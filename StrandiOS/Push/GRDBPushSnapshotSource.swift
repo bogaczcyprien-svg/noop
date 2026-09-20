@@ -20,7 +20,7 @@ public struct GRDBPushSnapshotSource: PushSnapshotSource {
 
     public func knownDeviceIds(capabilities: PushCapabilities) async -> [String] {
         let writer = store.registryWriter
-        return (try? writer.read { db in
+        return (try? await writer.read { db in
             try String.fetchAll(db, sql: """
                 SELECT DISTINCT deviceId FROM hrSample
                 UNION SELECT DISTINCT deviceId FROM dailyMetric
@@ -30,7 +30,7 @@ public struct GRDBPushSnapshotSource: PushSnapshotSource {
 
     public func appendRecord(table: PushAppendTable, deviceId: String, atRowId rowId: Int64) async throws -> PushAppendRecord? {
         let writer = store.registryWriter
-        return try writer.read { db in
+        return try await writer.read { db in
             guard let row = try Row.fetchOne(
                 db, sql: "SELECT rowid, * FROM \(tableName(table)) WHERE deviceId = ? AND rowid = ?",
                 arguments: [deviceId, rowId]
@@ -41,7 +41,7 @@ public struct GRDBPushSnapshotSource: PushSnapshotSource {
 
     public func appendRows(table: PushAppendTable, deviceId: String, afterRowId: Int64, limit: Int) async throws -> [PushAppendRecord] {
         let writer = store.registryWriter
-        return try writer.read { db in
+        return try await writer.read { db in
             let rows = try Row.fetchAll(
                 db,
                 sql: "SELECT rowid, * FROM \(tableName(table)) WHERE deviceId = ? AND rowid > ? ORDER BY rowid ASC LIMIT ?",
@@ -54,7 +54,7 @@ public struct GRDBPushSnapshotSource: PushSnapshotSource {
     public func mutableRows(table: PushMutableTable, deviceId: String, window: PushWindow, limit: Int) async throws -> [PushMutableRecord] {
         guard table == .dailyMetric else { return [] }
         let writer = store.registryWriter
-        return try writer.read { db in
+        return try await writer.read { db in
             let rows = try Row.fetchAll(
                 db,
                 sql: "SELECT * FROM dailyMetric WHERE deviceId = ? AND day >= ? AND day <= ? ORDER BY day ASC LIMIT ?",

@@ -2,6 +2,12 @@
 import Foundation
 import WhoopStore
 
+public struct PushSimpleError: Error, CustomStringConvertible {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var description: String { message }
+}
+
 /// Assembles the push feature (settings → snapshot source → transport → coordinator) and exposes the
 /// three trigger points the protocol doc calls for: after a BLE offload, at app-launch catch-up, and
 /// an explicit "Push now".
@@ -57,17 +63,17 @@ public final class PushRunner: ObservableObject {
 
     /// "Test connection" — capability discovery only, no batch, no database read (matches the
     /// protocol doc: this GET alone never opens the health database).
-    public func testConnection() async -> Result<PushCapabilities, String> {
+    public func testConnection() async -> Result<PushCapabilities, PushSimpleError> {
         guard let endpoint = SelfHostedPushSettings.shared.validatedEndpoint() else {
-            return .failure("invalid endpoint")
+            return .failure(PushSimpleError("invalid endpoint"))
         }
         guard let token = SelfHostedPushSettings.shared.token(), !token.isEmpty else {
-            return .failure("no token configured")
+            return .failure(PushSimpleError("no token configured"))
         }
         let transport = PushHttpTransport(endpoint: endpoint, bearerToken: token)
         switch await transport.capabilities() {
         case .available(let c): return .success(c)
-        case .rejected(let reason, _, _): return .failure(reason)
+        case .rejected(let reason, _, _): return .failure(PushSimpleError(reason))
         }
     }
 

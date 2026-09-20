@@ -14,7 +14,7 @@ public enum PushProtocolError: Error, Equatable {
     case invalid(String)
 }
 
-public protocol PushTable {
+public protocol PushTable: Sendable {
     var wireName: String { get }
 }
 
@@ -150,10 +150,6 @@ public struct PushBatch: Sendable {
     public let parts: Int?
     public let body: Data
 }
-
-// `any PushTable` isn't automatically Sendable-safe to carry across actors, but our two conformers
-// are plain value-type enums, so this is sound.
-extension PushBatch: @unchecked Sendable {}
 
 public struct PushTransportResponse: Sendable {
     public let statusCode: Int

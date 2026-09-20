@@ -117,9 +117,9 @@ public enum PushProtocol {
         let lines = try records.map { try encodeRecordLine(key: $0.key, data: $0.data) }
         let replacementId = stableUuid(
             header: [
-                "deviceId": .string(deviceId), "delivery": .string("replace_window"),
-                "protocolVersion": .string(version), "sourceId": .string(sourceId),
-                "stream": .string(table.wireName),
+                ("deviceId", .string(deviceId)), ("delivery", .string("replace_window")),
+                ("protocolVersion", .string(version)), ("sourceId", .string(sourceId)),
+                ("stream", .string(table.wireName)),
             ],
             lines: lines,
             extraCanonical: try canonicalJson(.object(selectorBounds(table: table, window: window)))

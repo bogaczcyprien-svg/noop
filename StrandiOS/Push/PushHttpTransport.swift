@@ -19,7 +19,7 @@ public final class PushHttpTransport: PushTransport {
         self.session = session
     }
 
-    static func defaultSession() -> URLSession {
+    public static func defaultSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 15

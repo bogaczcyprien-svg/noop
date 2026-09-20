@@ -148,7 +148,7 @@ struct SelfHostedPushSettingsView: View {
         case .success(let caps):
             testState = .success(streams: caps.appendTables.count + caps.mutableTables.count)
         case .failure(let reason):
-            testState = .failure(reason)
+            testState = .failure(reason.message)
         }
     }
 }

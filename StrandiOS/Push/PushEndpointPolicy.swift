@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 /// Security boundary for the user-supplied destination. Validation happens before DNS or HTTP.
 /// Port of the Android `PushEndpointPolicy.kt`.
