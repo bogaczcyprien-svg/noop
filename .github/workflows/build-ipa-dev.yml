@@ -1,0 +1,51 @@
+# Lightweight, on-demand iOS .ipa build for personal fork iteration.
+#
+# Unlike fork-release.yml (which bumps the version, builds Android+macOS too, and publishes a
+# full GitHub Release), this workflow only builds the NOOPiOS scheme and uploads the resulting
+# unsigned .ipa as a workflow run artifact. No commits, no releases, no other platforms — just a
+# fast way to get an installable .ipa out of a change pushed to this fork.
+name: Build iOS .ipa (dev)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  ios:
+    # iOS 26 Liquid Glass (glassEffect) needs the iOS 26 SDK -> Xcode 26 -> macos-26.
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build NOOPiOS for device (unsigned, Release)
+        run: >-
+          xcodebuild -scheme NOOPiOS -configuration Release -destination 'generic/platform=iOS'
+          -derivedDataPath build/dd
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          build
+
+      - name: Package sideload .ipa
+        run: |
+          APP=$(find build/dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -type d | head -1)
+          test -n "$APP" || { echo ".app (iphoneos) not found"; exit 1; }
+          rm -rf "$APP/Watch"
+          test -d "$APP/PlugIns/NOOPWidgets.appex" || {
+            echo "NOOPWidgets.appex missing from iOS build"; exit 1;
+          }
+          Tools/prepare-ios-sideload-app.sh "$APP"
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          SHA=$(git rev-parse --short HEAD)
+          zip -qr "NOOP-dev-${SHA}.ipa" Payload
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: NOOP-dev-*.ipa
+          retention-days: 14
