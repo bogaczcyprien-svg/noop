@@ -135,6 +135,14 @@ struct StrandiOSApp: App {
         model.healthWriteBack = { [weak bridge] in
             _ = await bridge?.writeBackAfterNewData()
         }
+        // Self-hosted push (docs/PUSH_PROTOCOL.md): off until the user configures and enables an
+        // endpoint + token in Settings. `runIfConfigured()` no-ops otherwise, so this is safe to wire
+        // unconditionally at every fresh-offload completion, exactly like the Health write-back above.
+        model.selfHostedPushTrigger = {
+            await PushRunner.shared.runIfConfigured()
+        }
+        PushBackgroundScheduler.register()
+        PushBackgroundScheduler.schedule()
     }
 
     /// The Shortcut-import alert's presentation binding, hoisted OUT of the `.alert` chain.
@@ -365,11 +373,15 @@ struct StrandiOSApp: App {
                     // widget and Today never disagree about which day they describe. Without this the
                     // watch only ever holds placeholder data on a real device.
                     await watch.pushLatest(from: model)
+                    // Self-hosted push app-launch/foreground catch-up (docs/PUSH_PROTOCOL.md). A no-op
+                    // unless the user configured and enabled a destination.
+                    await PushRunner.shared.runIfConfigured()
                 }
             } else if phase == .background {
                 // Re-submit on every transition because iOS may discard an old best-effort request.
                 HealthWritebackBackgroundScheduler.updateSchedule(
                     isAuthorized: health.auth == .authorized)
+                PushBackgroundScheduler.schedule()
                 // #1538: same reasoning for the re-score continuation, plus one case of its own. A pass
                 // can be left owed with NOTHING scheduled — a foreground pass killed by a force-quit
                 // never runs the deferral path that submits the request, and iOS can discard a request
