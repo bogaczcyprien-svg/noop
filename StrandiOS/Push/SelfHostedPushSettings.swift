@@ -22,7 +22,6 @@ public final class SelfHostedPushSettings: ObservableObject {
         self.endpointRaw = defaults.string(forKey: endpointKey) ?? ""
         self.isEnabled = defaults.bool(forKey: enabledKey)
         self.hasToken = false
-        self.hasToken = readToken() != nil
         let sourceIdKey = "noop.push.sourceId"
         if let existing = defaults.string(forKey: sourceIdKey) {
             self.sourceId = existing
@@ -31,6 +30,7 @@ public final class SelfHostedPushSettings: ObservableObject {
             defaults.set(generated, forKey: sourceIdKey)
             self.sourceId = generated
         }
+        self.hasToken = readToken() != nil
     }
 
     public func setEndpoint(_ raw: String) {
