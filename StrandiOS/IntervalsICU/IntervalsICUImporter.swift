@@ -1,10 +1,18 @@
 #if os(iOS)
 import Foundation
+import GRDB
 import WhoopStore
 
-/// Imports activities from intervals.icu into `WhoopStore.workout` under the `intervals-icu`
-/// device partition (mirrors the `apple-health` partition already used for imported Apple Health
-/// data — see docs/ARCHITECTURE.md §7). Read-only against intervals.icu; NOOP never writes back.
+/// Imports activities from intervals.icu into `WhoopStore.workout` (its own `intervals-icu` device
+/// partition, mirroring the `apple-health` import convention) AND backfills approximate `hrSample`
+/// rows under the strap's OWN device id (`Repository.whoopSource`) so NOOP's existing day-Strain
+/// integration — which deliberately reads one device's hr stream, never a mix — picks up rides where
+/// the strap wasn't worn. This is a deliberate exception to NOOP's source-separation convention,
+/// made knowingly: see the More > Data > intervals.icu screen for the tradeoff it documents.
+///
+/// intervals.icu's base activities endpoint only returns one avgHr per ride, not a per-second
+/// stream, so the backfilled samples are a flat repeat of avgHr every 60s across the ride — an
+/// approximation, not a measured trace. `INSERT OR IGNORE` never overwrites a real strap sample.
 public struct IntervalsICUImporter {
     public static let deviceId = "intervals-icu"
 
@@ -24,7 +32,42 @@ public struct IntervalsICUImporter {
         )
 
         let rows = activities.compactMap(toWorkoutRow)
-        return try await store.upsertWorkouts(rows, deviceId: deviceId)
+        let count = try await store.upsertWorkouts(rows, deviceId: deviceId)
+        try await backfillApproximateHR(activities: activities, store: store)
+        return count
+    }
+
+    /// Flat approximate HR at `average_heartrate`, one sample per minute across the ride, written
+    /// under the strap's own device id so the day-window Strain integration sees it.
+    private static func backfillApproximateHR(activities: [IntervalsICUActivity], store: WhoopStore) async throws {
+        var rows: [(ts: Int, bpm: Int)] = []
+        for a in activities {
+            guard let startLocal = a.start_date_local, let avgHr = a.average_heartrate else { continue }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            guard let start = formatter.date(from: startLocal) else { continue }
+            let startTs = Int(start.timeIntervalSince1970)
+            let duration = a.moving_time ?? a.elapsed_time ?? 0
+            guard duration > 0 else { continue }
+            let bpm = Int(avgHr.rounded())
+            var t = startTs
+            while t <= startTs + duration {
+                rows.append((ts: t, bpm: bpm))
+                t += 60
+            }
+        }
+        guard !rows.isEmpty else { return }
+        let writer = store.registryWriter
+        try await writer.write { db in
+            for row in rows {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO hrSample (deviceId, ts, bpm) VALUES (?, ?, ?)",
+                    arguments: [Repository.whoopSource, row.ts, row.bpm]
+                )
+            }
+        }
     }
 
     private static func toWorkoutRow(_ a: IntervalsICUActivity) -> WorkoutRow? {

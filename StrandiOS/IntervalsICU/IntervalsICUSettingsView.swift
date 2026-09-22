@@ -106,7 +106,7 @@ struct IntervalsICUSettingsView: View {
                 Text(runner.lastResult ?? "Rien importé pour l'instant.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
-                Text("Les séances importées apparaissent dans Workouts avec la source « intervals.icu ». NOOP recalcule son propre Strain à partir de ses propres données — un import n'y contribue pas.")
+                Text("Les séances importées apparaissent dans Workouts avec la source « intervals.icu ». Leur FC moyenne alimente aussi le Strain du jour, en complément des données du bracelet — c'est une approximation (une valeur moyenne répétée, pas un vrai tracé seconde par seconde), pas une mesure aussi précise que le bracelet.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
