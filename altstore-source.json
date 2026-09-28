@@ -33,13 +33,22 @@
         }
       },
       "version": "11.8.0",
-      "buildVersion": "410",
-      "versionDate": "2026-09-22",
-      "versionDescription": "Fork build: self-hosted push client + intervals.icu import.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork1/NOOP-v11.8.0-fork1-ios.ipa",
-      "size": 21657485,
+      "buildVersion": "410.2",
+      "versionDate": "2026-09-28",
+      "versionDescription": "Fork build: 10-minute sleep-onset window (was 90s) + self-hosted push client + intervals.icu import.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork2/NOOP-v11.8.0-fork2-ios.ipa",
+      "size": 21694452,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "11.8.0",
+          "buildVersion": "410.2",
+          "date": "2026-09-28",
+          "localizedDescription": "Fork build: 10-minute sleep-onset window (was 90s) + self-hosted push client + intervals.icu import.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork2/NOOP-v11.8.0-fork2-ios.ipa",
+          "size": 21694452,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "11.8.0",
           "buildVersion": "410",
