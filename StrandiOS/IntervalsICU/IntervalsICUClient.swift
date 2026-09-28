@@ -56,8 +56,13 @@ public struct IntervalsICUClient {
         }
     }
 
+    public enum TestConnectionResult {
+        case success(Int)
+        case failure(String)
+    }
+
     /// Cheap credential check: fetches a single day of activities.
-    public func testConnection() async -> Result<Int, String> {
+    public func testConnection() async -> TestConnectionResult {
         let today = PushDayFormat.formatter.string(from: Date())
         do {
             let acts = try await activities(oldest: today, newest: today)
