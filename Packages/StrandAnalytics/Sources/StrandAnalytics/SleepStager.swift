@@ -180,8 +180,12 @@ public enum SleepStager {
     public static let hrSleepBaselineMult: Double = 1.05
     /// Skip HR refinement (trust gravity) when fewer than this many HR samples.
     public static let hrRefineMinSamples: Int = 30
-    /// Consecutive sleep epochs required to declare onset.
-    public static let onsetPersistEpochs: Int = 3
+    /// Consecutive sleep epochs required to declare onset. 20 epochs = 10 minutes, matching the
+    /// sustained-stillness window common actigraphy sleep-onset conventions use, so a brief stillness
+    /// while awake (reading, scrolling) in bed no longer marks the displayed bedtime — the fork's own
+    /// deviation from upstream's more responsive 3-epoch (90s) default; not upstreamed, not validated
+    /// against a PSG reference, just a personal preference tuning.
+    public static let onsetPersistEpochs: Int = 20
 
     // MARK: - Off-wrist backstop (#500)
 
