@@ -147,6 +147,8 @@ struct StrandiOSApp: App {
             await SleepRecapNotifier.shared.postIfDue()
             // HRV trend notification (fork addition): off until enabled; no-ops otherwise.
             await TrendNotifier.shared.postIfDue()
+            // Post-workout nutrition reminder (fork addition): off until enabled; no-ops otherwise.
+            await WorkoutNutritionNotifier.shared.postIfDue()
         }
         PushBackgroundScheduler.register()
         PushBackgroundScheduler.schedule()

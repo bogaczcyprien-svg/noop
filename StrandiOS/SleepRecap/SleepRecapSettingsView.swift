@@ -8,6 +8,7 @@ import StrandDesign
 struct SleepRecapSettingsView: View {
     @State private var enabled = SleepRecapNotifier.shared.isEnabled
     @State private var trendEnabled = TrendNotifier.shared.isEnabled
+    @State private var nutritionEnabled = WorkoutNutritionNotifier.shared.isEnabled
 
     var body: some View {
         ScreenScaffold(
@@ -48,6 +49,26 @@ struct SleepRecapSettingsView: View {
                     }
 
                     Text("Désactivé par défaut. Prévient quand votre HRV est nettement au-dessus ou en-dessous de d'habitude depuis au moins 3 nuits de suite — une notification par tendance, pas une par jour. Distinct de l'alerte maladie, qui demande un motif plus précis sur plusieurs signaux.")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            StrandCard(padding: 20) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(isOn: $nutritionEnabled) {
+                        Text("Rappel nutrition après l'effort")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                    .toggleStyle(.switch)
+                    .tint(StrandPalette.accent)
+                    .onChange(of: nutritionEnabled) { _, newValue in
+                        WorkoutNutritionNotifier.shared.setEnabled(newValue)
+                    }
+
+                    Text("Désactivé par défaut. Une notification peu après la fin d'une séance détectée, pour penser à manger et vous hydrater dans l'heure qui suit — pas de journal alimentaire, juste un rappel de timing.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
