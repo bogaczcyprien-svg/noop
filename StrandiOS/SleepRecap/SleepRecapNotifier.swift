@@ -66,6 +66,12 @@ public final class SleepRecapNotifier {
         if let alarm = await alarmQualityLine(store: store, day: latest.day) {
             body += "\n" + alarm
         }
+        if let early = await earlyNightLine(store: store) {
+            body += "\n" + early
+        }
+        if let explainer = await nightExplainerLine(store: store, day: latest.day, days: sorted) {
+            body += "\n" + explainer
+        }
 
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Votre nuit")
@@ -158,6 +164,58 @@ public final class SleepRecapNotifier {
         case .wake, .unknown:
             return nil
         }
+    }
+
+    /// Early-vs-full-night HRV comparison (`EarlyNightRecovery`, Polar-Nightly-Recharge-inspired),
+    /// for the most recent session. nil when there isn't enough signal in either window.
+    private func earlyNightLine(store: WhoopStore) async -> String? {
+        let now = Int(Date().timeIntervalSince1970)
+        guard let sessions = try? await store.sleepSessions(
+            deviceId: Repository.whoopSource, from: now - 2 * 86_400, to: now, limit: 10
+        ), let session = sessions.max(by: { $0.endTs < $1.endTs }) else { return nil }
+
+        guard let allNN = try? await store.rrIntervals(
+            deviceId: Repository.whoopSource, from: session.startTs, to: session.endTs, limit: 20_000
+        ) else { return nil }
+        let earlyEnd = session.startTs + EarlyNightRecovery.earlyWindowMinutes * 60
+        let earlyNN = allNN.filter { $0.ts <= earlyEnd }.map(\.rrMs)
+        let fullNN = allNN.map(\.rrMs)
+
+        guard let result = EarlyNightRecovery.evaluate(earlyNN: earlyNN, fullNightNN: fullNN) else { return nil }
+        let pct = Int((result.ratio * 100).rounded())
+        return "Récupération en début de nuit : \(pct)% de votre moyenne de la nuit."
+    }
+
+    /// One-sentence "possible contributor" (`NightExplainer`) from logged Journal entries + HRV/resting-HR
+    /// deviation, only when that night's Charge was actually on the lower side — not shown on an ordinary
+    /// or good night, where naming a "contributor" would be noise, not help.
+    private func nightExplainerLine(store: WhoopStore, day: String, days: [DailyMetric]) async -> String? {
+        guard let latest = days.first(where: { $0.day == day }), let recovery = latest.recovery,
+              recovery < 50
+        else { return nil }
+
+        let entries = (try? await store.journalEntries(deviceId: Repository.whoopSource, from: day, to: day))
+            ?? []
+        // Only negatively-framed questions are worth naming as a "contributor" — a logged "Did you
+        // read before bed?" yes isn't a reason the night was worse.
+        let negativeFactors: Set<String> = [
+            "Did you drink any alcohol?", "Did you have caffeine late in the day?",
+            "Did you view a screen in bed?", "Did you eat close to bedtime?",
+            "Did you feel stressed?", "Did you feel sick or ill?",
+        ]
+        let logged = entries.filter { $0.answeredYes && negativeFactors.contains($0.question) }
+            .map(\.question)
+
+        let priorHrv = days.filter { $0.day < day }.map(\.avgHrv)
+        let hrvBaseline = Baselines.foldHistory(priorHrv, cfg: Baselines.hrvCfg)
+        let hrvZ = latest.avgHrv.flatMap { hrvBaseline.usable ? Baselines.deviation($0, state: hrvBaseline).z : nil }
+
+        let priorRhr = days.filter { $0.day < day }.map { $0.restingHr.map(Double.init) }
+        let rhrBaseline = Baselines.foldHistory(priorRhr, cfg: Baselines.restingHRCfg)
+        let rhrZ = latest.restingHr.flatMap { rhrBaseline.usable
+            ? -Baselines.deviation(Double($0), state: rhrBaseline).z : nil }   // flip: RHR above baseline = bad
+
+        return NightExplainer.explain(loggedFactors: logged, hrvZ: hrvZ, rhrZ: rhrZ)
     }
 
     private static func formatDuration(_ minutes: Double) -> String {

@@ -505,6 +505,8 @@ struct RootTabView: View {
                     MoreRow("Prédicteur de course", "flag.checkered", .raceTimePredictor)
                     // Logs to the existing numeric-Journal pipeline, not a new storage system.
                     MoreRow("Fenêtre de jeûne", "fork.knife.circle", .fastingWindow)
+                    // Reads the existing "stress"/"recovery" series — no new engine.
+                    MoreRow("Résilience", "shield.lefthalf.filled", .resilience)
                     // The plain 4.0 vs 5.0/MG capability grid — what NOOP reads live off each strap.
                     MoreRow("NOOP Limitations", "list.bullet.rectangle", .noopLimitations)
                 }
@@ -612,7 +614,7 @@ struct RootTabView: View {
 private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
-    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, sleepRecap, raceTimePredictor, fastingWindow, noopLimitations
+    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -644,6 +646,7 @@ private enum MoreDestination: Hashable {
         case .sleepRecap: SleepRecapSettingsView()
         case .raceTimePredictor: RaceTimePredictorView()
         case .fastingWindow: FastingWindowView()
+        case .resilience: ResilienceView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
         case .testCentre:      TestCentreView()
