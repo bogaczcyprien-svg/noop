@@ -63,6 +63,9 @@ public final class SleepRecapNotifier {
         if let bedtime = await bedtimeLine(store: store, days: sorted) {
             body += "\n" + bedtime
         }
+        if let alarm = await alarmQualityLine(store: store, day: latest.day) {
+            body += "\n" + alarm
+        }
 
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Votre nuit")
@@ -118,6 +121,43 @@ public final class SleepRecapNotifier {
         if !phases.isEmpty { parts.append(phases.joined(separator: ", ")) }
         if let recovery = metric.recovery { parts.append("Charge \(Int(recovery.rounded()))%") }
         return parts.isEmpty ? "Résumé de la nuit disponible dans NOOP." : parts.joined(separator: " — ")
+    }
+
+    /// INSTRUMENTATION ONLY (see `AlarmWakeQuality`'s header): reports what stage the already-fixed
+    /// smart-alarm time landed in for the night ending `day`, if the alarm is enabled and that night's
+    /// session covers it. Never changes when or whether the strap buzzes.
+    private func alarmQualityLine(store: WhoopStore, day: String) async -> String? {
+        guard UserDefaults.standard.bool(forKey: "behavior.smartAlarmEnabled") else { return nil }
+        let alarmMinutes = UserDefaults.standard.object(forKey: "behavior.smartAlarmMinutes") as? Int
+            ?? 7 * 60
+
+        // `postIfDue()` only reaches here for the freshest finalized night, so the most recent session
+        // by end time (within a generous 2-day window, well clear of `day`'s own ±4h logical-day
+        // rollover) IS that night — no day-string matching needed.
+        let now = Int(Date().timeIntervalSince1970)
+        guard let sessions = try? await store.sleepSessions(
+            deviceId: Repository.whoopSource, from: now - 2 * 86_400, to: now, limit: 10
+        ), let session = sessions.max(by: { $0.endTs < $1.endTs })
+        else { return nil }
+
+        let tz = TimeZone.current.secondsFromGMT()
+        guard let json = session.stagesJSON,
+            let segments = try? JSONDecoder().decode([StageSegment].self, from: Data(json.utf8)),
+            let verdict = AlarmWakeQuality.stageAtAlarm(
+                segments: segments, sessionEndTs: session.endTs,
+                alarmMinutesSinceMidnight: alarmMinutes, tzOffsetSeconds: tz
+            )
+        else { return nil }
+
+        let clock = BedtimeRecommendation.formatClock(alarmMinutes)
+        switch verdict {
+        case .light:
+            return "Le réveil (\(clock)) est tombé en sommeil léger — bon timing."
+        case .deep, .rem:
+            return "Le réveil (\(clock)) est tombé en sommeil \(verdict == .deep ? "profond" : "paradoxal") — pas le moment idéal."
+        case .wake, .unknown:
+            return nil
+        }
     }
 
     private static func formatDuration(_ minutes: Double) -> String {

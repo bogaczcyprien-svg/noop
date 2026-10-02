@@ -27,7 +27,7 @@ struct SleepRecapSettingsView: View {
                         SleepRecapNotifier.shared.setEnabled(newValue)
                     }
 
-                    Text("Désactivé par défaut. Une fois activé, dès que la nuit précédente est calculée (après la synchro du bracelet), NOOP envoie une notification avec la durée, les phases (profond/REM/léger), l'efficacité, le Charge du jour, et une suggestion d'heure de coucher pour ce soir — une seule fois par jour.")
+                    Text("Désactivé par défaut. Une fois activé, dès que la nuit précédente est calculée (après la synchro du bracelet), NOOP envoie une notification avec la durée, les phases (profond/REM/léger), l'efficacité, le Charge du jour, une suggestion d'heure de coucher pour ce soir, et — si le réveil intelligent est activé — si l'heure de réveil réglée est tombée en sommeil léger ou non (information seulement, l'heure du réveil ne change pas automatiquement). Une seule fois par jour.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
