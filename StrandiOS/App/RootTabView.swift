@@ -501,6 +501,8 @@ struct RootTabView: View {
                     MoreRow("intervals.icu", "figure.outdoor.cycle", .intervalsICU)
                     // Local, once-per-day morning notification with last night's phases. Off by default.
                     MoreRow("Résumé de nuit", "bell.badge.fill", .sleepRecap)
+                    // VO2max-derived race time estimates. Fork addition.
+                    MoreRow("Prédicteur de course", "flag.checkered", .raceTimePredictor)
                     // The plain 4.0 vs 5.0/MG capability grid — what NOOP reads live off each strap.
                     MoreRow("NOOP Limitations", "list.bullet.rectangle", .noopLimitations)
                 }
@@ -608,7 +610,7 @@ struct RootTabView: View {
 private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
-    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, sleepRecap, noopLimitations
+    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, sleepRecap, raceTimePredictor, noopLimitations
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -638,6 +640,7 @@ private enum MoreDestination: Hashable {
         case .selfHostedPush: SelfHostedPushSettingsView()
         case .intervalsICU: IntervalsICUSettingsView()
         case .sleepRecap: SleepRecapSettingsView()
+        case .raceTimePredictor: RaceTimePredictorView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
         case .testCentre:      TestCentreView()
