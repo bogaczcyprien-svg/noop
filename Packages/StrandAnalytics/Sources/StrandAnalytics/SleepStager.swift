@@ -180,11 +180,13 @@ public enum SleepStager {
     public static let hrSleepBaselineMult: Double = 1.05
     /// Skip HR refinement (trust gravity) when fewer than this many HR samples.
     public static let hrRefineMinSamples: Int = 30
-    /// Consecutive sleep epochs required to declare onset. 20 epochs = 10 minutes, matching the
-    /// sustained-stillness window common actigraphy sleep-onset conventions use, so a brief stillness
-    /// while awake (reading, scrolling) in bed no longer marks the displayed bedtime — the fork's own
-    /// deviation from upstream's more responsive 3-epoch (90s) default; not upstreamed, not validated
-    /// against a PSG reference, just a personal preference tuning.
+    /// Consecutive epochs required to declare onset AND (symmetrically) to confirm the final wake.
+    /// 20 epochs = 10 minutes, matching the sustained-stillness window common actigraphy sleep-onset
+    /// conventions use, so a brief stillness while awake (reading, scrolling) in bed no longer marks
+    /// the displayed bedtime, and — mirrored at the other end by `onsetAndFinalWake` — a brief stir
+    /// near the morning no longer extends the displayed wake-up past when sleep actually ended. The
+    /// fork's own deviation from upstream's more responsive 3-epoch (90s) default; not upstreamed, not
+    /// validated against a PSG reference, just a personal preference tuning.
     public static let onsetPersistEpochs: Int = 20
 
     // MARK: - Off-wrist backstop (#500)
@@ -1646,20 +1648,40 @@ public enum SleepStager {
 
     // MARK: - Stage 1–3: staging over a 30 s epoch grid
 
-    /// First persistent-sleep epoch (onset) and last sleep epoch (final wake).
+    /// First persistent-sleep epoch (onset) and last sleep epoch (final wake). Both boundaries require
+    /// `onsetPersistEpochs` of sustained same-direction signal to confirm — a brief stillness-while-awake
+    /// can no longer backdate onset, and (fork addition) a brief stir-while-still-settling can no longer
+    /// postpone the final wake either. Symmetric by construction: the forward scan finds the leftmost
+    /// sustained TRUE run (onset); the backward scan finds the rightmost sustained FALSE run and reports
+    /// the epoch just before it starts (final wake) — the simple last-true-epoch is the fallback when no
+    /// such sustained wake tail exists (e.g. the window is cropped mid-sleep with little trailing data).
     static func onsetAndFinalWake(_ ckFlags: [Bool]) -> (Int, Int) {
         let n = ckFlags.count
         if n == 0 { return (0, 0) }
+
         var onset: Int? = nil
         var run = 0
         for (i, s) in ckFlags.enumerated() {
             run = s ? run + 1 : 0
             if run >= onsetPersistEpochs { onset = i - onsetPersistEpochs + 1; break }
         }
+
+        var simpleLast: Int? = nil
+        for i in stride(from: n - 1, through: 0, by: -1) where ckFlags[i] { simpleLast = i; break }
+
         var final: Int? = nil
-        for i in stride(from: n - 1, through: 0, by: -1) where ckFlags[i] { final = i; break }
+        var wakeRun = 0
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            wakeRun = ckFlags[i] ? 0 : wakeRun + 1
+            if wakeRun >= onsetPersistEpochs {
+                final = i - 1
+                break
+            }
+        }
+        if let f = final, f < 0 { final = nil }
+
         let o = onset ?? 0
-        var f = final ?? (n - 1)
+        var f = final ?? simpleLast ?? (n - 1)
         if f < o { f = n - 1 }
         return (o, f)
     }
