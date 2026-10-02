@@ -33,13 +33,22 @@
         }
       },
       "version": "11.8.0",
-      "buildVersion": "410.2",
-      "versionDate": "2026-09-28",
-      "versionDescription": "Fork build: 10-minute sleep-onset window (was 90s) + self-hosted push client + intervals.icu import.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork2/NOOP-v11.8.0-fork2-ios.ipa",
-      "size": 21694452,
+      "buildVersion": "411",
+      "versionDate": "2026-10-02",
+      "versionDescription": "Fork build: Effort ring now shows a recovery-based target band; new opt-in overload alert (3-day streak above optimal range); intervals.icu bidirectional sync (real per-sample HR import + wellness push + dedicated Activities screen); morning sleep recap notification (bedtime, alarm quality, early-night recovery, night explainer); HRV/sleep trend + post-workout nutrition nudges; Pace of Recovery, Race Time Predictor, Fasting Window, Resilience score; Energy Budget widget; more sensitive Charge/Recovery scoring; symmetric sleep onset/final-wake persistence.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork3/NOOP-v11.8.0-fork3-ios.ipa",
+      "size": 21828213,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "11.8.0",
+          "buildVersion": "411",
+          "date": "2026-10-02",
+          "localizedDescription": "Fork build: Effort ring now shows a recovery-based target band; new opt-in overload alert (3-day streak above optimal range); intervals.icu bidirectional sync (real per-sample HR import + wellness push + dedicated Activities screen); morning sleep recap notification (bedtime, alarm quality, early-night recovery, night explainer); HRV/sleep trend + post-workout nutrition nudges; Pace of Recovery, Race Time Predictor, Fasting Window, Resilience score; Energy Budget widget; more sensitive Charge/Recovery scoring; symmetric sleep onset/final-wake persistence.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork3/NOOP-v11.8.0-fork3-ios.ipa",
+          "size": 21828213,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "11.8.0",
           "buildVersion": "410.2",
