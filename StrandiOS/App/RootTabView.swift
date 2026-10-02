@@ -499,6 +499,8 @@ struct RootTabView: View {
                     // Import cycling (and other) sessions ridden without the strap, straight from
                     // intervals.icu's public API — no HealthKit entitlement needed (#sideload-limit).
                     MoreRow("intervals.icu", "figure.outdoor.cycle", .intervalsICU)
+                    // Dedicated list of every intervals.icu-sourced activity, separate from Workouts.
+                    MoreRow("Activités intervals.icu", "list.bullet.rectangle.portrait", .intervalsICUActivities)
                     // Local, once-per-day morning notification with last night's phases. Off by default.
                     MoreRow("Résumé de nuit", "bell.badge.fill", .sleepRecap)
                     // VO2max-derived race time estimates. Fork addition.
@@ -614,7 +616,7 @@ struct RootTabView: View {
 private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
-    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
+    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, intervalsICUActivities, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -643,6 +645,7 @@ private enum MoreDestination: Hashable {
         case .shortcutsExport: ShortcutExportSettingsView()
         case .selfHostedPush: SelfHostedPushSettingsView()
         case .intervalsICU: IntervalsICUSettingsView()
+        case .intervalsICUActivities: IntervalsICUActivitiesView()
         case .sleepRecap: SleepRecapSettingsView()
         case .raceTimePredictor: RaceTimePredictorView()
         case .fastingWindow: FastingWindowView()
