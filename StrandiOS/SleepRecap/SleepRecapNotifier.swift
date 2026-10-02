@@ -2,6 +2,7 @@
 import Foundation
 import UserNotifications
 import WhoopStore
+import StrandAnalytics
 
 /// Posts a once-per-day LOCAL notification summarizing last night's sleep (phases, duration,
 /// efficiency, Charge) as soon as that night's data has finished computing — naturally lands "each
@@ -42,28 +43,66 @@ public final class SleepRecapNotifier {
 
         let cal = Calendar(identifier: .gregorian)
         let today = Date()
-        guard let from = cal.date(byAdding: .day, value: -2, to: today) else { return }
+        // 16 days back: enough trailing nights for SleepDebt's 14-night window once today's partial
+        // day is excluded, same margin AnalyticsEngine callers use elsewhere for this ledger.
+        guard let from = cal.date(byAdding: .day, value: -16, to: today) else { return }
         guard let days = try? await store.dailyMetrics(
             deviceId: Repository.whoopSource,
             from: PushDayFormat.formatter.string(from: from),
             to: PushDayFormat.formatter.string(from: today)
         ) else { return }
-        guard let latest = days.sorted(by: { $0.day < $1.day })
-            .last(where: { $0.totalSleepMin != nil }) else { return }
+        let sorted = days.sorted { $0.day < $1.day }
+        guard let latest = sorted.last(where: { $0.totalSleepMin != nil }) else { return }
         guard UserDefaults.standard.string(forKey: lastPostedKey) != latest.day else { return }
 
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
         else { return }
 
+        var body = Self.summary(for: latest)
+        if let bedtime = await bedtimeLine(store: store, days: sorted) {
+            body += "\n" + bedtime
+        }
+
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Votre nuit")
-        content.body = Self.summary(for: latest)
+        content.body = body
         content.sound = .default
         let request = UNNotificationRequest(identifier: requestIdPrefix + latest.day,
                                             content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
         UserDefaults.standard.set(latest.day, forKey: lastPostedKey)
+    }
+
+    /// Tonight's bedtime suggestion (sleep debt + habitual wake time), as a notification line, or nil
+    /// when there isn't enough recent data to say anything honest.
+    private func bedtimeLine(store: WhoopStore, days: [DailyMetric]) async -> String? {
+        let series = days.map { (day: $0.day, totalSleepMin: $0.totalSleepMin) }
+        let ledger = SleepDebt.ledger(series: series)
+        guard ledger.nightCount > 0 else { return nil }
+
+        let now = Int(Date().timeIntervalSince1970)
+        let weekAgo = now - 7 * 86_400
+        guard let sessions = try? await store.sleepSessions(
+            deviceId: Repository.whoopSource, from: weekAgo, to: now, limit: 20
+        ), !sessions.isEmpty else { return nil }
+
+        let tz = TimeZone.current.secondsFromGMT()
+        // Average wake clock-minute across recent sessions. Averaging raw minutes-since-midnight is
+        // fine here (not circular-mean) — a habitual wake routine doesn't straddle midnight in practice.
+        let wakeMinutes = sessions.map { (($0.endTs + tz) % 86_400 + 86_400) % 86_400 / 60 }
+        let habitualWake = wakeMinutes.reduce(0, +) / wakeMinutes.count
+
+        let rec = BedtimeRecommendation.recommend(
+            debtBalanceMin: ledger.balanceMin,
+            baseNeedMin: AnalyticsEngine.Rest.defaultNeedHours * 60,
+            habitualWakeMinutes: habitualWake
+        )
+        let clock = BedtimeRecommendation.formatClock(rec.bedtimeMinutes)
+        if rec.debtOwedMin > 0 {
+            return "Ce soir, visez un coucher vers \(clock) (inclut \(Int(rec.debtOwedMin.rounded()))min de dette de sommeil)."
+        }
+        return "Ce soir, visez un coucher vers \(clock)."
     }
 
     /// Pure, testable: a one-line sleep-phase recap from a `DailyMetric`. Missing fields are simply

@@ -7,11 +7,12 @@ import StrandDesign
 /// that night's data is computed. No server, no network.
 struct SleepRecapSettingsView: View {
     @State private var enabled = SleepRecapNotifier.shared.isEnabled
+    @State private var trendEnabled = TrendNotifier.shared.isEnabled
 
     var body: some View {
         ScreenScaffold(
             title: "Résumé de nuit",
-            subtitle: "Une notification locale chaque matin avec le résumé de votre nuit."
+            subtitle: "Des notifications locales — rien n'est envoyé en dehors de l'appareil."
         ) {
             StrandCard(padding: 20) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -26,7 +27,27 @@ struct SleepRecapSettingsView: View {
                         SleepRecapNotifier.shared.setEnabled(newValue)
                     }
 
-                    Text("Désactivé par défaut. Une fois activé, dès que la nuit précédente est calculée (après la synchro du bracelet), NOOP envoie une notification avec la durée, les phases (profond/REM/léger), l'efficacité et le Charge du jour — une seule fois par jour. Rien n'est envoyé en dehors de l'appareil.")
+                    Text("Désactivé par défaut. Une fois activé, dès que la nuit précédente est calculée (après la synchro du bracelet), NOOP envoie une notification avec la durée, les phases (profond/REM/léger), l'efficacité, le Charge du jour, et une suggestion d'heure de coucher pour ce soir — une seule fois par jour.")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            StrandCard(padding: 20) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(isOn: $trendEnabled) {
+                        Text("Notification de tendance HRV")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                    .toggleStyle(.switch)
+                    .tint(StrandPalette.accent)
+                    .onChange(of: trendEnabled) { _, newValue in
+                        TrendNotifier.shared.setEnabled(newValue)
+                    }
+
+                    Text("Désactivé par défaut. Prévient quand votre HRV est nettement au-dessus ou en-dessous de d'habitude depuis au moins 3 nuits de suite — une notification par tendance, pas une par jour. Distinct de l'alerte maladie, qui demande un motif plus précis sur plusieurs signaux.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
