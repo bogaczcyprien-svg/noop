@@ -56,6 +56,33 @@ public struct IntervalsICUClient {
         }
     }
 
+    /// Writes one night's already-computed summary to intervals.icu's wellness entry for `date`
+    /// (merges into whatever's already there for that day — any field left nil here is untouched).
+    /// Fork addition, the reverse direction of `activities(oldest:newest:)`: NOOP never reads this
+    /// back, matching the one-way-export convention the self-hosted push client already follows.
+    public func putWellness(date: String, hrv: Double?, restingHR: Int?,
+                            sleepSecs: Int?, sleepScore: Int?) async throws {
+        guard let url = URL(string: "https://intervals.icu/api/v1/athlete/\(athleteId)/wellness/\(date)")
+        else { throw IntervalsICUError.invalidURL }
+
+        var body: [String: Any] = [:]
+        if let hrv { body["hrv"] = hrv }
+        if let restingHR { body["restingHR"] = restingHR }
+        if let sleepSecs { body["sleepSecs"] = sleepSecs }
+        if let sleepScore { body["sleepScore"] = sleepScore }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        let credentials = Data("API_KEY:\(apiKey)".utf8).base64EncodedString()
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw IntervalsICUError.http(0) }
+        guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
+    }
+
     public enum TestConnectionResult {
         case success(Int)
         case failure(String)

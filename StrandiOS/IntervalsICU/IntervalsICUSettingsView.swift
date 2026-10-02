@@ -23,9 +23,34 @@ struct IntervalsICUSettingsView: View {
             subtitle: "Importe vos séances (dont celles sans bracelet, ex. vélo) depuis intervals.icu."
         ) {
             configCard
+            pushCard
             statusCard
         }
         .onAppear { athleteIdDraft = settings.athleteId }
+    }
+
+    private var pushEnabledBinding: Binding<Bool> {
+        Binding(get: { settings.pushEnabled }, set: { settings.setPushEnabled($0) })
+    }
+
+    private var pushCard: some View {
+        StrandCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: pushEnabledBinding) {
+                    Text("Envoyer mes nuits vers intervals.icu")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+                .disabled(!settings.hasApiKey)
+
+                Text("Désactivé par défaut. Une fois activé, chaque matin NOOP envoie le résumé déjà calculé de votre nuit (HRV, FC de repos, durée de sommeil) vers votre fiche de bien-être intervals.icu du jour — rien n'est relu depuis intervals.icu pour cet envoi.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var configCard: some View {

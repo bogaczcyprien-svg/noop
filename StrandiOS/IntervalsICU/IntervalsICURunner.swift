@@ -29,6 +29,19 @@ public final class IntervalsICURunner: ObservableObject {
         }
     }
 
+    /// Push last night's computed summary to intervals.icu. No-ops when
+    /// `IntervalsICUSettings.pushEnabled` is off, same safe-to-call-unconditionally shape as the
+    /// self-hosted push's `runIfConfigured()`. Silent on failure beyond logging to `lastResult` —
+    /// this runs from an automatic post-offload hook, not a user-initiated action.
+    public func pushLastNightIfEnabled() async {
+        guard let store = await store() else { return }
+        do {
+            try await IntervalsICUWellnessPush.pushLatestNight(store: store)
+        } catch {
+            lastResult = "push échec : \(error)"
+        }
+    }
+
     private func store() async -> WhoopStore? {
         if let cachedStore { return cachedStore }
         guard let path = try? StorePaths.defaultDatabasePath(),

@@ -79,8 +79,11 @@ public enum RecoveryScorer {
     /// baseline (`Baselines.strainCfg`) are supplied.
     public static let wActivityBalance: Double = 0.05
 
-    /// Logistic spread: ±2 z-units ≈ full Red–Green band (15%–95%).
-    public static let logisticK: Double = 1.6
+    /// Logistic spread: ±2 z-units ≈ full Red–Green band (15%–95%). Fork tuning: raised from the
+    /// upstream 1.6 to make Charge move more visibly night to night for the same underlying z —
+    /// a personal-preference trade (more responsive, also more reactive to ordinary noise), not
+    /// upstreamed or re-validated against a reference.
+    public static let logisticK: Double = 2.0
     /// Logistic offset so Z=0 → 58%.
     public static let logisticZ0: Double = -0.20
     /// WHOOP-published population-average recovery (%). Cold-start fallback.

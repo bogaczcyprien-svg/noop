@@ -8,15 +8,21 @@ public final class IntervalsICUSettings: ObservableObject {
 
     private let defaults: UserDefaults
     private let athleteIdKey = "noop.intervalsicu.athleteId"
+    private let pushEnabledKey = "noop.intervalsicu.pushEnabled"
     private let keychainService = "com.noopapp.noop.intervalsicu"
     private let keychainAccount = "apiKey"
 
     @Published public private(set) var athleteId: String
     @Published public private(set) var hasApiKey: Bool
+    /// Opt-in, default OFF (fork addition): write last night's HRV/resting-HR/sleep summary to
+    /// intervals.icu's wellness entry each morning once computed. Nothing is ever read back for
+    /// this direction — matches NOOP's one-way-export convention.
+    @Published public private(set) var pushEnabled: Bool
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.athleteId = defaults.string(forKey: athleteIdKey) ?? "0"
+        self.pushEnabled = defaults.bool(forKey: pushEnabledKey)
         self.hasApiKey = false
         self.hasApiKey = readApiKey() != nil
     }
@@ -24,6 +30,11 @@ public final class IntervalsICUSettings: ObservableObject {
     public func setAthleteId(_ id: String) {
         athleteId = id
         defaults.set(id, forKey: athleteIdKey)
+    }
+
+    public func setPushEnabled(_ enabled: Bool) {
+        pushEnabled = enabled
+        defaults.set(enabled, forKey: pushEnabledKey)
     }
 
     public func setApiKey(_ key: String) {

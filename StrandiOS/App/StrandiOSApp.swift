@@ -140,6 +140,11 @@ struct StrandiOSApp: App {
         // unconditionally at every fresh-offload completion, exactly like the Health write-back above.
         model.selfHostedPushTrigger = {
             await PushRunner.shared.runIfConfigured()
+            // intervals.icu wellness push (fork addition): off until the user enables it in
+            // Settings; no-ops otherwise, safe to wire unconditionally like the line above.
+            await IntervalsICURunner.shared.pushLastNightIfEnabled()
+            // Morning sleep-recap notification (fork addition): off until enabled; no-ops otherwise.
+            await SleepRecapNotifier.shared.postIfDue()
         }
         PushBackgroundScheduler.register()
         PushBackgroundScheduler.schedule()
