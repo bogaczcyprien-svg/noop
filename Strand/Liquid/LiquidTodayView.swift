@@ -688,7 +688,8 @@ struct LiquidTodayView: View {
                           onGuide: { guideSection = .effort },
                           maxValue: effortScale == .whoop ? 21 : 100,
                           decimals: effortScale == .whoop ? 1 : 0,
-                          detailRoute: .metric(HeroRingMetric.effort))
+                          detailRoute: .metric(HeroRingMetric.effort),
+                          targetRange: effortTargetRange(recovery: chargeDisplay.pct))
             HeroScoreCell(label: String(localized: "Rest"), score: restScore, tint: StrandPalette.restColor,
                           animated: dataLoaded, onGuide: { guideSection = .rest },
                           detailRoute: .metric(HeroRingMetric.rest))
@@ -2004,6 +2005,19 @@ struct LiquidTodayView: View {
         return UnitFormatter.effortDisplay(s, scale: effortScale)
     }
 
+    /// The Effort ring's recovery-based target marker: today's optimal Day-Strain band (task #43's
+    /// `CoupledView.optimalStrainRange`, PRESENTATION ONLY, never fed back into any score), converted
+    /// from its native WHOOP 0–21 axis onto the stored 0–100 scale and then onto whichever display scale
+    /// the user has chosen (#45) — the same two-step conversion the Effort number itself goes through, so
+    /// the marker always lines up with the ring it is drawn on. nil recovery (calibrating) draws nothing.
+    private func effortTargetRange(recovery: Double?) -> ClosedRange<Double>? {
+        guard let band = CoupledView.optimalStrainRange(recovery: recovery) else { return nil }
+        let lowStored = Double(band.lowerBound) / UnitFormatter.effortScaleFactor
+        let highStored = Double(band.upperBound) / UnitFormatter.effortScaleFactor
+        return UnitFormatter.effortValue(lowStored, scale: effortScale)
+            ...UnitFormatter.effortValue(highStored, scale: effortScale)
+    }
+
     private func workoutSub(_ w: WorkoutRow) -> String {
         var parts: [String] = []
         let secs = w.durationS ?? Double(max(w.endTs - w.startTs, 0))
@@ -2135,6 +2149,10 @@ private struct HeroScoreCell: View {
     /// the same score land on the identical dossier rather than diverging. The LABEL keeps its own job:
     /// it opens the scoring guide, which is this screen's only route to that explainer.
     var detailRoute: TabRoute? = nil
+    /// The recovery-derived optimal-Effort band (task #43's `CoupledView.optimalStrainRange`), on the
+    /// same scale as `score`/`maxValue`. Only the Effort hero passes this; Charge/Rest leave it nil and
+    /// render exactly as before.
+    var targetRange: ClosedRange<Double>? = nil
 
     /// The gauge, linked when there is somewhere to go.
     ///
@@ -2149,7 +2167,8 @@ private struct HeroScoreCell: View {
             animated: animated,
             maxValue: maxValue,
             decimals: decimals,
-            tapPassesThrough: detailRoute != nil
+            tapPassesThrough: detailRoute != nil,
+            targetRange: targetRange
         )
         if let detailRoute {
             NavigationLink(value: detailRoute) { gauge }
@@ -2157,11 +2176,23 @@ private struct HeroScoreCell: View {
                 // The ring is what shows the NUMBER, so its spoken label carries the number too. Without
                 // this a VoiceOver user hears only the metric name on the element displaying the value,
                 // while the label below it reads the score, which is backwards.
-                .accessibilityLabel(Text("\(label), \(spokenScore)"))
+                .accessibilityLabel(Text(spokenTarget.map { "\(label), \(spokenScore), \($0)" }
+                                         ?? "\(label), \(spokenScore)"))
                 .accessibilityHint(Text("Opens the trend and readings"))
         } else {
             gauge
         }
+    }
+
+    /// The target band as VoiceOver should say it, or nil when there is none (Charge/Rest, or an
+    /// unscored recovery). Shares `spokenScore`'s number formatting so both read consistently.
+    private var spokenTarget: String? {
+        guard let targetRange else { return nil }
+        func fmt(_ v: Double) -> String {
+            decimals > 0 ? String(format: "%.\(decimals)f", locale: AppLanguage.activeLocale, v)
+                         : String(Int(v.rounded()))
+        }
+        return String(localized: "target \(fmt(targetRange.lowerBound)) to \(fmt(targetRange.upperBound))")
     }
 
     /// The score as VoiceOver should say it, matching the label row's own phrasing.

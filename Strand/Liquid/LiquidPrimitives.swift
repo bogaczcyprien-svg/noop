@@ -16,7 +16,8 @@ enum LiquidRender {
     /// A softly sculpted circular progress ring. Geometry is fixed (`radius`, `lineWidth`, arc span);
     /// this pass only deepens the material — recessed track, frosted inner disc, semantic progress
     /// gradient — without neon bloom, tip dots, or layout changes.
-    static func vessel(_ base: GraphicsContext, _ size: CGSize, _ sim: LiquidSim, now: Double, tint: Color) {
+    static func vessel(_ base: GraphicsContext, _ size: CGSize, _ sim: LiquidSim, now: Double, tint: Color,
+                       targetRange: ClosedRange<Double>? = nil) {
         let diameter = max(2, min(size.width, size.height) - 3)
         let rect = CGRect(x: (size.width - diameter) / 2, y: (size.height - diameter) / 2,
                           width: diameter, height: diameter)
@@ -92,6 +93,26 @@ enum LiquidRender {
                 startPoint: CGPoint(x: rect.minX, y: rect.maxY),
                 endPoint: CGPoint(x: rect.maxX, y: rect.minY)
             ), style: cap)
+        }
+
+        // Recovery-based target band (the Effort ring's "optimal strain" marker, task #43's
+        // `CoupledView.optimalStrainRange`) — a short accent arc riding just outside the main track so it
+        // reads as a goal zone rather than competing with the progress fill underneath it. Fractions are
+        // already clamped by the caller; nil (no recovery yet) draws nothing, matching every other
+        // calibrating read-out in this screen.
+        if let targetRange {
+            let lo = max(0, min(1, targetRange.lowerBound))
+            let hi = max(0, min(1, targetRange.upperBound))
+            if hi > lo {
+                let targetRadius = radius + lineWidth * 0.62 + 1.5
+                var band = Path()
+                band.addArc(center: center, radius: targetRadius, startAngle: .degrees(-90 + 360 * lo),
+                           endAngle: .degrees(-90 + 360 * hi), clockwise: false)
+                ctx.stroke(band, with: .color(.black.opacity(0.22)),
+                           style: StrokeStyle(lineWidth: lineWidth * 0.30 + 1.6, lineCap: .round))
+                ctx.stroke(band, with: .color(.white.opacity(0.92)),
+                           style: StrokeStyle(lineWidth: lineWidth * 0.30, lineCap: .round))
+            }
         }
 
         // Outer instrument rim (unchanged placement).
@@ -275,6 +296,9 @@ struct LiquidVessel: View {
     /// instead, so both happen: the liquid still splashes and the link still pushes. Default false
     /// keeps every standalone vessel byte-identical (#1995).
     var tapPassesThrough: Bool = false
+    /// The optional recovery-based target band, as 0...1 fractions of the gauge's own scale. nil draws
+    /// no marker (#43-derived; see `LiquidRender.vessel`).
+    var targetRange: ClosedRange<Double>? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var motion = NoopMotionState.shared
@@ -283,11 +307,13 @@ struct LiquidVessel: View {
 
     // The custom init exists to seed `_sim` from `value`, which also means the memberwise init is NOT
     // synthesised: any new stored property has to be threaded through here or callers cannot pass it.
-    init(value: Double?, tint: Color, animated: Bool = true, tapPassesThrough: Bool = false) {
+    init(value: Double?, tint: Color, animated: Bool = true, tapPassesThrough: Bool = false,
+         targetRange: ClosedRange<Double>? = nil) {
         self.value = value
         self.tint = tint
         self.animated = animated
         self.tapPassesThrough = tapPassesThrough
+        self.targetRange = targetRange
         _sim = State(initialValue: LiquidSim(target: value ?? 0))
     }
 
@@ -303,7 +329,7 @@ struct LiquidVessel: View {
             let now = liquidSeconds(tl.date)
             Canvas { context, size in
                 sim.step(now: now, tilt: LiquidMotion.shared.tilt, target: value ?? 0)
-                LiquidRender.vessel(context, size, sim, now: now, tint: tint)
+                LiquidRender.vessel(context, size, sim, now: now, tint: tint, targetRange: targetRange)
             }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -317,7 +343,8 @@ struct LiquidVessel: View {
     /// One-shot, cached render — posed at the fill line, no clock, no motion acquire.
     private var staticGauge: some View {
         Canvas { context, size in
-            LiquidRender.vessel(context, size, LiquidSim.posed(value ?? 0), now: 0, tint: tint)
+            LiquidRender.vessel(context, size, LiquidSim.posed(value ?? 0), now: 0, tint: tint,
+                               targetRange: targetRange)
         }
         .aspectRatio(1, contentMode: .fit)
         .contentShape(Circle())
@@ -493,17 +520,24 @@ struct LiquidScoreGauge: View {
     var captionColor: Color = StrandPalette.textTertiary
     /// Forwarded to `LiquidVessel` so a gauge inside a link still splashes AND still navigates (#1995).
     var tapPassesThrough: Bool = false
+    /// Optional target band, on the SAME scale as `score`/`maxValue` (e.g. the recovery-derived optimal
+    /// Effort range, already converted to whichever display scale the caller is using). Converted here to
+    /// the 0...1 fractions `LiquidVessel` draws against.
+    var targetRange: ClosedRange<Double>? = nil
 
     @State private var shown: Double = 0
 
     private var frac: Double? { score.map { max(0, min(1, $0 / maxValue)) } }
+    private var targetFrac: ClosedRange<Double>? {
+        targetRange.map { max(0, min(1, $0.lowerBound / maxValue))...max(0, min(1, $0.upperBound / maxValue)) }
+    }
     private var centerFont: Font { StrandFont.rounded(diameter * 26 / Self.homeHeroDiameter) }
     private var captionFont: Font { StrandFont.rounded(diameter * 0.085, weight: .medium) }
 
     var body: some View {
         ZStack {
             LiquidVessel(value: frac, tint: tint, animated: animated,
-                         tapPassesThrough: tapPassesThrough)
+                         tapPassesThrough: tapPassesThrough, targetRange: targetFrac)
                 .frame(width: diameter, height: diameter)
             VStack(spacing: captionText == nil ? 0 : 1) {
                 Group {
