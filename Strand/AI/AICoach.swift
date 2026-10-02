@@ -941,6 +941,19 @@ final class AICoachEngine: ObservableObject {
         return clean.isEmpty ? nil : clean
     }
 
+    /// Headless (non-streaming), one-off question: the caller supplies the FULL user-turn text already
+    /// (no stored context, no chat transcript, nothing persisted). Same configured-provider + consent
+    /// gate as `generateBrief()`, so a feature built on this one on/off switch — not a second consent
+    /// surface of its own — e.g. the intervals.icu Activities screen's per-workout AI debrief, which
+    /// builds its own prompt (stats + HR zone split) via `WorkoutDebrief` and hands it straight here.
+    func headlessAnswer(_ userText: String) async -> String? {
+        guard CoachBriefScheduler.coachMasterEnabled else { return nil }
+        guard isConfigured, dataConsent, let key = resolvedKey else { return nil }
+        guard let reply = try? await callProvider(key: key, messages: [(.user, userText)]) else { return nil }
+        let clean = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? nil : clean
+    }
+
     /// Full data context = the metrics summary + recent workouts (+ an OPT-IN on-device-signals summary
     /// when the second consent is on). Used when the user has granted data access.
     func buildFullContext() async -> String {

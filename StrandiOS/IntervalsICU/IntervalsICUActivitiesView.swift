@@ -1,16 +1,31 @@
 #if os(iOS)
 import SwiftUI
+import MarkdownUI
 import StrandDesign
 import WhoopStore
+import WhoopProtocol
+import StrandAnalytics
 
 /// A dedicated list of every activity imported from intervals.icu — separate from the general
 /// Workouts screen (which mixes every source together), so rides/sessions synced from intervals.icu
 /// are easy to review on their own with their full detail. Fork addition; read-only, reuses the
 /// already-imported `WorkoutRow` rows (`deviceId == "intervals-icu"`), no new storage.
+///
+/// Also offers a per-activity AI debrief (`AICoachEngine.headlessAnswer`, the SAME bring-your-own-key
+/// Coach the rest of the app uses — no second key/consent surface): a short text breakdown of the
+/// aerobic/anaerobic contribution, built from a Karvonen %HRR time split over the real per-sample HR
+/// `IntervalsICUImporter` backfilled for this activity (see `WorkoutDebrief`).
 struct IntervalsICUActivitiesView: View {
+    @EnvironmentObject var coach: AICoachEngine
+    @EnvironmentObject var profile: ProfileStore
     @State private var activities: [WorkoutRow] = []
     @State private var loaded = false
     @State private var cachedStore: WhoopStore?
+    /// Debrief state keyed by `activity.startTs` (unique per activity). A nil-less dictionary lookup
+    /// (`debriefText[ts]`) doubles as "not yet requested" vs. "request returned this text".
+    @State private var debriefText: [Int: String] = [:]
+    @State private var debriefFailed: Set<Int> = []
+    @State private var debriefLoading: Set<Int> = []
 
     var body: some View {
         ScreenScaffold(
@@ -69,8 +84,73 @@ struct IntervalsICUActivitiesView: View {
                         statPair("Calories", "\(Int(kcal.rounded())) kcal")
                     }
                 }
+
+                debriefSection(activity)
             }
         }
+    }
+
+    @ViewBuilder
+    private func debriefSection(_ activity: WorkoutRow) -> some View {
+        let ts = activity.startTs
+        Divider().padding(.vertical, 2)
+        if let text = debriefText[ts] {
+            Markdown(text).markdownTheme(.strand)
+        } else if debriefLoading.contains(ts) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("L'IA débrief la séance…")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+        } else {
+            Button {
+                Task { await debrief(activity) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                    Text("Débriefer avec l'IA")
+                }
+                .font(StrandFont.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(StrandPalette.accent)
+            if debriefFailed.contains(ts) {
+                Text("Configure ta clé API dans Réglages > Coach pour utiliser le débrief IA.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+        }
+    }
+
+    /// Runs the AI debrief for one activity: pulls the real per-sample HR backfilled for its time
+    /// window, folds it into a Karvonen %HRR zone split (`WorkoutDebrief.zoneBreakdown`), builds the
+    /// prompt, and hands it to the SAME Coach engine every other AI surface in the app uses
+    /// (`AICoachEngine.headlessAnswer`) — no second key/consent flow for this one screen.
+    @MainActor
+    private func debrief(_ activity: WorkoutRow) async {
+        let ts = activity.startTs
+        debriefLoading.insert(ts)
+        debriefFailed.remove(ts)
+        defer { debriefLoading.remove(ts) }
+
+        var hr: [HRSample] = []
+        if let s = await store() {
+            hr = (try? await s.hrSamples(
+                deviceId: IntervalsICUImporter.deviceId, from: activity.startTs, to: activity.endTs, limit: 8_000
+            )) ?? []
+        }
+        let maxHR = profile.age > 0 ? StrainScorer.tanakaHRmax(age: Double(profile.age)) : nil
+        let zones = maxHR.flatMap {
+            WorkoutDebrief.zoneBreakdown(hr: hr, restingHR: StrainScorer.defaultRestingHR, maxHR: $0)
+        }
+        let prompt = WorkoutDebrief.prompt(activity: activity, zones: zones)
+
+        guard let reply = await coach.headlessAnswer(prompt) else {
+            debriefFailed.insert(ts)
+            return
+        }
+        debriefText[ts] = reply
     }
 
     private func statPair(_ label: String, _ value: String) -> some View {
