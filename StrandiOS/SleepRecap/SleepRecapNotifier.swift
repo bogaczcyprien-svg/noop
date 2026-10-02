@@ -73,7 +73,7 @@ public final class SleepRecapNotifier {
         content.sound = .default
         let request = UNNotificationRequest(identifier: requestIdPrefix + latest.day,
                                             content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        try? await UNUserNotificationCenter.current().add(request)
         UserDefaults.standard.set(latest.day, forKey: lastPostedKey)
     }
 

@@ -57,7 +57,7 @@ public final class TrendNotifier {
         let sorted = days.sorted { $0.day < $1.day }
         guard let latestDay = sorted.last(where: { $0.avgHrv != nil })?.day else { return }
         guard UserDefaults.standard.string(forKey: lastNotifiedKey) != latestDay else { return }
-        guard let streak = Self.currentStreak(days: sorted), streak.count >= minStreakNights else { return }
+        guard let streak = Self.currentStreak(days: sorted), streak.count >= Self.minStreakNights else { return }
 
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
@@ -71,7 +71,7 @@ public final class TrendNotifier {
         content.sound = .default
         let request = UNNotificationRequest(identifier: requestIdPrefix + latestDay,
                                             content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        try? await UNUserNotificationCenter.current().add(request)
         UserDefaults.standard.set(latestDay, forKey: lastNotifiedKey)
     }
 
