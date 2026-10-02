@@ -178,8 +178,8 @@ public final class SleepRecapNotifier {
             deviceId: Repository.whoopSource, from: session.startTs, to: session.endTs, limit: 20_000
         ) else { return nil }
         let earlyEnd = session.startTs + EarlyNightRecovery.earlyWindowMinutes * 60
-        let earlyNN = allNN.filter { $0.ts <= earlyEnd }.map(\.rrMs)
-        let fullNN = allNN.map(\.rrMs)
+        let earlyNN = allNN.filter { $0.ts <= earlyEnd }.map { Double($0.rrMs) }
+        let fullNN = allNN.map { Double($0.rrMs) }
 
         guard let result = EarlyNightRecovery.evaluate(earlyNN: earlyNN, fullNightNN: fullNN) else { return nil }
         let pct = Int((result.ratio * 100).rounded())
