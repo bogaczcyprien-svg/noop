@@ -145,6 +145,8 @@ struct StrandiOSApp: App {
             await IntervalsICURunner.shared.pushLastNightIfEnabled()
             // Morning sleep-recap notification (fork addition): off until enabled; no-ops otherwise.
             await SleepRecapNotifier.shared.postIfDue()
+            // HRV trend notification (fork addition): off until enabled; no-ops otherwise.
+            await TrendNotifier.shared.postIfDue()
         }
         PushBackgroundScheduler.register()
         PushBackgroundScheduler.schedule()
