@@ -116,6 +116,11 @@ struct TrainingLoadCard: View {
                         VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                             legend
                             TrainingLoadChart(rows: rows)
+                            if let latest, let line = paceOfRecoveryLine(ctl: latest.ctl, atl: latest.atl) {
+                                Text(line)
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
                         }
                     },
                     footer: {
@@ -149,6 +154,18 @@ struct TrainingLoadCard: View {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         }
+    }
+
+    /// "Pace of Recovery" (fork addition): a forward projection — "if you took it easy from today,
+    /// here's roughly when your form would come back to balanced" — only shown while form is actually
+    /// negative (fatigued); nil once it's back at/above 0, where the line would say nothing useful.
+    private func paceOfRecoveryLine(ctl: Double, atl: Double) -> String? {
+        guard ctl - atl < 0 else { return nil }
+        let projection = PaceOfRecovery.project(ctl: ctl, atl: atl)
+        if projection.daysToRecovered >= PaceOfRecovery.maxProjectedDays {
+            return String(localized: "At this pace, recovery is more than \(PaceOfRecovery.maxProjectedDays) days out if you ease up now.")
+        }
+        return String(localized: "At this pace, about \(projection.daysToRecovered) day(s) to recovered form if you ease up now.")
     }
 
     private func subtitle(for tl: TrainingLoadEngine.Result) -> String {
