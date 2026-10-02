@@ -2014,8 +2014,9 @@ struct LiquidTodayView: View {
         guard let band = CoupledView.optimalStrainRange(recovery: recovery) else { return nil }
         let lowStored = Double(band.lowerBound) / UnitFormatter.effortScaleFactor
         let highStored = Double(band.upperBound) / UnitFormatter.effortScaleFactor
-        return UnitFormatter.effortValue(lowStored, scale: effortScale)
-            ...UnitFormatter.effortValue(highStored, scale: effortScale)
+        let low = UnitFormatter.effortValue(lowStored, scale: effortScale)
+        let high = UnitFormatter.effortValue(highStored, scale: effortScale)
+        return low...high
     }
 
     private func workoutSub(_ w: WorkoutRow) -> String {
