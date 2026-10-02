@@ -316,6 +316,7 @@ final class AppModel: ObservableObject {
         repo.$days.sink { [weak self] days in
             self?.evaluateIllness(days)
             self?.evaluateStrainTarget()
+            self?.evaluateOverload()
             // Keep the battery night-guard's learned bedtime warm off the same signal (throttled inside).
             self?.refreshHabitualMidsleep()
         }.store(in: &hrCancellables)
@@ -2026,6 +2027,15 @@ final class AppModel: ObservableObject {
             dayStrain21: row.strain.map { UnitFormatter.effortValue($0, scale: .whoop) },
             target21: CoupledView.optimalStrainRange(recovery: row.recovery)?.lowerBound,
             enabled: behavior.strainTargetNudge)
+    }
+
+    /// Fork-only counterpart to `evaluateStrainTarget()` above: warns when Effort has run above the TOP
+    /// of its recovery-derived optimal band for several days running, instead of celebrating the bottom
+    /// of it. Measured over the full daily history (`repo.days`), not just today, since a streak can't
+    /// be read off a single day.
+    func evaluateOverload() {
+        guard let row = repo.today else { return }
+        OverloadNotifier.onDaysUpdate(today: row.day, days: repo.days, enabled: behavior.overloadAlert)
     }
 
     /// Re-run the illness watch over the cached history. Called when the Automations toggle

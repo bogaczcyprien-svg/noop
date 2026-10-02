@@ -57,6 +57,11 @@ final class BehaviorStore: ObservableObject {
     /// recovery-derived optimal band. Default OFF like every other automation.
     @Published var strainTargetNudge: Bool { didSet { d.set(strainTargetNudge, forKey: K.strainTargetNudge) } }
 
+    // MARK: Overload alert (fork-only; symmetric to the strain target nudge above)
+    /// Warn when Effort has landed above the TOP of its recovery-derived optimal band for several days
+    /// running (`OverloadNotifier.OverloadPolicy.requiredStreak`). Default OFF like every other automation.
+    @Published var overloadAlert: Bool { didSet { d.set(overloadAlert, forKey: K.overloadAlert) } }
+
     private let d = UserDefaults.standard
     private enum K {
         static let dtAction = "behavior.doubleTapAction"
@@ -80,6 +85,7 @@ final class BehaviorStore: ObservableObject {
         static let batteryAlerts = "behavior.batteryAlerts"
         static let batteryPredictiveAlerts = "behavior.batteryPredictiveAlerts"
         static let strainTargetNudge = "behavior.strainTargetNudge"
+        static let overloadAlert = "behavior.overloadAlert"
     }
 
     init() {
@@ -102,6 +108,7 @@ final class BehaviorStore: ObservableObject {
         batteryAlerts = d.object(forKey: K.batteryAlerts) as? Bool ?? true
         batteryPredictiveAlerts = d.object(forKey: K.batteryPredictiveAlerts) as? Bool ?? true
         strainTargetNudge = d.object(forKey: K.strainTargetNudge) as? Bool ?? false
+        overloadAlert = d.object(forKey: K.overloadAlert) as? Bool ?? false
     }
 
     // MARK: Charge baseline recalibration

@@ -69,6 +69,7 @@ struct AutomationsView: View {
             healthInsightsCard
             batteryCard
             strainTargetCard
+            overloadCard
         }
     }
 
@@ -436,6 +437,24 @@ struct AutomationsView: View {
                         // already reached, evaluate now rather than waiting for the next refresh
                         // (the reevaluateIllness idiom).
                         model.evaluateStrainTarget()
+                    }
+                }
+        }
+    }
+
+    // MARK: - Overload alert (fork-only; symmetric to the strain target nudge above)
+
+    private var overloadCard: some View {
+        Section2(icon: "exclamationmark.triangle", title: String(localized: "Overload alert"),
+                 blurb: String(localized: "A warning when your Effort has stayed above the top of your optimal strain range for several days in a row, worked out from your recovery."),
+                 active: behavior.overloadAlert) {
+            ToggleRow(label: String(localized: "Notify on sustained overload"),
+                      help: String(localized: "Posts after your strap syncs and NOOP scores the day, once Effort has landed above the optimal range for 3 days running. At most once per day."),
+                      isOn: $behavior.overloadAlert)
+                .onChangeCompat(of: behavior.overloadAlert) { on in
+                    if on {
+                        OverloadNotifier.requestAuthorization()
+                        model.evaluateOverload()
                     }
                 }
         }
