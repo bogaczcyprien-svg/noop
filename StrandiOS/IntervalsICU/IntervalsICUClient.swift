@@ -21,6 +21,14 @@ public enum IntervalsICUError: Error {
     case decoding
 }
 
+/// One named stream from the activity streams endpoint — `type` is e.g. "time"/"heartrate", `data`
+/// the per-sample values aligned across every stream requested together (nulls where a sample is
+/// missing, e.g. a GPS dropout). Fork addition.
+public struct IntervalsICUStream: Decodable {
+    public let type: String
+    public let data: [Double?]
+}
+
 public struct IntervalsICUClient {
     private let athleteId: String
     private let apiKey: String
@@ -51,6 +59,31 @@ public struct IntervalsICUClient {
         guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
         do {
             return try JSONDecoder().decode([IntervalsICUActivity].self, from: data)
+        } catch {
+            throw IntervalsICUError.decoding
+        }
+    }
+
+    /// Fetches named per-sample streams for one activity (e.g. `["time", "heartrate"]`) — real
+    /// recorded data, not the base `activities(...)` call's single ride-average. "time" is seconds
+    /// elapsed since the activity started (NOT always 1s apart — always request it alongside any
+    /// other stream to know each sample's actual offset) per intervals.icu's own stream docs. Fork
+    /// addition, used to backfill a truer HR trace than the flat-average fallback.
+    public func streams(activityId: String, types: [String]) async throws -> [IntervalsICUStream] {
+        var components = URLComponents(string: "https://intervals.icu/api/v1/activity/\(activityId)/streams.json")
+        components?.queryItems = [URLQueryItem(name: "types", value: types.joined(separator: ","))]
+        guard let url = components?.url else { throw IntervalsICUError.invalidURL }
+
+        var request = URLRequest(url: url)
+        let credentials = Data("API_KEY:\(apiKey)".utf8).base64EncodedString()
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw IntervalsICUError.http(0) }
+        guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
+        do {
+            return try JSONDecoder().decode([IntervalsICUStream].self, from: data)
         } catch {
             throw IntervalsICUError.decoding
         }

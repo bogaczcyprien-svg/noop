@@ -4,15 +4,16 @@ import GRDB
 import WhoopStore
 
 /// Imports activities from intervals.icu into `WhoopStore.workout` (its own `intervals-icu` device
-/// partition, mirroring the `apple-health` import convention) AND backfills approximate `hrSample`
-/// rows under the strap's OWN device id (`Repository.whoopSource`) so NOOP's existing day-Strain
-/// integration — which deliberately reads one device's hr stream, never a mix — picks up rides where
-/// the strap wasn't worn. This is a deliberate exception to NOOP's source-separation convention,
-/// made knowingly: see the More > Data > intervals.icu screen for the tradeoff it documents.
+/// partition, mirroring the `apple-health` import convention) AND backfills `hrSample` rows under the
+/// strap's OWN device id (`Repository.whoopSource`) so NOOP's existing day-Strain integration — which
+/// deliberately reads one device's hr stream, never a mix — picks up rides where the strap wasn't
+/// worn. This is a deliberate exception to NOOP's source-separation convention, made knowingly: see
+/// the More > Data > intervals.icu screen for the tradeoff it documents.
 ///
-/// intervals.icu's base activities endpoint only returns one avgHr per ride, not a per-second
-/// stream, so the backfilled samples are a flat repeat of avgHr every 60s across the ride — an
-/// approximation, not a measured trace. `INSERT OR IGNORE` never overwrites a real strap sample.
+/// Prefers intervals.icu's real per-sample streams endpoint (actual recorded HR at its actual
+/// offsets) over the base `activities` call's single ride-average; falls back to a flat repeat of
+/// that average only when the streams fetch fails or carries no heart-rate data (e.g. a ride recorded
+/// without a chest strap/arm band). `INSERT OR IGNORE` never overwrites a real strap sample either way.
 public struct IntervalsICUImporter {
     public static let deviceId = "intervals-icu"
 
@@ -33,34 +34,59 @@ public struct IntervalsICUImporter {
 
         let rows = activities.compactMap(toWorkoutRow)
         let count = try await store.upsertWorkouts(rows, deviceId: deviceId)
-        try await backfillApproximateHR(activities: activities, store: store)
+        await backfillHR(activities: activities, client: client, store: store)
         return count
     }
 
-    /// Flat approximate HR at `average_heartrate`, one sample per minute across the ride, written
-    /// under the strap's own device id so the day-window Strain integration sees it.
-    private static func backfillApproximateHR(activities: [IntervalsICUActivity], store: WhoopStore) async throws {
-        var rows: [(ts: Int, bpm: Int)] = []
+    private static func backfillHR(activities: [IntervalsICUActivity], client: IntervalsICUClient,
+                                   store: WhoopStore) async {
         for a in activities {
-            guard let startLocal = a.start_date_local, let avgHr = a.average_heartrate else { continue }
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-            formatter.timeZone = TimeZone(identifier: "UTC")
-            formatter.calendar = Calendar(identifier: .gregorian)
-            guard let start = formatter.date(from: startLocal) else { continue }
-            let startTs = Int(start.timeIntervalSince1970)
+            guard let startTs = startTs(a) else { continue }
             let duration = a.moving_time ?? a.elapsed_time ?? 0
             guard duration > 0 else { continue }
-            let bpm = Int(avgHr.rounded())
-            var t = startTs
-            while t <= startTs + duration {
-                rows.append((ts: t, bpm: bpm))
-                t += 60
+
+            if let real = try? await client.streams(activityId: a.id, types: ["time", "heartrate"]),
+               let rows = realHRRows(streams: real, activityStartTs: startTs), !rows.isEmpty {
+                await insert(rows, store: store)
+            } else if let avgHr = a.average_heartrate {
+                await insert(flatHRRows(startTs: startTs, duration: duration, bpm: Int(avgHr.rounded())),
+                           store: store)
             }
         }
+    }
+
+    /// Real recorded HR at its actual offsets, or nil when the streams response doesn't carry both a
+    /// usable "time" and "heartrate" stream (missing entirely, empty, or a device that recorded no
+    /// HR for this ride) — the caller falls back to the flat approximation in that case.
+    static func realHRRows(streams: [IntervalsICUStream], activityStartTs: Int) -> [(ts: Int, bpm: Int)]? {
+        guard let time = streams.first(where: { $0.type == "time" })?.data,
+              let hr = streams.first(where: { $0.type == "heartrate" })?.data,
+              !time.isEmpty, !hr.isEmpty
+        else { return nil }
+        var rows: [(ts: Int, bpm: Int)] = []
+        rows.reserveCapacity(min(time.count, hr.count))
+        for i in 0..<min(time.count, hr.count) {
+            guard let offset = time[i], let bpm = hr[i], bpm > 0 else { continue }
+            rows.append((ts: activityStartTs + Int(offset.rounded()), bpm: Int(bpm.rounded())))
+        }
+        return rows
+    }
+
+    /// Flat approximate HR at `bpm`, one sample per minute across the ride — the pre-streams fallback,
+    /// kept for rides the streams endpoint can't supply real HR for.
+    private static func flatHRRows(startTs: Int, duration: Int, bpm: Int) -> [(ts: Int, bpm: Int)] {
+        var rows: [(ts: Int, bpm: Int)] = []
+        var t = startTs
+        while t <= startTs + duration {
+            rows.append((ts: t, bpm: bpm))
+            t += 60
+        }
+        return rows
+    }
+
+    private static func insert(_ rows: [(ts: Int, bpm: Int)], store: WhoopStore) async {
         guard !rows.isEmpty else { return }
-        let writer = store.registryWriter
-        try await writer.write { db in
+        try? await store.registryWriter.write { db in
             for row in rows {
                 try db.execute(
                     sql: "INSERT OR IGNORE INTO hrSample (deviceId, ts, bpm) VALUES (?, ?, ?)",
@@ -68,6 +94,16 @@ public struct IntervalsICUImporter {
                 )
             }
         }
+    }
+
+    private static func startTs(_ a: IntervalsICUActivity) -> Int? {
+        guard let startLocal = a.start_date_local else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        guard let start = formatter.date(from: startLocal) else { return nil }
+        return Int(start.timeIntervalSince1970)
     }
 
     private static func toWorkoutRow(_ a: IntervalsICUActivity) -> WorkoutRow? {
