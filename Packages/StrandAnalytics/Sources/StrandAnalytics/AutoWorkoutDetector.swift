@@ -14,12 +14,14 @@ import WhoopProtocol
 // to turn a suggestion into a manual workout, or X to dismiss it forever. Its published policy
 // remains frozen while the duration alternatives collect local shadow evidence.
 //
-// The published thresholds here are intentionally CONSERVATIVE (low sensitivity): a sustained ≥ 12-min
-// elevation of HR ≥ resting + 30 bpm, brief (≤ 90 s) dips tolerated, near windows merged. Tuned
-// to avoid false positives from stress / caffeine / a brief flight of stairs, at the cost of
-// missing the odd short or gentle session — exactly right for a SUGGESTION you can decline. An
-// OPTIONAL continuous motion signal, when one is readily available, is required as confirmation;
-// with no motion series it runs HR-only.
+// Fork: loosened from the upstream-published 12-min / 90-s thresholds to 8-min / 180-s (#workout
+// detector felt too easy to miss on an interrupted ride — city cycling with stoplights routinely
+// breaks a sustained span at the old 90-s dip tolerance). Still intentionally on the conservative
+// side: a sustained ≥ 8-min elevation of HR ≥ resting + 30 bpm, brief (≤ 180 s) dips tolerated, near
+// windows merged. Tuned to avoid false positives from stress / caffeine / a brief flight of stairs,
+// at the cost of missing the odd very short or very gentle session — exactly right for a SUGGESTION
+// you can decline. An OPTIONAL continuous motion signal, when one is readily available, is required
+// as confirmation; with no motion series it runs HR-only.
 //
 // The 10- and 15-minute alternatives are SHADOW policies only. Test Centre may run them beside the
 // published 12-minute result to compare against labelled workouts, but they must not drive the Today
@@ -64,13 +66,16 @@ public enum AutoWorkoutDetector {
 
     /// Elevated gate: bpm must be at least restingHR + this margin to count as "working".
     public static let elevatedMarginBPM = 30
-    /// A candidate must hold the elevated gate for a contiguous span of at least this long (12 min).
-    public static let minSustainedMin: Double = 12.0
+    /// A candidate must hold the elevated gate for a contiguous span of at least this long (8 min,
+    /// fork-loosened from the upstream-published 12 min).
+    public static let minSustainedMin: Double = 8.0
     /// Candidate duration policies evaluated only by local Test Centre shadow diagnostics.
     /// The published confirmation path continues to use `minSustainedMin` (12 minutes).
     public static let shadowSustainedMinutes: [Double] = [10.0, 15.0]
     /// A dip below the gate no longer than this does NOT break the span (a red light, a sip of water).
-    public static let maxDipS = 90
+    /// Fork-loosened from 90 s to 180 s so a longer stoplight/intersection stop on a ride doesn't
+    /// split one sustained effort into two sub-threshold pieces.
+    public static let maxDipS = 180
     /// Two detected windows whose gap is strictly less than this are merged into one (5 min).
     public static let mergeGapS = 5 * 60
     /// When an OPTIONAL continuous motion series is supplied, a window must ALSO show elevated motion

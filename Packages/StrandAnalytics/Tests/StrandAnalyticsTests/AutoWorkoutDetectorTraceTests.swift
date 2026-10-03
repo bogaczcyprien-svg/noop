@@ -69,14 +69,16 @@ final class AutoWorkoutDetectorTraceTests: XCTestCase {
     }
 
     func testTraceUsesExplicitShadowPolicyWithoutChangingDefault() {
+        // 9 min clears the published 8-minute default but not the stricter 10-minute shadow policy
+        // used explicitly below, proving the override is honored independently of the default.
         let start = 2_000_000
-        let hr = elapsedSpan(start, 10 * 60, 120)
+        let hr = elapsedSpan(start, 9 * 60, 120)
 
-        XCTAssertTrue(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).isEmpty)
+        XCTAssertFalse(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).isEmpty)
         let (traced, lines) = AutoWorkoutDetector.detectTrace(
             hr: hr, restingBpm: 60, minimumSustainedMinutes: 10.0, path: "shadow")
 
-        XCTAssertEqual(traced.count, 1)
+        XCTAssertTrue(traced.isEmpty)
         XCTAssertTrue(lines.contains { $0.contains("path=shadow") })
         XCTAssertTrue(lines.contains { $0.contains("minSustainedMin=10.0") })
     }
