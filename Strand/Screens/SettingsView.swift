@@ -228,11 +228,6 @@ struct SettingsView: View {
     // hidden. Mirrors the Android pref so the toggle reads the same on both platforms.
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
 
-    /// Opt-in "Auto-detect workouts" (default OFF). When ON, Today scans the last day or two of HR for a
-    /// sustained-elevated window and offers — via a single dismissible card — to save it as a workout.
-    /// Nothing is ever created automatically. Mirrors the Android `NoopPrefs.KEY_AUTO_DETECT_WORKOUTS`.
-    @AppStorage(PuffinExperiment.autoDetectWorkoutsKey) private var autoDetectWorkoutsEnabled = false
-
     /// "Journal reminder" (#627, default ON). When ON, Today shows the persistent journal widget
     /// (last-7-days strip + tap-through). Mirrors the Android `NoopPrefs.KEY_JOURNAL_REMINDER_ENABLED`.
     @AppStorage(PuffinExperiment.journalReminderKey) private var journalReminderEnabled = true
@@ -1753,22 +1748,6 @@ struct SettingsView: View {
                 .accessibilityHint("Adds a water-log card to your dashboard")
 
                 Text("Adds a simple fluid log with a daily goal that adjusts to your effort. Tap to add a sip, cup or bottle and watch a progress ring fill. On \(Platform.deviceNounPhrase) only. Nothing is synced.")
-                    .font(StrandFont.caption)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                rowDivider
-
-                Toggle(isOn: $autoDetectWorkoutsEnabled) {
-                    Text("Auto-detect workouts")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
-                .accessibilityHint("Automatically saves a workout when it spots sustained elevated heart rate")
-
-                Text("After a sync, NOOP looks over your recent heart rate for a sustained, raised stretch that looks like exercise and saves it automatically as a Workout — no confirmation prompt. Turning this off stops future auto-saves but keeps your existing workout history. Deliberately conservative, so the odd workout may still be missed. On \(Platform.deviceNounPhrase) only.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

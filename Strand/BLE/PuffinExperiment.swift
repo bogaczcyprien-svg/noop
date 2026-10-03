@@ -242,15 +242,14 @@ enum PuffinExperiment {
     /// Test Centre view via @AppStorage on this key. Mirrors the Android `PuffinExperiment.KEY_HRV_READINESS`.
     static let hrvReadinessKey = "noopHrvReadiness"
 
-    /// Opt-in "Auto-detect workouts": after a sync / on Today appear, scan the last day or two of HR for a
-    /// SUSTAINED-ELEVATED window (resting HR + 30 bpm held ≥ 8 min, fork-loosened from the upstream 12 min)
-    /// that doesn't overlap a saved workout, and surface ONE dismissible Today card offering to save it as
-    /// a manual-style workout. Pure read + suggestion: nothing is ever created without the user tapping
-    /// Save, and turning this OFF stops all detection and hides the card. Default OFF. Mirrors the Android
-    /// `NoopPrefs.KEY_AUTO_DETECT_WORKOUTS`.
+    /// Fork: "Auto-detect workouts" is ALWAYS on, no settings toggle — after a sync, NOOP scans the last
+    /// day or two of HR for a SUSTAINED-ELEVATED window (resting HR + 30 bpm held ≥ 8 min, fork-loosened
+    /// from the upstream 12 min) that doesn't overlap a saved workout, and saves it straight away as a
+    /// manual-style Workout, no confirmation (`AppModel.evaluateAutoWorkoutSave`). Upstream shipped this
+    /// as an opt-in, default-OFF suggestion card behind a UserDefaults key; this fork always runs it.
     static let autoDetectWorkoutsKey = "noopAutoDetectWorkouts"
 
-    static var autoDetectWorkoutsEnabled: Bool { UserDefaults.standard.bool(forKey: autoDetectWorkoutsKey) }
+    static var autoDetectWorkoutsEnabled: Bool { true }
 
     /// "Journal reminder" (#627). When ON, Today shows a persistent journal widget (a last-7-days
     /// completion strip that taps through to the journal) and nudges when today isn't logged yet.
