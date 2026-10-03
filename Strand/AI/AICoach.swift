@@ -290,6 +290,7 @@ final class AICoachEngine: ObservableObject {
     Format replies in simple Markdown, chat-sized: short paragraphs, **bold** for key numbers, \
     bullet or numbered lists for plans, ### headings only when structure genuinely helps, and a \
     small table only for a week-ahead plan. No code blocks.
+    Always reply in French (français), regardless of what language the data labels or this prompt are in.
     """
 
     /// The system prompt actually sent, read FRESH from UserDefaults on every request so an edit in
@@ -338,12 +339,13 @@ final class AICoachEngine: ObservableObject {
 
     /// K7: Follow-up suggestion chips shown after each assistant reply. These are generic
     /// conversational follow-ups (not data-derived) so the user can dig deeper without typing.
-    /// Byte-identical to the Android twin's `followUpSuggestions`.
+    /// Fork: translated to French (was byte-identical to the Android twin's English
+    /// `followUpSuggestions`; diverges here since this fork's Coach always replies in French).
     static let followUpSuggestions: [String] = [
-        "Tell me more about that",
-        "What should I do next?",
-        "How does today compare to this week?",
-        "Give me a specific action plan",
+        "Dis-m'en plus",
+        "Qu'est-ce que je devrais faire ensuite ?",
+        "Comment se compare aujourd'hui à cette semaine ?",
+        "Donne-moi un plan d'action concret",
     ]
 
     /// K12: Rough token estimate for the next send, based on the current draft + context size.
@@ -717,7 +719,7 @@ final class AICoachEngine: ObservableObject {
     /// No-op if a conversation already exists, so it never duplicates into an active chat.
     func surfaceScheduledBrief(_ text: String) {
         guard messages.isEmpty else { return }
-        appendMessage(ChatMessage(role: .assistant, text: "Today's brief\n\n" + text))
+        appendMessage(ChatMessage(role: .assistant, text: "Récap du jour\n\n" + text))
         persistMessages()
     }
 
@@ -725,7 +727,7 @@ final class AICoachEngine: ObservableObject {
     /// assistant message, unconditionally — unlike `surfaceScheduledBrief`, this always appends so a
     /// mid-conversation tap still shows the fresh brief.
     func appendGeneratedBrief(_ text: String) {
-        appendMessage(ChatMessage(role: .assistant, text: "Today's brief\n\n" + text))
+        appendMessage(ChatMessage(role: .assistant, text: "Récap du jour\n\n" + text))
         persistMessages()
     }
 
@@ -857,7 +859,7 @@ final class AICoachEngine: ObservableObject {
         let wire: [(role: ChatMessage.Role, content: String)] =
             [(.user, context + "\n\n---\n\n" + Self.briefInstruction)]
 
-        let prefix = "Today's brief\n\n"
+        let prefix = "Récap du jour\n\n"
         let placeholder = ChatMessage(role: .assistant, text: prefix)
         appendMessage(placeholder)
         var accumulated = ""
