@@ -292,7 +292,11 @@ final class Repository: ObservableObject {
     /// disagree, and a future namespace added to the read alone would reintroduce exactly this bug.
     nonisolated static func workoutNamespaces(rawIds: [String]) -> [String] {
         deletableWorkoutNamespaces(rawIds: rawIds)
-            + [WorkoutSource.appleHealthSource, "lifting", "activity-file"]
+            // "intervals-icu": fork addition — must match IntervalsICUImporter.deviceId (StrandiOS, a
+            // separate target this file can't import). Without this, activities imported from
+            // intervals.icu sat in their own isolated screen and never fed Workouts, calories, or daily
+            // Effort scoring — real recorded rides went invisible everywhere except that one screen.
+            + [WorkoutSource.appleHealthSource, "lifting", "activity-file", "intervals-icu"]
     }
 
     /// The subset of [workoutNamespaces] a DELETE may touch: the strap namespaces only.

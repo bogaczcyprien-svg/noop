@@ -41,7 +41,7 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testBriefDipIsTolerated() {
-        // 10 min at 120, a 60 s dip to 70 (below floor, but <= 180 s), then 10 min at 120.
+        // 10 min at 120, a 60 s dip to 70 (below floor, but <= 90 s), then 10 min at 120.
         // The dip must NOT split the span → one ~21 min workout.
         let start = 2_000_000
         let first = block(start, 600, 120)
@@ -54,9 +54,9 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testShortSpanIsRejected() {
-        // 6 min at 120 (< 8 min minimum) → nothing.
+        // 8 min at 120 (< 12 min minimum) → nothing.
         let start = 3_000_000
-        let hr = block(start - 300, 300, 65) + block(start, 6 * 60, 120) + block(start + 360, 300, 65)
+        let hr = block(start - 300, 300, 65) + block(start, 8 * 60, 120) + block(start + 480, 300, 65)
         XCTAssertTrue(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).isEmpty)
     }
 
@@ -68,13 +68,13 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testNearWindowsAreMerged() {
-        // Two 15 min bouts at 120 separated by a 4 min true rest at 65 (< 5 min merge gap, and the rest
-        // is > 180 s so it CLOSES each span). The two closed spans are then MERGED into one (gap < 5 min).
+        // Two 15 min bouts at 120 separated by a 3 min true rest at 65 (< 5 min merge gap, but the rest
+        // is > 90 s so it CLOSES each span). The two closed spans are then MERGED into one (gap < 5 min).
         let start = 5_000_000
         let a = block(start, 15 * 60, 120)
-        let gap = block(start + 900, 4 * 60, 65)   // 240 s rest > maxDipS → span closes
-        let b = block(start + 1140, 15 * 60, 120)
-        let hr = block(start - 300, 300, 65) + a + gap + b + block(start + 2040, 300, 65)
+        let gap = block(start + 900, 3 * 60, 65)   // 180 s rest > maxDipS → span closes
+        let b = block(start + 1080, 15 * 60, 120)
+        let hr = block(start - 300, 300, 65) + a + gap + b + block(start + 1980, 300, 65)
         let out = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60)
         XCTAssertEqual(out.count, 1, "near windows not merged: \(out.count)")
         // Merged span runs from the first bout's start to the second bout's end (~33 min).
@@ -137,16 +137,16 @@ final class AutoWorkoutDetectorTests: XCTestCase {
             hr: below, restingBpm: 60, minimumSustainedMinutes: 10.0).isEmpty)
         XCTAssertEqual(AutoWorkoutDetector.detect(
             hr: exact, restingBpm: 60, minimumSustainedMinutes: 10.0).count, 1)
-        // The same exact ten-minute span clears the published 8-minute default too (10 >= 8).
-        XCTAssertEqual(AutoWorkoutDetector.detect(hr: exact, restingBpm: 60).count, 1)
+        // The same exact ten-minute span must not change the published 12-minute result.
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: exact, restingBpm: 60).isEmpty)
     }
 
-    func testPublishedDefaultRemainsEightMinutes() {
+    func testPublishedDefaultRemainsTwelveMinutes() {
         let start = 10_500_000
-        let below = elapsedSpan(start, 8 * 60 - 1, 120)
-        let exact = elapsedSpan(start, 8 * 60, 120)
+        let below = elapsedSpan(start, 12 * 60 - 1, 120)
+        let exact = elapsedSpan(start, 12 * 60, 120)
 
-        XCTAssertEqual(AutoWorkoutDetector.minSustainedMin, 8.0)
+        XCTAssertEqual(AutoWorkoutDetector.minSustainedMin, 12.0)
         XCTAssertEqual(AutoWorkoutDetector.shadowSustainedMinutes, [10.0, 15.0])
         XCTAssertTrue(AutoWorkoutDetector.detect(hr: below, restingBpm: 60).isEmpty)
         XCTAssertEqual(AutoWorkoutDetector.detect(hr: exact, restingBpm: 60).count, 1)

@@ -317,7 +317,6 @@ final class AppModel: ObservableObject {
             self?.evaluateIllness(days)
             self?.evaluateStrainTarget()
             self?.evaluateOverload()
-            self?.evaluateAutoWorkoutSave()
             // Keep the battery night-guard's learned bedtime warm off the same signal (throttled inside).
             self?.refreshHabitualMidsleep()
         }.store(in: &hrCancellables)
@@ -2037,21 +2036,6 @@ final class AppModel: ObservableObject {
     func evaluateOverload() {
         guard let row = repo.today else { return }
         OverloadNotifier.onDaysUpdate(today: row.day, days: repo.days, enabled: behavior.overloadAlert)
-    }
-
-    /// Fork: no confirmation card. The user doesn't want to be asked — once auto-detect finds an
-    /// unsaved, un-dismissed sustained-elevated-HR window (`Repository.autoDetectCandidate`), save it
-    /// straight away as a manual-style Workout, same write `AutoWorkoutCard`'s "Save it" used to make.
-    /// `autoDetectCandidate` already excludes anything already saved or dismissed, so this is safe to
-    /// run on every days republish without double-saving. Gated on the SAME toggle
-    /// (`PuffinExperiment.autoDetectWorkoutsEnabled`) that used to gate the (now-removed) card.
-    func evaluateAutoWorkoutSave() {
-        guard PuffinExperiment.autoDetectWorkoutsEnabled else { return }
-        Task {
-            guard let candidate = await repo.autoDetectCandidate() else { return }
-            _ = await repo.saveDetectedWorkout(candidate)
-            await repo.refresh()
-        }
     }
 
     /// Re-run the illness watch over the cached history. Called when the Automations toggle
