@@ -31,6 +31,19 @@ struct IntervalsICUActivitiesSection: View {
     @State private var debriefFailed: Set<Int> = []
     @State private var debriefLoading: Set<Int> = []
 
+    /// Cap the number of activities shown — the Today embedding passes a small number so it doesn't
+    /// dump a full season of rides onto the home screen; nil (the "See all" destination) shows every
+    /// activity. When capped and more exist, a trailing link opens the full, uncapped list.
+    var limit: Int? = nil
+
+    private var sortedActivities: [WorkoutRow] {
+        activities.sorted(by: { $0.startTs > $1.startTs })
+    }
+    private var visibleActivities: [WorkoutRow] {
+        guard let limit else { return sortedActivities }
+        return Array(sortedActivities.prefix(limit))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Activités intervals.icu", overline: "intervals.icu")
@@ -44,8 +57,26 @@ struct IntervalsICUActivitiesSection: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                ForEach(activities.sorted(by: { $0.startTs > $1.startTs }), id: \.startTs) { activity in
+                ForEach(visibleActivities, id: \.startTs) { activity in
                     activityCard(activity)
+                }
+                if let limit, sortedActivities.count > limit {
+                    NavigationLink {
+                        IntervalsICUActivitiesScreen()
+                    } label: {
+                        StrandCard(padding: 16) {
+                            HStack {
+                                Text("Voir toutes mes activités (\(sortedActivities.count))")
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.accent)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -204,6 +235,19 @@ struct IntervalsICUActivitiesSection: View {
         else { return nil }
         cachedStore = opened
         return opened
+    }
+}
+
+/// The full, uncapped activity list — reached via the Today section's "See all" link when there are
+/// more activities than its cap shows. Fork addition.
+struct IntervalsICUActivitiesScreen: View {
+    var body: some View {
+        ScreenScaffold(
+            title: "Activités intervals.icu",
+            subtitle: "Toutes vos séances importées depuis intervals.icu."
+        ) {
+            IntervalsICUActivitiesSection()
+        }
     }
 }
 #endif

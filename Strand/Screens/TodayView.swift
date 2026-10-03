@@ -2537,7 +2537,7 @@ struct TodayView: View {
     @ViewBuilder
     private var intervalsActivitiesSection: some View {
         #if os(iOS)
-        IntervalsICUActivitiesSection()
+        IntervalsICUActivitiesSection(limit: 2)
         #else
         EmptyView()
         #endif
