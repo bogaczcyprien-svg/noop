@@ -33,13 +33,22 @@
         }
       },
       "version": "11.8.0",
-      "buildVersion": "412",
+      "buildVersion": "413",
       "versionDate": "2026-10-03",
-      "versionDescription": "Fork build: Auto-detect workouts is now fully automatic (saves straight to Workouts, no confirmation card, no settings toggle); detection thresholds loosened (8-min sustained, 180s dip tolerance); opt-in overload alert; AI debrief per intervals.icu activity using your Coach API key; Effort ring recovery-based target band.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork4/NOOP-v11.8.0-fork4-ios.ipa",
-      "size": 21818595,
+      "versionDescription": "Fork build: reverted the HR-based auto-save-without-confirmation (it created false-positive workouts); intervals.icu-imported activities now appear in the main Workouts list; the intervals.icu activities + AI-debrief list moved from More onto Today, right below Your Cards.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork5/NOOP-v11.8.0-fork5-ios.ipa",
+      "size": 21818113,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "11.8.0",
+          "buildVersion": "413",
+          "date": "2026-10-03",
+          "localizedDescription": "Fork build: reverted the HR-based auto-save-without-confirmation (it created false-positive workouts); intervals.icu-imported activities now appear in the main Workouts list; the intervals.icu activities + AI-debrief list moved from More onto Today, right below Your Cards.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork5/NOOP-v11.8.0-fork5-ios.ipa",
+          "size": 21818113,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "11.8.0",
           "buildVersion": "412",
