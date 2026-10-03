@@ -367,14 +367,10 @@ struct LiquidTodayView: View {
                         case .addedCards: if selectedDayOffset == 0 { hostedCardsSection }
                         }
                     }
-                    // Opt-in "looks like a workout?" suggestion, dropped in the liquid Home rewrite. Its
-                    // Settings toggle (PuffinExperiment.autoDetectWorkoutsKey) had no visible effect on the
-                    // DEFAULT screen: the card's only mount was classic TodayView, so a user could switch
-                    // auto-detect on and never be shown a single suggestion. Same position classic uses
-                    // (after the cards block, before Data Sources) and the same leaf Android renders.
-                    // Self-gates on the toggle AND on the detector finding an unsaved, un-dismissed window,
-                    // so it renders nothing by default.
-                    AutoWorkoutCard()
+                    // Fork: no more "looks like a workout?" card to confirm. Auto-detect (same
+                    // PuffinExperiment.autoDetectWorkoutsEnabled toggle) now saves a detected window
+                    // straight away in the background (AppModel.evaluateAutoWorkoutSave) — see
+                    // AutoWorkoutDetector.swift's header for why.
                     dataSourcesSection
                     Color.clear.frame(height: 90) // floating tab-bar clearance
                 }

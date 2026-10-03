@@ -1510,9 +1510,9 @@ struct TodayView: View {
                 ForEach(sectionOrder) { section in
                     todaySection(section)
                 }
-                // Opt-in "looks like a workout?" suggestion (default OFF). Renders only when the
-                // Settings toggle is on AND the detector finds a recent unsaved, un-dismissed window.
-                AutoWorkoutCard()
+                // Fork: no more "looks like a workout?" card to confirm. Auto-detect (same
+                // PuffinExperiment.autoDetectWorkoutsEnabled toggle) now saves a detected window
+                // straight away in the background (AppModel.evaluateAutoWorkoutSave).
                 sourcesSection
             }
             #if os(iOS)
