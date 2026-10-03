@@ -6,16 +6,20 @@ import WhoopStore
 import WhoopProtocol
 import StrandAnalytics
 
-/// A dedicated list of every activity imported from intervals.icu — separate from the general
-/// Workouts screen (which mixes every source together), so rides/sessions synced from intervals.icu
-/// are easy to review on their own with their full detail. Fork addition; read-only, reuses the
-/// already-imported `WorkoutRow` rows (`deviceId == "intervals-icu"`), no new storage.
+/// A list of every activity imported from intervals.icu — separate from the general Workouts list
+/// (which mixes every source together), so rides/sessions synced from intervals.icu are easy to
+/// review with their full detail. Fork addition; read-only, reuses the already-imported `WorkoutRow`
+/// rows (`deviceId == "intervals-icu"`), no new storage.
+///
+/// Embedded directly on Today (below "Your Cards") rather than tucked under More — the user wants it
+/// immediately visible, not a tap away. Plain content, no `ScreenScaffold`: the caller (Today's
+/// reorderable section list) owns the page chrome.
 ///
 /// Also offers a per-activity AI debrief (`AICoachEngine.headlessAnswer`, the SAME bring-your-own-key
 /// Coach the rest of the app uses — no second key/consent surface): a short text breakdown of the
 /// aerobic/anaerobic contribution, built from a Karvonen %HRR time split over the real per-sample HR
 /// `IntervalsICUImporter` backfilled for this activity (see `WorkoutDebrief`).
-struct IntervalsICUActivitiesView: View {
+struct IntervalsICUActivitiesSection: View {
     @EnvironmentObject var coach: AICoachEngine
     @EnvironmentObject var profile: ProfileStore
     @State private var activities: [WorkoutRow] = []
@@ -28,10 +32,8 @@ struct IntervalsICUActivitiesView: View {
     @State private var debriefLoading: Set<Int> = []
 
     var body: some View {
-        ScreenScaffold(
-            title: "Activités intervals.icu",
-            subtitle: "Toutes vos séances importées depuis intervals.icu."
-        ) {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Activités intervals.icu", overline: "intervals.icu")
             if activities.isEmpty {
                 StrandCard(padding: 20) {
                     Text(loaded

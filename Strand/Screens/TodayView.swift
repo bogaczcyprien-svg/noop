@@ -1999,6 +1999,8 @@ struct TodayView: View {
             recoveryVitalsSection
         case .yourCards:
             yourCardsSection
+        case .intervalsActivities:
+            if selectedDayOffset == 0 { intervalsActivitiesSection }
         case .menstrualCycle:
             if selectedDayOffset == 0 { MenstrualCycleHomeCard() }
         case .journal:
@@ -2527,6 +2529,18 @@ struct TodayView: View {
                 }
             }
         }
+    }
+
+    /// Fork: the intervals.icu activities + AI debrief list, embedded directly on Today (right after
+    /// Your Cards) instead of under More. iOS-only (the feature lives under `StrandiOS/IntervalsICU`);
+    /// renders nothing on macOS.
+    @ViewBuilder
+    private var intervalsActivitiesSection: some View {
+        #if os(iOS)
+        IntervalsICUActivitiesSection()
+        #else
+        EmptyView()
+        #endif
     }
 
     /// #today-hosted-cards: the Trends/Sleep cards the user hosted in Today, in arranged order. Each is the

@@ -354,6 +354,8 @@ struct LiquidTodayView: View {
                         case .heartRate: heartRateSection
                         case .recoveryVitals: recoveryVitalsSection
                         case .yourCards: yourCardsSection
+                        case .intervalsActivities:
+                            if selectedDayOffset == 0 { intervalsActivitiesSection }
                         case .menstrualCycle:
                             if selectedDayOffset == 0 { MenstrualCycleHomeCard() }
                         // #656: the persistent journal widget (last-7-days strip + tap-through). Now a
@@ -782,6 +784,18 @@ struct LiquidTodayView: View {
                 }
             }
         }
+    }
+
+    /// Fork: the intervals.icu activities + AI debrief list, embedded directly on Today (right after
+    /// Your Cards) instead of under More — the user wants it immediately visible. iOS-only (the
+    /// feature lives under `StrandiOS/IntervalsICU`); renders nothing on macOS.
+    @ViewBuilder
+    private var intervalsActivitiesSection: some View {
+        #if os(iOS)
+        IntervalsICUActivitiesSection()
+        #else
+        EmptyView()
+        #endif
     }
 
     /// Dispatch a hosted card id to its native view. Each case renders the exact view the originating tab
