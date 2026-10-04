@@ -1655,14 +1655,37 @@ public enum SleepStager {
     /// sustained TRUE run (onset); the backward scan finds the rightmost sustained FALSE run and reports
     /// the epoch just before it starts (final wake) — the simple last-true-epoch is the fallback when no
     /// such sustained wake tail exists (e.g. the window is cropped mid-sleep with little trailing data).
-    static func onsetAndFinalWake(_ ckFlags: [Bool]) -> (Int, Int) {
+    /// Fork addition: `hr` (optional, per-epoch mean bpm aligned 1:1 with `ckFlags`, NaN where no
+    /// data) corroborates the ONSET run only. Motion-only Cole-Kripke cannot tell "lying still
+    /// awake" from "asleep" — that is an intrinsic limit of actigraphy. This window is already a
+    /// session `confirmSleepWithHR` accepted, so its own median HR stands in for the window's
+    /// sleep-level baseline (same `hrSleepBaselineMult` band that session-level gate uses, applied
+    /// per-epoch here): a still epoch only counts toward the onset run once HR has ALSO settled to
+    /// at/below that band, not merely once the wrist stopped moving. A short pre-sleep awake-in-bed
+    /// stretch is a small fraction of a real night, so the median stays at the true sleep level (the
+    /// same right-skew argument `confirmSleepWithHR`'s doc comment makes). Epochs with no HR, or a
+    /// window with too little HR data to trust a baseline (`hrRefineMinSamples`), pass through
+    /// unchanged — this can only ever make onset detection MORE conservative, never less, versus the
+    /// motion-only behaviour every existing caller already relies on. Final wake is untouched
+    /// (unreported, narrower scope is safer for the core stager).
+    static func onsetAndFinalWake(_ ckFlags: [Bool], hr: [Double] = []) -> (Int, Int) {
         let n = ckFlags.count
         if n == 0 { return (0, 0) }
 
+        let validHR = hr.count == n ? hr.filter { !$0.isNaN } : []
+        let onsetHRBaseline: Double? = validHR.count >= hrRefineMinSamples
+            ? HRVAnalyzer.median(validHR) : nil
+
+        func onsetEligible(_ i: Int) -> Bool {
+            guard ckFlags[i] else { return false }
+            guard let onsetHRBaseline, i < hr.count, !hr[i].isNaN else { return true }
+            return hr[i] <= onsetHRBaseline * hrSleepBaselineMult
+        }
+
         var onset: Int? = nil
         var run = 0
-        for (i, s) in ckFlags.enumerated() {
-            run = s ? run + 1 : 0
+        for i in 0..<n {
+            run = onsetEligible(i) ? run + 1 : 0
             if run >= onsetPersistEpochs { onset = i - onsetPersistEpochs + 1; break }
         }
 
@@ -1739,7 +1762,7 @@ public enum SleepStager {
 
         let rescaled = rescaleCounts(grid.counts)
         let ckFlags = coleKripke(rescaled)
-        let (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags)
+        let (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags, hr: grid.hr)
 
         let dogHR = dogHRVariability(grid.hr)
         let feats = extractFeatures(grid: grid, ckFlags: ckFlags, dogHR: dogHR,
@@ -2705,7 +2728,7 @@ public enum SleepStager {
 
         let rescaled = rescaleCounts(grid.counts)
         let ckFlags = coleKripke(rescaled)
-        let (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags)
+        let (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags, hr: grid.hr)
         let dogHR = dogHRVariability(grid.hr)
         let feats = extractFeatures(grid: grid, ckFlags: ckFlags, dogHR: dogHR,
                                     onsetIdx: onsetIdx, finalWakeIdx: finalWakeIdx)
