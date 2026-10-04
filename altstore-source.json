@@ -33,13 +33,22 @@
         }
       },
       "version": "11.8.0",
-      "buildVersion": "413",
-      "versionDate": "2026-10-03",
-      "versionDescription": "Fork build: reverted the HR-based auto-save-without-confirmation (it created false-positive workouts); intervals.icu-imported activities now appear in the main Workouts list; the intervals.icu activities + AI-debrief list moved from More onto Today, right below Your Cards.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork5/NOOP-v11.8.0-fork5-ios.ipa",
-      "size": 21818113,
+      "buildVersion": "414",
+      "versionDate": "2026-10-04",
+      "versionDescription": "Fork build: sleep onset now requires HR to also settle toward its sleep-level baseline, not just stillness; Coach (AI) now always replies in French; intervals.icu Activities on Today capped to the 2 most recent with a See all link.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork6/NOOP-v11.8.0-fork6-ios.ipa",
+      "size": 21823472,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "11.8.0",
+          "buildVersion": "414",
+          "date": "2026-10-04",
+          "localizedDescription": "Fork build: sleep onset now requires HR to also settle toward its sleep-level baseline, not just stillness; Coach (AI) now always replies in French; intervals.icu Activities on Today capped to the 2 most recent with a See all link.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork6/NOOP-v11.8.0-fork6-ios.ipa",
+          "size": 21823472,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "11.8.0",
           "buildVersion": "413",
