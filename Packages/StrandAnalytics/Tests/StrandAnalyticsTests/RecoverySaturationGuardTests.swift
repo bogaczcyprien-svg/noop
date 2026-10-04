@@ -175,12 +175,14 @@ final class RecoverySaturationGuardTests: XCTestCase {
         XCTAssertTrue(satLine!.contains("wouldEaseHrvZTo="), "must report the would-be eased z")
         XCTAssertTrue(satLine!.contains("not applied"), "must state the easing was not applied")
 
-        // The reported would-be lift must be real and positive (this fixture: ~18 points).
+        // The reported would-be lift must be real and positive (this fixture: ~22 points at this
+        // fork's logisticK=2.0; was ~18 points at the upstream k=1.6 — re-widened, not re-pinned,
+        // since this is a sanity range, not an exact oracle).
         let delta = Double(satLine!.split(separator: " ")
             .first { $0.hasPrefix("wouldRaiseCharge=") }!
             .dropFirst("wouldRaiseCharge=".count))!
         XCTAssertGreaterThan(delta, 15.0)
-        XCTAssertLessThan(delta, 21.0)
+        XCTAssertLessThan(delta, 23.0)
 
         // ...and the HRV TERM in the trace is the RAW z, matching what was actually scored.
         let hrvZRaw = RecoveryScorer.zScore(41, mean: hrvB.baseline, spread: hrvB.spread)

@@ -205,7 +205,10 @@ final class RecoveryScorerTraceTests: XCTestCase {
             "charge term skinTempDev z=-0.0 w=0.05 (dev=0.0C penalty=-|dev|/1.0)",
             "charge nilTerm dropped=[] (each dropped term renormalizes the remaining weights)",
             "charge renorm totalWeight=1.0 compositeZ=1.45 (z = sum(z*w)/sum(w))",
-            "charge score=93.38 band=green (logistic k=1.6 z0=-0.2)",
+            // Fork: re-pinned for logisticK=2.0 (was "score=93.38... k=1.6" at the upstream value);
+            // this fork does not carry the change to the Android twin, so "byte-identical across
+            // platforms" no longer holds for this fixture on that side.
+            "charge score=96.47 band=green (logistic k=2.0 z0=-0.2)",
         ])
     }
 }

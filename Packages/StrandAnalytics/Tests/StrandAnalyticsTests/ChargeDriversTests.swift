@@ -15,37 +15,62 @@ final class ChargeDriversTests: XCTestCase {
 
     // MARK: - Integer marginal rounding parity (#51)
 
-    func testDriverPointRoundingUsesNearestWithHalfTiesAwayFromZero() {
-        func hrvMarginal(hrv: Double, rhr: Double, hrvBaseline: BaselineState,
-                         rhrBaseline: BaselineState? = nil) -> (raw: Double, points: Int) {
-            let full = RecoveryScorer.recovery(
-                hrv: hrv, rhr: rhr, resp: nil,
-                hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                respBaseline: nil, sleepPerf: nil)!
-            let neutral = RecoveryScorer.recovery(
-                hrv: hrvBaseline.baseline, rhr: rhr, resp: nil,
-                hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                respBaseline: nil, sleepPerf: nil)!
-            let row = RecoveryScorer.chargeDrivers(
-                hrv: hrv, rhr: rhr, resp: nil,
-                hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                respBaseline: nil, sleepPerf: nil)
-                .first { $0.label == "Heart rate variability" }!
-            return (full - neutral, row.deltaPoints)
-        }
+    private func hrvMarginal(hrv: Double, rhr: Double, hrvBaseline: BaselineState,
+                             rhrBaseline: BaselineState? = nil) -> (raw: Double, points: Int) {
+        let full = RecoveryScorer.recovery(
+            hrv: hrv, rhr: rhr, resp: nil,
+            hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
+            respBaseline: nil, sleepPerf: nil)!
+        let neutral = RecoveryScorer.recovery(
+            hrv: hrvBaseline.baseline, rhr: rhr, resp: nil,
+            hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
+            respBaseline: nil, sleepPerf: nil)!
+        let row = RecoveryScorer.chargeDrivers(
+            hrv: hrv, rhr: rhr, resp: nil,
+            hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
+            respBaseline: nil, sleepPerf: nil)
+            .first { $0.label == "Heart rate variability" }!
+        return (full - neutral, row.deltaPoints)
+    }
 
+    /// Bisect `hrv` over `[lo, hi]` for the value at which `hrvMarginal(...).raw` crosses `target`,
+    /// to full double precision (lo/hi converge to adjacent doubles). Self-calibrating against
+    /// whatever RecoveryScorer tuning is compiled in (fork follow-up to #51): the ORIGINAL version
+    /// of this test hardcoded magic `hrv` literals that happened to hit an exact ±0.5 tie under the
+    /// upstream logisticK=1.6 — literals that silently stopped meaning "exact tie" the moment this
+    /// fork retuned logisticK to 2.0, which is exactly what broke this test. Bisecting at test time
+    /// means it keeps testing the real boundary under whatever formula is actually running, instead
+    /// of a fossilized number from whenever it was last hand-derived. `raw` must be monotonic in
+    /// hrv over `[lo, hi]` for bisection to converge, which holds for a single marginal HRV term.
+    private func bisectTie(target: Double, lo: Double, hi: Double,
+                           rawAt: (Double) -> Double) -> Double {
+        var lo = lo, hi = hi
+        let increasing = rawAt(hi) > rawAt(lo)
+        for _ in 0..<100 {
+            let mid = lo + (hi - lo) / 2
+            if mid == lo || mid == hi { break }   // adjacent doubles: precision exhausted
+            let r = rawAt(mid)
+            if increasing ? (r < target) : (r > target) { lo = mid } else { hi = mid }
+        }
+        return lo + (hi - lo) / 2
+    }
+
+    func testDriverPointRoundingUsesNearestWithHalfTiesAwayFromZero() {
         let negativeBaseline = BaselineState(
             baseline: 30.0, spread: 0.55, nValid: 14,
             nightsSinceUpdate: 0, status: .trusted)
+        let negativeTieHRV = bisectTie(target: -0.5, lo: 29.0, hi: 30.0) {
+            hrvMarginal(hrv: $0, rhr: 60.0, hrvBaseline: negativeBaseline).raw
+        }
         let negativeBelowTie = hrvMarginal(
-            hrv: 29.991177275907276, rhr: 60.0, hrvBaseline: negativeBaseline)
+            hrv: negativeTieHRV.nextUp, rhr: 60.0, hrvBaseline: negativeBaseline)
         let negativeTie = hrvMarginal(
-            hrv: 29.99117725828923, rhr: 60.0, hrvBaseline: negativeBaseline)
+            hrv: negativeTieHRV, rhr: 60.0, hrvBaseline: negativeBaseline)
         let negativeBeyondTie = hrvMarginal(
-            hrv: 29.991177240671185, rhr: 60.0, hrvBaseline: negativeBaseline)
+            hrv: negativeTieHRV.nextDown, rhr: 60.0, hrvBaseline: negativeBaseline)
         XCTAssertGreaterThan(negativeBelowTie.raw, -0.5)
         XCTAssertEqual(negativeBelowTie.points, 0)
-        XCTAssertEqual(negativeTie.raw, -0.5)
+        XCTAssertEqual(negativeTie.raw, -0.5, accuracy: 1e-9)
         XCTAssertEqual(negativeTie.points, -1)
         XCTAssertLessThan(negativeBeyondTie.raw, -0.5)
         XCTAssertEqual(negativeBeyondTie.points, -1)
@@ -56,18 +81,22 @@ final class ChargeDriversTests: XCTestCase {
         let positiveRHRBaseline = BaselineState(
             baseline: 60.0, spread: 0.1, nValid: 14,
             nightsSinceUpdate: 0, status: .trusted)
+        let positiveTieHRV = bisectTie(target: 0.5, lo: 30.0, hi: 36.0) {
+            hrvMarginal(hrv: $0, rhr: 58.541, hrvBaseline: positiveHRVBaseline,
+                       rhrBaseline: positiveRHRBaseline).raw
+        }
         let positiveBelowTie = hrvMarginal(
-            hrv: 33.09890762408082, rhr: 58.541,
+            hrv: positiveTieHRV.nextDown, rhr: 58.541,
             hrvBaseline: positiveHRVBaseline, rhrBaseline: positiveRHRBaseline)
         let positiveTie = hrvMarginal(
-            hrv: 33.099135135290354, rhr: 58.541,
+            hrv: positiveTieHRV, rhr: 58.541,
             hrvBaseline: positiveHRVBaseline, rhrBaseline: positiveRHRBaseline)
         let positiveBeyondTie = hrvMarginal(
-            hrv: 33.09936273466694, rhr: 58.541,
+            hrv: positiveTieHRV.nextUp, rhr: 58.541,
             hrvBaseline: positiveHRVBaseline, rhrBaseline: positiveRHRBaseline)
         XCTAssertLessThan(positiveBelowTie.raw, 0.5)
         XCTAssertEqual(positiveBelowTie.points, 0)
-        XCTAssertEqual(positiveTie.raw, 0.5)
+        XCTAssertEqual(positiveTie.raw, 0.5, accuracy: 1e-9)
         XCTAssertEqual(positiveTie.points, 1)
         XCTAssertGreaterThan(positiveBeyondTie.raw, 0.5)
         XCTAssertEqual(positiveBeyondTie.points, 1)
@@ -77,8 +106,11 @@ final class ChargeDriversTests: XCTestCase {
         let hrvBaseline = BaselineState(
             baseline: 30.0, spread: 0.55, nValid: 14,
             nightsSinceUpdate: 0, status: .trusted)
+        let tieHRV = bisectTie(target: -0.5, lo: 29.0, hi: 30.0) {
+            hrvMarginal(hrv: $0, rhr: 60.0, hrvBaseline: hrvBaseline).raw
+        }
         let scoreBefore = RecoveryScorer.recovery(
-            hrv: 29.99117725828923, rhr: 60.0, resp: nil,
+            hrv: tieHRV, rhr: 60.0, resp: nil,
             hrvBaseline: hrvBaseline, rhrBaseline: nil,
             respBaseline: nil, sleepPerf: nil)
         let neutralScore = RecoveryScorer.recovery(
@@ -88,15 +120,15 @@ final class ChargeDriversTests: XCTestCase {
 
         // Intentionally omit arg 8 (skinTempDev) to exercise the real default path from #51.
         let drivers = RecoveryScorer.chargeDrivers(
-            hrv: 29.99117725828923, rhr: 60.0, resp: nil,
+            hrv: tieHRV, rhr: 60.0, resp: nil,
             hrvBaseline: hrvBaseline, rhrBaseline: nil,
             respBaseline: nil, sleepPerf: nil)
         let scoreAfter = RecoveryScorer.recovery(
-            hrv: 29.99117725828923, rhr: 60.0, resp: nil,
+            hrv: tieHRV, rhr: 60.0, resp: nil,
             hrvBaseline: hrvBaseline, rhrBaseline: nil,
             respBaseline: nil, sleepPerf: nil)
 
-        XCTAssertEqual(scoreBefore! - neutralScore!, -0.5)
+        XCTAssertEqual(scoreBefore! - neutralScore!, -0.5, accuracy: 1e-9)
         XCTAssertEqual(scoreAfter, scoreBefore)
         XCTAssertEqual(drivers, [ChargeDriver(
             label: "Heart rate variability",
