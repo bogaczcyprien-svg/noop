@@ -168,8 +168,11 @@ data class RrInterval(
     val synced: Int = 0,
     val ord: Int? = null,
     val srcChannel: Int? = null,
-    /** #1073 (Room v29): 1 when this beat's ts is in the FUTURE (corrupt ring time); NULL otherwise.
-     *  Marked, never deleted; `WhoopDao.rrIntervals` filters it at READ. Twin of GRDB `tsSuspect`. */
+    /** 1 when this beat is NOT to be scored; NULL otherwise. Two causes carry the same mark, because
+     *  every scoring read wants both gone and they all test `<> 1`: the beat's ts is in the FUTURE
+     *  (corrupt ring time, #1073 / Room v29), or it is a WHOOP 5/MG 500 ms fill beat (#2371 / Room v41).
+     *  The mark therefore says "excluded", never WHICH cause, so a diagnostic reading it must not claim
+     *  one. Marked, never deleted; `WhoopDao.rrIntervals` filters it at READ. Twin of GRDB `tsSuspect`. */
     val tsSuspect: Int? = null,
 )
 
@@ -410,29 +413,6 @@ data class SleepSession(
     /** The bed (onset) time to DISPLAY / sort / re-stage by: the user's hand-set onset when edited,
      *  else the immutable detected [startTs]. Mirrors Swift `CachedSleepSession.effectiveStartTs`. */
     val effectiveStartTs: Long get() = startTsAdjusted ?: startTs
-
-    /** Whole-block duration in hours (effective onset → wake). */
-    val durationHours: Double get() = (endTs - effectiveStartTs) / 3600.0
-
-    /**
-     * DERIVED nap classification (#518), computed at READ time, NO schema column / migration. A block
-     * is a nap when it is SHORT (< [NAP_MAX_HOURS]) or DAYTIME-onset (onset not in the overnight window).
-     * The day's MAIN sleep is resolved separately (the longest, overnight-preferring block, see
-     * SleepScreen.mainSleepBlock); this flag only describes the block's own shape, so the UI can label /
-     * count naps consistently with iOS SleepView.isNap. A long overnight split-sleep block is NOT a nap.
-     */
-    val isNapShaped: Boolean
-        get() {
-            val cal = java.util.Calendar.getInstance().apply { timeInMillis = effectiveStartTs * 1000L }
-            val h = cal.get(java.util.Calendar.HOUR_OF_DAY)
-            val overnightOnset = h >= 20 || h < 10
-            return durationHours < NAP_MAX_HOURS || !overnightOnset
-        }
-
-    companion object {
-        /** A block shorter than this is nap-shaped regardless of onset. Mirrors iOS SleepView.napMaxHours. */
-        const val NAP_MAX_HOURS: Double = 3.0
-    }
 }
 
 /**

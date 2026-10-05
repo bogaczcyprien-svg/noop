@@ -682,6 +682,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     SleepScreen(
                         vm = viewModel,
                         onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        onOpenAlarms = { nav.navigate(Destination.SmartAlarm.route) },
                     )
                 }
                 composable(Destination.CoupledView.route) {
@@ -752,10 +753,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.InsightsHub.route) { InsightsHubScreen(viewModel) }
                 composable(Destination.LabBook.route) { LabBookScreen(viewModel) }
                 composable(Destination.Rhythm.route) {
-                    // EXPERIMENTAL: self-gates on its own consent clickwrap (default OFF). The night
-                    // summary + per-window Poincaré results land with the rhythm capture pipeline; until
-                    // then it renders its honest "no clear reading yet" empty state behind the gate.
-                    RhythmScreen(night = null, windows = emptyList())
+                    RhythmRoute(viewModel)
                 }
                 composable(Destination.FusedRecord.route) { FusedRecordRoute(viewModel) }
                 composable(Destination.AppleHealth.route) { AppleHealthScreen(viewModel) }

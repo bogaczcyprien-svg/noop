@@ -207,7 +207,7 @@ struct RootTabView: View {
             case .devices:
                 showDevices = true
                 router.requestedDestination = nil
-            case .insightsHub, .labBook, .fusedRecord, .rhythm:
+            case .insightsHub, .labBook, .fusedRecord, .rhythm, .alarms:
                 routedPillar = dest
                 router.requestedDestination = nil
             case .coach:
@@ -281,14 +281,11 @@ struct RootTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: liftSession.isActive)
+        // A session left running by a previous launch is back before this view exists
+        // (`LiftSessionController.resumeSaved`, from `StrandiOSApp.init`), as the BAR — not as a sheet
+        // thrown in the user's face; they open it when they want it.
         .sheet(isPresented: $liftSession.isPresented) {
             LiftSessionView { }
-        }
-        // A session left running by a previous launch comes back as the BAR, not as a sheet thrown
-        // in the user's face — they open it when they want it.
-        .task {
-            guard !liftSession.isActive, let snapshot = LiftSessionPersistence.load() else { return }
-            liftSession.resume(from: snapshot)
         }
     }
 
@@ -342,6 +339,7 @@ struct RootTabView: View {
                 // `AICoachEngine.pendingPrompt`); this keeps the switch exhaustive and falls back to Coach if
                 // it ever reaches the host.
                 case .coach: CoachView()
+                case .alarms: SmartAlarmView()
                 }
             }
             // The Trends/Today fallbacks above emit TabRoute value pushes (#198), which need a

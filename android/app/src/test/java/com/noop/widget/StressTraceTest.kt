@@ -280,6 +280,24 @@ class StressTraceTest {
         assertEquals("0.0", StressTrace.formatLevel(0.04))
     }
 
+    /** The exact binary quarters, matching the Swift pin — each side guards its own direction (#2167). */
+    @Test
+    fun `a level rounds half away from zero like iOS`() {
+        assertEquals("0.3", StressTrace.formatLevel(0.25))
+        assertEquals("1.3", StressTrace.formatLevel(1.25))
+        assertEquals("2.3", StressTrace.formatLevel(2.25))
+    }
+
+    /** The LF/HF ratio shares the level's tenths arithmetic without its ceiling. */
+    @Test
+    fun `the lf hf ratio shares the level arithmetic without its ceiling`() {
+        assertEquals("2.3", StressTrace.formatRatio(9.0 / 4.0))
+        assertEquals("0.3", StressTrace.formatRatio(0.25))
+        assertEquals("1.8", StressTrace.formatRatio(1.75))
+        assertEquals("4.3", StressTrace.formatRatio(4.25))
+        assertEquals("0.0", StressTrace.formatRatio(-0.3))
+    }
+
     // #2166: the snapshot used to round to two decimals, so the widget rounded twice where the card
     // rounded once and the two printed different tenths on 5% of levels.
 

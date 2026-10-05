@@ -33,6 +33,14 @@ final class AppModel: ObservableObject {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
 
+    /// One of our own strap-log lines, stamped like the lines around it. NOOP's log takes each line's time from
+    /// whoever writes it, and the Lift Log's lines arrived without one: all 98 of them in Utku's 22 Sep session,
+    /// so the moment a tap or a step happened had to be inferred from the neighbouring lines. A diagnostic says
+    /// when it happened.
+    static func stamped(_ line: String) -> String {
+        "[\(logTimeFormatter.string(from: Date()))] \(line)"
+    }
+
     /// The CANONICAL imported/computed id ("my-whoop"). The WHOOP-IMPORT target (`WhoopImporter`), the
     /// FusionSource `.whoopImport` mapping, and a manually-saved workout all land under THIS stable id, and
     /// the engine writes its computed scores under the matching `-noop` sibling. It must NOT follow the
@@ -119,6 +127,31 @@ final class AppModel: ObservableObject {
 
         var isPaused: Bool { pausedAt != nil }
 
+        /// Adds a heart-rate sample unless this second already has one, and says whether it did.
+        ///
+        /// `captureWorkoutSample` runs from two `@Published` sinks (`heartRate` and `rr`), so a strap sends
+        /// it one call per R-R packet plus another whenever the rate itself moves, which during exercise is
+        /// most seconds: two samples with one `ts`. Effort credits each sample with the gap to the next and a
+        /// zero gap with a full second (`StrainScorer.sampleDurationsMinutes`), so every repeat counted as
+        /// another second of effort, live and in the saved workout. The stream is one reading a second.
+        ///
+        /// A refused reading still reaches `peakHr`: the sinks fire because the rate moved, so a repeat is often a
+        /// different bpm for that second, and a within-second high is part of the workout's peak. Only the last
+        /// sample is compared, so this drops a repeat of the current second, not an out-of-order arrival; the live
+        /// stream is monotonic.
+        mutating func recordSample(_ sample: HRSample) -> Bool {
+            if let last = samples.last, last.ts == sample.ts {
+                peakHr = max(peakHr, sample.bpm)
+                return false
+            }
+            samples.append(sample)
+            return true
+        }
+
+        /// The maximum heart rate the workout is saved with: the highest sample, or a higher reading a repeated
+        /// second folded into `peakHr` (`recordSample`). Nil with no samples.
+        var savedPeak: Int? { samples.map(\.bpm).max().map { max($0, peakHr) } }
+
         /// Delegates to `ActiveWorkoutClock` so this and the two card surfaces cannot drift apart again.
         func elapsed(at now: Date = Date()) -> TimeInterval {
             ActiveWorkoutClock.activeElapsed(start: start, pausedAt: pausedAt,
@@ -161,6 +194,8 @@ final class AppModel: ObservableObject {
     // L3 stress-onset detector state: a rolling R-R buffer + the replay-safe detector state (persisted
     // via BiofeedbackPrefs so a relaunch can't re-fire), carried verbatim between evaluations.
     private var rrBuf: [Int] = []
+    /// Which live R-R packet `rrBuf` last took, so each packet enters it once (`RRPacketCursor`).
+    private var stressPackets = RRPacketCursor()
     private var stressState = BiofeedbackPrefs.loadStressState()
 
     /// Import source currently writing to the local store, if any.
@@ -247,8 +282,17 @@ final class AppModel: ObservableObject {
             }
         }.store(in: &hrCancellables)
         // Smooth HR centrally so it's solid everywhere it's shown.
-        live.$heartRate.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
-        live.$rr.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
+        // A `@Published` sink runs in willSet, before the value lands, so each hands `ingestHR` the value being
+        // written and reads the other from `live`, where it is current. Reading both from `live` meant clearing the
+        // heart rate (a disconnect, the strap off the wrist) found the old values still there and kept the median.
+        live.$heartRate.sink { [weak self] hr in
+            guard let self else { return }
+            self.ingestHR(heartRate: hr, rr: self.live.rr)
+        }.store(in: &hrCancellables)
+        live.$rr.sink { [weak self] rr in
+            guard let self else { return }
+            self.ingestHR(heartRate: self.live.heartRate, rr: rr)
+        }.store(in: &hrCancellables)
 
         // #2117: bank the device's R-R transport facts whenever a link comes up. Shell-independent on
         // purpose: the classic Today already reads these three for its own note, but the Liquid shell is
@@ -452,8 +496,8 @@ final class AppModel: ObservableObject {
             // flag → no-op on every subsequent launch; idempotent on a clean DB.
             await self.intelligence.runTimestampHealIfNeeded()
             // One-shot on-upgrade Effort rescore (#313): recompute strain from source across the FULL
-            // history once, so any deep-history rows an older build left on the 0–21 axis regenerate on
-            // the 0–100 axis. Guarded by a persisted flag, so this is a no-op on every subsequent launch.
+            // history and repair sleep rejected by unmatched WRIST_OFF in one pass. Both persisted flags
+            // describe that shared pass; either pending flag triggers it.
             await self.intelligence.runEffortRescoreIfNeeded()
             while !Task.isCancelled {
                 // #547 RE-POLLUTION: a sync since the last tick may have armed a re-heal (its ingest gate
@@ -603,7 +647,8 @@ final class AppModel: ObservableObject {
             // path. Timestamp matches BLEManager.log()'s "HH:mm:ss" so the lines read consistently.
             straplog: { [weak self] line in
                 self?.live.append(log: "[\(AppModel.logTimeFormatter.string(from: Date()))] \(line)")
-            })
+            },
+            ouraNightBand: { [weak self] in self?.ouraNightBand() })   // item 27
         coordinator.start()
         self.deviceRegistry = registry
         // #1303: adoption re-points the strap onto its stable `whoop-<serial>` id inside BLEManager (which
@@ -677,6 +722,7 @@ final class AppModel: ObservableObject {
     /// so that it cannot mark unscored data as scored — so gating on the fingerprint here would be asking
     /// a question whose answer is already known to be "yes, there is work".
     func runDeferredRescoreIfOwed() async {
+        await intelligence.runSleepWearRescoreIfNeeded()
         // A pass already running here holds the owed mark itself and settles it when it finishes; forcing
         // another would only queue a second full pass behind it.
         guard RescoreBackgroundScheduler.isRescoreOwed, !intelligence.computing else { return }
@@ -750,11 +796,11 @@ final class AppModel: ObservableObject {
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
     /// Prefers the strap's reported HR; falls back to 60000/R-R. Clamps to a plausible
     /// 30–220 range (rejects 0 / garbage spikes) and publishes the window MEDIAN.
-    private func ingestHR() {
+    private func ingestHR(heartRate: Int?, rr: [Int]) {
         var inst: Double?
-        if let hr = live.heartRate, hr >= 30, hr <= 220 {
+        if let hr = heartRate, hr >= 30, hr <= 220 {
             inst = Double(hr)
-        } else if let rr = live.rr.last, rr > 0 {
+        } else if let rr = rr.last, rr > 0 {
             let v = 60_000.0 / Double(rr)
             if v >= 30, v <= 220 { inst = v }
         }
@@ -763,7 +809,7 @@ final class AppModel: ObservableObject {
             // median so screens that now prefer `bpm` fall through to "," instead of freezing on the
             // last value. Mirrors Android (_bpm = null on disconnect). A transient out-of-range sample
             // with the link still up (heartRate or rr still present) keeps the last median.
-            if live.heartRate == nil && live.rr.isEmpty { resetSmoothing() }
+            if heartRate == nil && rr.isEmpty { resetSmoothing() }
             return
         }
         let now = Date()
@@ -848,9 +894,10 @@ final class AppModel: ObservableObject {
     }
 
     /// Persist the in-flight manual workout to `UserDefaults` so it survives the app being killed mid-
-    /// session (#529). Called on start + each captured sample. A no-op when nothing is running. Apple has
-    /// no GPS-route session, so every manual workout is the "non-GPS" case and gets this durability ,
-    /// the Apple analogue of Android's `persistNonGpsWorkout`.
+    /// session (#529). Called on start + each captured sample. A no-op when nothing is running. The Apple
+    /// analogue of Android's `persistNonGpsWorkout`. A distance workout records a route as well, and its
+    /// fixes are banked separately by `ActiveRouteStore`: keeping them out of here is what lets this stay
+    /// a small per-sample write instead of rewriting a growing route on every beat.
     private func persistActiveWorkout() {
         guard let w = activeWorkout else { return }
         ActiveWorkoutPersistence.store(
@@ -986,7 +1033,7 @@ final class AppModel: ObservableObject {
         }
         let avg = samples.isEmpty ? nil
             : Int((Double(samples.map(\.bpm).reduce(0, +)) / Double(samples.count)).rounded())
-        let peak = samples.map(\.bpm).max()
+        let peak = w.savedPeak
         // #983: score the SAVED workout with the wearer's measured resting HR, not the hardcoded
         // default of 60. %HRR is (bpm - resting) / (max - resting), so the default moves every zone
         // boundary — at 136 bpm with maxHR 190 it is the difference between zone 1 and zone 2. Today's
@@ -1046,7 +1093,13 @@ final class AppModel: ObservableObject {
     /// over the growing window each sample is cheap at the ~1 Hz live-HR cadence.
     private func captureWorkoutSample() {
         guard var w = activeWorkout, !w.isPaused, let hr = bpm else { return }
-        w.samples.append(HRSample(ts: Int(Date().timeIntervalSince1970), bpm: hr))
+        // A second that already has its sample moves only the peak: publish that, and skip the rescore and the
+        // snapshot (the next second's sample carries the peak into the snapshot).
+        let peakBefore = w.peakHr
+        guard w.recordSample(HRSample(ts: Int(Date().timeIntervalSince1970), bpm: hr)) else {
+            if w.peakHr != peakBefore { activeWorkout = w }
+            return
+        }
         w.peakHr = max(w.peakHr, hr)
         w.avgHr = Int((Double(w.samples.map(\.bpm).reduce(0, +)) / Double(w.samples.count)).rounded())
         w.liveStrain = StrainScorer.strain(w.samples, maxHR: Double(profile.hrMax),
@@ -1072,6 +1125,10 @@ final class AppModel: ObservableObject {
     /// baseline + rate limit), persisted via `BiofeedbackPrefs` so a relaunch can't re-fire. Honest /
     /// non-clinical: "stress" is an autonomic proxy vs the user's own baseline, never a diagnosis.
     private func evaluateStress() {
+        // Once per R-R packet. `ingestHR` runs from both the heart-rate and the R-R sink, so a packet reached
+        // this once or twice, its intervals entered `rrBuf` as often, and the detector's slow baseline
+        // advanced on every call rather than every packet.
+        guard stressPackets.isNew(live.rrSeq) else { return }
         let fresh = live.rr.filter { $0 > 300 && $0 < 2000 }   // plausible R-R (30–200 bpm)
         guard !fresh.isEmpty else { return }
         rrBuf.append(contentsOf: fresh)
@@ -1624,6 +1681,27 @@ final class AppModel: ObservableObject {
     /// alarm backup took a single time plus a day set, so the control on the alarm screen silently moved
     /// only the evening reminder. Mirrors Android's `reconcileStrapAlarm` which passes `dayOverrides`
     /// to `nextSmartAlarmEpochSec`, and `SmartAlarmScheduler.arm` which reads `targetOverrides`.
+    /// Warn about a strap last seen LOW that has not been heard from since (#2556).
+    ///
+    /// The crossings wired into `live.onBatteryUpdate` only run when a reading ARRIVES, so a strap that
+    /// drains out of range is never judged by them. This reads the last BANKED reading instead, so it works
+    /// precisely when the link does not.
+    ///
+    /// `connected: false` is passed deliberately and is sound rather than a shortcut: a connected strap
+    /// banks a reading about every minute, so its last banked value can never be old enough to clear the
+    /// staleness window. The window is its own connectivity test. Kotlin twin: `StaleBatteryWorker`.
+    @MainActor
+    func checkStrapNotSeen() async {
+        guard let last = await repo.latestBattery() else { return }
+        BatteryNotifier.onStrapNotSeen(
+            lastSocPct: last.soc.map { Int($0.rounded()) },
+            lastTsSec: last.ts,
+            lastCharging: last.charging,
+            nowSec: Int(Date().timeIntervalSince1970),
+            connected: false,
+            enabled: behavior.batteryAlerts)
+    }
+
     func applySmartAlarm() {
         let overrides = WindDownNudge.perDayWakeOverrides
         guard behavior.smartAlarmEnabled else {
@@ -1721,22 +1799,22 @@ final class AppModel: ObservableObject {
     ///
     /// A double tap rather than a single one because a strap takes knocks against bars and benches all
     /// session, and two deliberate taps are not something a rack does by accident.
-    var strapDoubleTapOverride: (() -> Void)?
+    var strapDoubleTapOverride: (@MainActor () -> Void)?
 
     private func handleDoubleTap() {
         let now = Date()
         let since = now.timeIntervalSince(lastDoubleTapAt)
         guard since > 1.2 else {   // debounce repeats
-            live.append(log: String(format: "Double-tap ignored: %.1f s after the previous one (debounce 1.2 s)", since))
+            live.append(log: Self.stamped(String(format: "Double-tap ignored: %.1f s after the previous one (debounce 1.2 s)", since)))
             return
         }
         lastDoubleTapAt = now
         if let override = strapDoubleTapOverride {
-            live.append(log: "Double-tap → Lift Log: next")
+            live.append(log: Self.stamped("Double-tap → Lift Log: next"))
             override()
             return
         }
-        live.append(log: "Double-tap → \(behavior.doubleTapAction.label)")
+        live.append(log: Self.stamped("Double-tap → \(behavior.doubleTapAction.label)"))
         runMacAction(behavior.doubleTapAction, shortcut: behavior.doubleTapShortcut)
     }
 
@@ -1872,7 +1950,8 @@ final class AppModel: ObservableObject {
     }
 
     private func evaluateIllness(_ days: [DailyMetric]) {
-        guard behavior.illnessWatch, days.count >= 14 else {
+        guard behavior.illnessWatch, days.count >= 14,
+              let latestDay = days.last?.day, latestDay == repo.today?.day else {
             healthAlert = nil; illnessSignal = nil; illnessDistance = nil; return
         }
         Task { [weak self] in
@@ -1908,8 +1987,12 @@ final class AppModel: ObservableObject {
     /// publish the result + the semantic `healthAlert` banner payload.
     private func applyIllnessSignal(_ days: [DailyMetric], alcohol: Bool,
                                     hardOrLateWorkout: Bool, alreadyUnwell: Bool) {
+        // A newer day can arrive while the journal read is in flight. Never publish the older
+        // task's alert over that day's result.
+        guard days.last?.day == repo.days.last?.day, days.last?.day == repo.today?.day else { return }
         let previous = healthAlert
         let recent = Array(days.suffix(2))
+        let latest = days[days.count - 1]
         let base = Array(days.suffix(31).dropLast(3))    // ~28 days ending 3 days ago
         func mean(_ vals: [Double]) -> Double? { vals.isEmpty ? nil : vals.reduce(0, +) / Double(vals.count) }
         func rm(_ kp: (DailyMetric) -> Double?) -> Double? { mean(recent.compactMap(kp)) }
@@ -1919,11 +2002,15 @@ final class AppModel: ObservableObject {
         // engine's gate for actually raising. Skin-temp is already a stored DEVIATION (°C), so it's
         // z-scored against a zero-centred personal spread; the others z-score the raw column.
         func signal(_ kp: (DailyMetric) -> Double?, cfgKey: String, illnessUp: Bool) -> (IllnessSignalEngine.SignalReading, Bool)? {
-            guard let cfg = Baselines.metricCfg[cfgKey], let recentMean = rm(kp) else { return nil }
+            guard let cfg = Baselines.metricCfg[cfgKey], let recentMean = rm(kp),
+                  let latestValue = kp(latest) else { return nil }
             let state = Baselines.foldHistory(base.map(kp), cfg: cfg)
             guard state.usable else { return (IllnessSignalEngine.SignalReading(zIllnessward: 0, present: false), false) }
             let dev = Baselines.deviation(recentMean, state: state)
-            let z = illnessUp ? dev.z : -dev.z   // HRV drop is illness-ward → negate
+            let latestDev = Baselines.deviation(latestValue, state: state)
+            // Keep the two-night smoothing, but only count a signal while the newest night
+            // independently clears the same illness-ward threshold (#2533).
+            let z = illnessUp ? min(dev.z, latestDev.z) : min(-dev.z, -latestDev.z)
             return (IllnessSignalEngine.SignalReading(zIllnessward: z), state.trusted)
         }
 
@@ -1933,8 +2020,8 @@ final class AppModel: ObservableObject {
         // Skin-temp deviation: a stored °C delta. Build a small zero-centred state from its own recent
         // spread so a +0.6 °C reads as a meaningful z without needing a separate baseline column.
         var skin: (IllnessSignalEngine.SignalReading, Bool)? = nil
-        if let recentSkin = rm({ $0.skinTempDevC }) {
-            let z = recentSkin / 0.3     // ~0.3 °C ≈ one personal spread (matches skin_temp floorSpread)
+        if let recentSkin = rm({ $0.skinTempDevC }), let latestSkin = latest.skinTempDevC {
+            let z = min(recentSkin, latestSkin) / 0.3 // ~0.3 °C ≈ one personal spread
             skin = (IllnessSignalEngine.SignalReading(zIllnessward: z), true)
         }
 
@@ -1965,15 +2052,15 @@ final class AppModel: ObservableObject {
 
         // Caller-rendered phrases for the signals that fire (the engine surfaces only the firing ones).
         var labels: [String: String] = [:]
-        if let r = rm({ $0.restingHr.map(Double.init) }), let b = mean(base.compactMap { $0.restingHr.map(Double.init) }), r > b {
+        if let r = latest.restingHr.map(Double.init), let b = mean(base.compactMap { $0.restingHr.map(Double.init) }), r > b {
             let delta = Int((r - b).rounded())
             labels["restingHR"] = String(localized: "RHR +\(delta)")
         }
-        if let r = rm({ $0.avgHrv }), let b = mean(base.compactMap { $0.avgHrv }), b > 0, r < b {
+        if let r = latest.avgHrv, let b = mean(base.compactMap { $0.avgHrv }), b > 0, r < b {
             let percent = Int(((1 - r / b) * 100).rounded())
             labels["hrv"] = String(localized: "HRV −\(percent)%")
         }
-        if let r = rm({ $0.skinTempDevC }), r > 0 {
+        if let r = latest.skinTempDevC, r > 0 {
             // The value is STORED in °C but must be SHOWN in the reader's unit: this label welded "°C"
             // into the translated string, so a Fahrenheit user got "+0.7 °C" from the banner while every
             // other surface rendered the same night as "+1.3 Δ°F".
@@ -1990,7 +2077,7 @@ final class AppModel: ObservableObject {
                 locale: AppLanguage.activeLocale)
             labels["skinTemp"] = String(localized: "Skin temperature \(temperature)")
         }
-        if let r = rm({ $0.respRateBpm }), let b = mean(base.compactMap { $0.respRateBpm }), r > b {
+        if let r = latest.respRateBpm, let b = mean(base.compactMap { $0.respRateBpm }), r > b {
             labels["respiration"] = String(localized: "Respiration up")
         }
 
@@ -2089,6 +2176,40 @@ final class AppModel: ObservableObject {
     var ouraOnsetKeying: Bool {
         get { UserDefaults.standard.bool(forKey: Self.ouraOnsetKeyingKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.ouraOnsetKeyingKey) }
+    }
+
+    /// Oura packed-notification A/B (EXPERIMENTAL, default OFF): send the official app's SetNotification
+    /// mask `1c 01 ff` at the next connect instead of NOOP's `3f`. The ring packs ~10 packets per
+    /// notification for the official app (9x the drain throughput) and NOOP's session never gets that
+    /// shape; the mask is the first candidate switch (OURA_PROTOCOL.md s2.3). Read once per connect, so
+    /// turning it off restores `3f` on the next session — nothing persists on the ring. Readout: the
+    /// `-> notify_all(ff)` line and the raw sidecar's notification-size histogram. Test Centre only.
+    static let ouraNotifyMaskFullKey = "noopOuraNotifyMaskFull"
+    var ouraNotifyMaskFull: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.ouraNotifyMaskFullKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.ouraNotifyMaskFullKey) }
+    }
+
+    /// Item 27 (EXPERIMENTAL, default OFF): keep the Oura ring in its daytime-HR mode while the phone's screen
+    /// is off during the DAY, standing it down only for the learned night band (`NightStandDown`), instead
+    /// of on every screen-off. The ring emits daytime heart rate — and the beats behind windowed rMSSD —
+    /// only while a client holds that mode, so with the screen-keyed suspend a pocketed phone empties the
+    /// day. ON costs ring battery (its own daytime PPG); OFF is today's behaviour, and the night is
+    /// unchanged either way. No effect without an Oura ring; cold start (no learned schedule) keeps OFF's rule.
+    static let ouraAllDayLiveHRKey = "noopOuraAllDayLiveHR"
+    var ouraAllDayLiveHR: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.ouraAllDayLiveHRKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.ouraAllDayLiveHRKey) }
+    }
+
+    /// Item 27: the learned night band for the all-day HR stand-down — the SAME midsleep + typical-night
+    /// inputs the battery night-guard reads (`refreshHabitualMidsleep`, hourly), so the two policies share
+    /// one notion of the user's night. nil at cold start.
+    func ouraNightBand() -> NightStandDown.Band? {
+        NightStandDown.band(
+            habitualMidsleepSec: habitualMidsleepCache,
+            typicalSleepHours: BatteryEstimator.typicalSleepHours(
+                nightlyHours: repo.days.compactMap { $0.totalSleepMin.map { $0 / 60.0 } }))
     }
 
     /// Recompute the v5 skin-temp suite snapshots (cycle phase + body clock) from the current history.
@@ -2301,8 +2422,7 @@ final class AppModel: ObservableObject {
     nonisolated static func materializeForImport(_ picked: URL) async throws -> ImportFile {
         #if os(iOS)
         let ext = picked.pathExtension.isEmpty ? "dat" : picked.pathExtension
-        let dst = FileManager.default.temporaryDirectory
-            .appendingPathComponent("noop-import-\(UUID().uuidString)")
+        let dst = NoopScratch.file("import-\(UUID().uuidString)")
             .appendingPathExtension(ext)
         var coordError: NSError?
         var ioError: Error?
@@ -2472,28 +2592,18 @@ final class AppModel: ObservableObject {
         #endif
     }
 
-    /// True for any scratch file/dir NOOP itself writes into the temp directory , import copies, the
-    /// decompressed export.xml, exports, backups, raw captures: every one is prefixed `noop-`. #590: the
-    /// import decompresses `export.xml` to a `noop-health-*` temp file (up to 8 GB), but a previous build
-    /// only matched `noop-import-*`, so an interrupted import stranded multi-GB extractions the Storage
-    /// screen never saw OR reclaimed. Matching the shared `noop-` prefix counts + sweeps them all and is
-    /// future-proof. Safe: the temp dir is NOOP's private sandbox and the 60 s in-flight guard in
-    /// `purgeImportTemp` protects a live import.
-    nonisolated static func isNoopTempScratch(_ name: String) -> Bool { name.hasPrefix("noop-") }
-
-    /// Total bytes of NOOP's own `noop-*` temp scratch (a crash mid-import can strand a multi-GB one).
-    /// Recurses into directories (the Xiaomi importer stages a `noop-xiaomi-*` folder).
+    /// Total bytes of NOOP's own temp scratch: its owned folder, plus the flat scratch earlier builds
+    /// left beside it. A crash mid-import can strand a multi-GB extraction in there (#590).
+    ///
+    /// Recurses, because the scratch holds directories (the Xiaomi importer stages one). Scoped to what
+    /// [purgeImportTemp] would actually reclaim, so the Storage screen cannot attribute another
+    /// program's disk to NOOP (#2446).
     nonisolated static func importTempSizeBytes() -> Int64 {
-        let tmp = FileManager.default.temporaryDirectory
-        guard let items = try? FileManager.default.contentsOfDirectory(
-            at: tmp, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey], options: []) else { return 0 }
-        var total: Int64 = 0
-        for item in items where isNoopTempScratch(item.lastPathComponent) {
+        NoopScratch.sizeBytes { item in
             let vals = try? item.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
-            if vals?.isDirectory == true { total += directorySizeBytes(item) }
-            else { total += Int64(vals?.fileSize ?? 0) }
+            if vals?.isDirectory == true { return directorySizeBytes(item) }
+            return Int64(vals?.fileSize ?? 0)
         }
-        return total
     }
 
     /// Sum every regular file under `dir` (one level , Inbox is flat). Best-effort; missing dir → 0.
@@ -2520,21 +2630,11 @@ final class AppModel: ObservableObject {
         return await storageReport()
     }
 
-    /// Remove NOOP's stranded `noop-*` temp scratch (import copies, the multi-GB `noop-health-*`
-    /// export.xml an interrupted import leaves behind , #590, exports, backups, raw captures). Mirrors
-    /// `purgeImportInbox`'s 60 s in-flight guard so a concurrent import/export isn't disturbed.
-    nonisolated static func purgeImportTemp() {
-        let fm = FileManager.default
-        let tmp = fm.temporaryDirectory
-        guard let items = try? fm.contentsOfDirectory(
-            at: tmp, includingPropertiesForKeys: [.contentModificationDateKey], options: []) else { return }
-        let cutoff = Date().addingTimeInterval(-60)
-        for item in items where isNoopTempScratch(item.lastPathComponent) {
-            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, modified > cutoff { continue }
-            try? fm.removeItem(at: item)
-        }
-    }
+    /// Remove NOOP's stranded temp scratch: everything in the folder it owns, plus the flat scratch
+    /// earlier builds wrote (the multi-GB `noop-health-*` export.xml an interrupted import leaves
+    /// behind, #590). Keeps `purgeImportInbox`'s 60 s in-flight guard, so a concurrent import or
+    /// export is not disturbed. See `NoopScratch` for why ownership is a folder and not a prefix.
+    nonisolated static func purgeImportTemp() { NoopScratch.purge() }
 
     /// Handle a `noop://import-health` deep link (PR #581), the HealthKit-free Shortcuts import for
     /// sideloaded installs. Custom URL schemes are forgeable by other apps/sites, so this only decodes

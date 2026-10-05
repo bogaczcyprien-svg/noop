@@ -9,10 +9,13 @@ import com.noop.alarm.SmartAlarmScheduler
 import com.noop.alarm.SmartAlarmStore
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
+import com.noop.analytics.AnalyticsEngine
 import com.noop.analytics.Baselines
+import com.noop.analytics.ChargeBaselines
 import com.noop.analytics.IllnessSignalEngine
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.IntelligenceEngine
+import com.noop.analytics.IntelligencePersistence
 import com.noop.analytics.DayCycleIntelligenceIntegration
 import com.noop.analytics.CircadianEngine
 import com.noop.analytics.V5HealthSignals
@@ -767,6 +770,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
+     * #2525: the Charge baselines (HRV, resting HR, respiration) resolved with the engine's own rule from the
+     * imported and own daily rows, read apart because the rule needs to know which nights are imported. The
+     * single funnel every Charge readout below the headline reads (the "What shaped it" rows, the
+     * calibration count, the confidence tier), so none of them can fold a different history than the score
+     * was computed against. Anchored on today's local day and the two recalibration epochs, read on each
+     * emission exactly as the engine reads them per pass. The read range starts at this ViewModel's first
+     * window start, so it only ever covers MORE days than the window; [ChargeBaselines.history] trims to the
+     * current one. Mirrors the Swift `Repository.chargeBaselines`.
+     */
+    val chargeBaselines: StateFlow<ChargeBaselines.Resolved?> = run {
+        val startSec = System.currentTimeMillis() / 1000L
+        val startTz = java.util.TimeZone.getDefault().getOffset(startSec * 1000L) / 1000L
+        val from = Baselines.cutoffKey(AnalyticsEngine.dayString(startSec, startTz), ChargeBaselines.windowDays - 1)
+        combine(
+            repository.importedDailyUnionFlow(deviceId, from, "9999-12-31"),
+            repository.computedDailyUnionFlow(deviceId, from, "9999-12-31"),
+        ) { imported, own ->
+            val nowSec = System.currentTimeMillis() / 1000L
+            val tz = java.util.TimeZone.getDefault().getOffset(nowSec * 1000L) / 1000L
+            val prefs = NoopPrefs.of(appContext)
+            ChargeBaselines.resolve(
+                imported = imported,
+                own = own,
+                anchorDay = AnalyticsEngine.dayString(nowSec, tz),
+                hrvEpoch = prefs.getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble(),
+                recoveryEpoch = prefs.getLong(Baselines.recoveryBaselineEpochKey, 0L).toDouble(),
+            )
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    }
+
+    /**
      * Today's measured steps follow the newest confirmed sleep-onset cycle, independently of the fixed
      * 04:00 presentation day used by the rest of the dashboard. The marker is persisted by the analytics
      * pass, so this survives process death and a delayed sleep detection can switch the tile retroactively.
@@ -1004,14 +1040,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val logicalKey = logicalDayKeyNow()       // ISO yyyy-MM-dd, local logical day
                 val localKey = java.time.LocalDate.now().toString()
                 _today.value = resolveTodayRow(days, logicalKey, localKey)
-                val previousAlert = _healthAlert.value
                 _healthAlert.value =
-                    if (_illnessWatchEnabled.value) IllnessWatch.evaluate(days) else null
-                // Banner transition (clear → raised) → real system notification; the notifier's
-                // persisted day gate dedupes against the background-service call site.
-                if (previousAlert == null) {
-                    _healthAlert.value?.let { IllnessAlertNotifier.onEvaluated(appContext, it) }
-                }
+                    (if (_illnessWatchEnabled.value && _today.value != null &&
+                        days.lastOrNull()?.day == _today.value?.day
+                    ) {
+                        IllnessWatch.evaluate(days)
+                    } else null)
+                        ?.let { IllnessAlertNotifier.withWindow(appContext, it, days) }
+                // EVERY evaluation is reported, raised or clear. The clear-to-raised edge now lives in
+                // the notifier's PERSISTED state (#2586): `_healthAlert` starts null on every ViewModel
+                // build, so gating here made a cold start look like a transition, and the day gate then
+                // allowed a notification about an alert that had simply stayed raised. That is why the
+                // `previousAlert == null` gate this change arrived with is NOT restored: it is the gate
+                // the persisted edge replaced, and reinstating it would bring the cold start back.
+                // A loading/error emission with fewer than 14 days cannot establish a real clear.
+                if (days.size >= 14) IllnessAlertNotifier.onEvaluated(appContext, _healthAlert.value)
                 // Morning recap (#517) — opt-in, default OFF. Once today's row carries a banked night
                 // (totalSleepMin != null), post a one-per-day Charge + Rest recap. recovery == Charge;
                 // Rest is recomputed from the night's totals via RestScorer (the same single source of
@@ -1144,20 +1187,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     NoopPrefs.setTsHealPending(appContext, false)
                 }
             }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
-            // One-shot on-upgrade Effort rescore (#313): recompute strain from source across the FULL
-            // history once, so any deep-history rows an older build left on the 0–21 axis regenerate on
-            // the 0–100 axis. Guarded by a persisted flag, so it's a no-op on every subsequent launch.
+            // One-shot shared Effort and sleep-wear repair: recompute strain from source across the FULL
+            // history and replay pre-fix sleep once. Either pending flag triggers one pass; both flags
+            // are set only after persistence returns. Cached-only days are preserved, changing Effort's
+            // old broad-window write behavior. Cancellation/failure retries next launch.
             runCatching {
                 IntelligenceEngine.runEffortRescoreIfNeeded(
                     repo = repository,
                     profile = currentProfile(),
                     importedDeviceId = deviceId,
                     maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
-                    flagGet = { NoopPrefs.effortRescoreDone(appContext) },
-                    flagSet = { NoopPrefs.setEffortRescoreDone(appContext) },
+                    flagGet = {
+                        !IntelligencePersistence.historyRepairIsPending(
+                            effortDone = NoopPrefs.effortRescoreDone(appContext),
+                            sleepWearDone = NoopPrefs.sleepWearRescoreDone(appContext),
+                        )
+                    },
+                    flagSet = {
+                        NoopPrefs.setEffortRescoreDone(appContext)
+                        NoopPrefs.setSleepWearRescoreDone(appContext)
+                    },
                     // #1567: this rewrites the FULL history once, so a missing owner source would bake the
                     // WHOOP5 skin-temp scale into every day of it.
                     ownerSource = RegistryDayOwnerSource(noopApp.deviceRegistry),
+                    preserveUnscoredHistory = true,
                 )
             }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
             while (isActive) {
@@ -1732,7 +1785,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val pausedMs = w.pausedDurationMs + (w.pausedAtMs?.let { endMs - it } ?: 0L)
         val activeDurationMs = (endMs - w.startMs - pausedMs).coerceAtLeast(0L)
         val avg = if (samples.isNotEmpty()) samples.sumOf { it.bpm } / samples.size else null
-        val peak = if (samples.isNotEmpty()) samples.maxOf { it.bpm } else null
+        // `w.peakHr` can exceed every sample: a repeated second's higher reading is folded into it, not recorded.
+        val peak = if (samples.isNotEmpty()) maxOf(samples.maxOf { it.bpm }, w.peakHr) else null
         // #983: score the SAVED workout with the wearer's measured resting HR, not the hardcoded
         // default of 60. %HRR is (bpm - resting) / (max - resting), so the default moves every zone
         // boundary — at 136 bpm with maxHR 190 it is the difference between zone 1 and zone 2. Today's
@@ -1775,12 +1829,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         buzz(2, HapticPrefs.WORKOUT)
         viewModelScope.launch {
-            runCatching { repository.upsertWorkouts(listOf(row)) }
+            val saved = runCatching { repository.upsertWorkouts(listOf(row)) }.isSuccess
             // #528: persist the live 1 Hz workout HR into hrSample so it can export to Health Connect
             // at full resolution NOW (the HR export keeps workout-window samples un-decimated), instead
             // of only after the next strap offload sync. IGNORE-on-conflict makes a later sync of the
             // same seconds a no-op.
             runCatching { if (samples.isNotEmpty()) repository.insertHr(samples) }
+            // The Workouts screen collects this list even while the live capture sheet is open. Refresh
+            // after the row and HR are persisted so its sessions, stats and first-workout empty state
+            // update without leaving and re-entering the screen.
+            if (saved) loadWorkouts()
             if (_hcWriteback.value) {
                 runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
                 // #528: export the just-captured HR series now (workout row already upserted above, so
@@ -1801,12 +1859,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         @Suppress("UNNECESSARY_SAFE_CALL")
         val w = _activeWorkout?.value ?: return
         if (w.pausedAtMs != null) return
-        val s = w.samples + HrSample(deviceId = deviceId, ts = System.currentTimeMillis() / 1000, bpm = bpm)
+        // One sample a second. This runs on every LiveState emission that carries a heart rate — any field
+        // changing, not only the rate — so a second often arrives more than once with one `ts`, and Effort
+        // credits a zero gap with a full second (`StrainScorer.sampleDurationsMinutes`): each repeat counted
+        // as another second of effort, live and in the saved workout. A refused reading still reaches the peak: the
+        // rate moving is often why this ran, so it can be a within-second high; only the peak is published for it,
+        // with no rescore and no snapshot. Twin of iOS `ActiveWorkout.recordSample`.
+        val ts = System.currentTimeMillis() / 1000
+        if (w.samples.lastOrNull()?.ts == ts) {
+            if (bpm > w.peakHr) _activeWorkout.value = w.copy(peakHr = bpm)
+            return
+        }
+        val s = w.samples + HrSample(deviceId = deviceId, ts = ts, bpm = bpm)
         val strain = StrainScorer.strain(
             s, maxHR = profileStore.hrMax.toDouble(),
             method = NoopPrefs.effortMethod(appContext), sex = profileStore.sex) ?: 0.0
         val updated = w.copy(
-            samples = s, avgHr = s.sumOf { it.bpm } / s.size, peakHr = s.maxOf { it.bpm }, liveStrain = strain,
+            // Grown by comparison, not recomputed from `s`, so a peak folded in from a repeated second is kept.
+            samples = s, avgHr = s.sumOf { it.bpm } / s.size, peakHr = maxOf(w.peakHr, bpm), liveStrain = strain,
         )
         _activeWorkout.value = updated
         // Re-snapshot the durable non-GPS session so a process kill keeps the latest accumulated HR (#529).
@@ -2443,6 +2513,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         NoopPrefs.setOuraOnsetKeying(appContext, enabled)
     }
 
+    /** Packed-notification A/B: toggle the EXPERIMENTAL `ff` SetNotification mask. Read by the Oura source
+     *  once per connect (via [SourceCoordinator]), so it takes effect at the next connect, not the current one. */
+    fun setOuraNotifyMaskFull(enabled: Boolean) {
+        NoopPrefs.setOuraNotifyMaskFull(appContext, enabled)
+    }
+
     /** #1121: toggle the opt-in rolling "detailed capture" strap-log file. Persisted so it survives a
      *  process kill (re-armed in [init] below). */
     fun setDetailedCapture(enabled: Boolean) {
@@ -2800,7 +2876,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _illnessWatchEnabled.value = enabled
         NoopPrefs.setIllnessWatch(appContext, enabled)
         // Recompute now — the recentDays collector only fires on data changes.
-        _healthAlert.value = if (enabled) IllnessWatch.evaluate(recentDays.value) else null
+        val days = recentDays.value
+        _healthAlert.value = (if (enabled && _today.value != null &&
+            days.lastOrNull()?.day == _today.value?.day
+        ) {
+            IllnessWatch.evaluate(days)
+        } else null)
+            ?.let { IllnessAlertNotifier.withWindow(appContext, it, days) }
+        // Reported like any other evaluation, because the persisted edge (#2586) is only correct if
+        // EVERY change of state reaches it. Switching the watch off while an alert was raised used to
+        // clear the banner here and leave the stored flag raised, so the next genuine transition —
+        // possibly months later, after switching the watch back on — would be read as "already raised"
+        // and silently suppressed.
+        if (days.size >= 14) IllnessAlertNotifier.onEvaluated(appContext, _healthAlert.value)
     }
 
     /** #hide-cycle: hide/show the cycle-awareness offer. Hiding also stops active tracking, so "hidden"

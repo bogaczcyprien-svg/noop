@@ -46,18 +46,18 @@ object IntelligenceEngine {
     /**
      * Serialises [analyzeRecent] against itself. The pass is launched from four independent coroutines: the
      * 15-min backstop loop and rescoreAfterEdit (both AppViewModel), the post-offload analyze
-     * (WhoopBleClient), plus the one-shot Effort rescore ([runEffortRescoreIfNeeded]). These can overlap:
+     * (WhoopBleClient), plus the shared one-shot Effort/sleep-history repair. These can overlap:
      * two parallel 21-night passes double the CPU/battery AND race the #899 self-heal, whose concurrent
      * overlapping-session deletes can pick different survivors. This mirrors the intent of the Swift
      * `computing` guard, but SERIALISES rather than coalesces on purpose: Android's callers pass
-     * heterogeneous windows , the Effort rescore uses maxDays=4000, not 21, and can overlap the *independent*
+     * heterogeneous windows , the history repair uses maxDays=4000, not 21, and can overlap the *independent*
      * BLE-offload analyze. A drop-guard would skip that full-history rescore while its unconditional flagSet
      * marks it permanently done, and would re-run the holder's 21-day window in its place. withLock lets
      * every caller run its OWN pass, queued and never parallel, so nothing is dropped and no window is
      * silently lost. Suspending (not thread-blocking) and cancellation-cooperative, matching the callers'
      * #125 CancellationException handling. No re-entrancy: nothing analyzeRecent calls re-enters it
      * ([runEffortRescoreIfNeeded] delegates to analyzeRecent and does NOT take the lock itself, so the
-     * Mutex is acquired exactly once per Effort pass, never nested).
+     * Mutex is acquired exactly once per history repair, never nested).
      */
     private val analyzeGate = Mutex()
 
@@ -121,6 +121,9 @@ object IntelligenceEngine {
      *  In-memory and per-process exactly like [dayScanCache]; see [StepsMotionCache] for why this one needs no
      *  config signature. Pruned to the calibration window each pass so it cannot grow without bound. */
     private var stepsMotionCache = HashMap<String, Pair<String, Double>>()
+
+    // Guarded by analyzeGate; kept as state to avoid another parameter on the bytecode-budgeted pass.
+    private var preserveUnscoredHistoryForRun = false
 
     /** One reused night: its per-day cache [key], the scored [res], and everything the pass-1 loop otherwise
      *  writes into function-scoped per-day maps that pass 2 reads (owner/hrRows/primary-session RHR/SpO₂
@@ -499,6 +502,7 @@ object IntelligenceEngine {
         // every existing test relies on. Read/written under [analyzeGate] with the cache they back.
         stepsMotionCacheGet: (() -> String?)? = null,
         stepsMotionCacheSet: ((String) -> Unit)? = null,
+        preserveUnscoredHistory: Boolean = false,
     ): List<Computed> = withContext(Dispatchers.Default) {
         // #1005: time the whole pass so a re-score STORM is visible in the strap log (the trigger lines
         // record WHY each pass runs; this records how many nights and how long — the CPU cost per run).
@@ -516,6 +520,7 @@ object IntelligenceEngine {
             // across the back-to-back passes an offload storm is made of. Reset and emit both live in this
             // wrapper, never in `analyzeRecentOnCpu`, whose ratchet margin has no room for either.
             StoreProbeTally.reset()
+            preserveUnscoredHistoryForRun = preserveUnscoredHistory
             if (!stepsMotionCacheLoaded && stepsMotionCacheGet != null) {
                 stepsMotionCacheLoaded = true
                 val raw = stepsMotionCacheGet()
@@ -599,6 +604,7 @@ object IntelligenceEngine {
         // #1567: same reason as the sync path, over a WIDER window — this one rewrites the FULL history
         // once. Without it every day of that rewrite reads the skin-temp scale as WHOOP5 (see analyzeRecent).
         ownerSource: DayOwnerSource? = null,
+        preserveUnscoredHistory: Boolean = true,
     ) {
         if (flagGet()) return
         analyzeRecent(
@@ -608,6 +614,7 @@ object IntelligenceEngine {
             importedDeviceId = importedDeviceId,
             maxHROverride = maxHROverride,
             ownerSource = ownerSource,
+            preserveUnscoredHistory = preserveUnscoredHistory,
         )
         flagSet()
     }
@@ -778,7 +785,8 @@ object IntelligenceEngine {
         // the Sleep tab resolve to the identical block. Mirrors Swift. (#547)
         val (habitualMidsleepSec, nightlyHours) = computeHabitualSleep(
             repo, importedDeviceId, computedId,
-            nowLocalMidnight - maxDays * SECONDS_PER_DAY - StreamReadCap.LOOKBACK_SECONDS, nowSeconds, tzOffsetSeconds,
+            nowLocalMidnight - maxDays * SECONDS_PER_DAY - StreamReadCap.LOOKBACK_SECONDS, nowSeconds,
+            finishedBefore = nowLocalMidnight, offsetSec = tzOffsetSeconds,
         )
         // Wave 0 (SL1/T1): personal sleep REGULARITY + population-anchored NEED, computed ONCE from the
         // trailing per-night durations and threaded to every analyzeDay below (mirrors the midsleep
@@ -1035,7 +1043,7 @@ object IntelligenceEngine {
             val steps = repo.stepSamples(owner, from, to, STREAM_LIMIT)
             val skinReads = readDaySkinAndWristOff(
                 repo, owner, from, to, ownerSource, skinFamilyByOwner, skinWornToleranceByOwner,
-                skinAnchorByOwner, skinAnchorResolvedOwners, skinAnchorScanFrom, skinAnchorScanTo,
+                skinAnchorByOwner, skinAnchorResolvedOwners, skinAnchorScanFrom, skinAnchorScanTo, hr,
             )
             val skin = skinReads.skin
             val spo2 = skinReads.spo2
@@ -1113,7 +1121,7 @@ object IntelligenceEngine {
                 when {
                     owner != importedDeviceId && stored.isNotEmpty() -> {
                         dayDiag(SleepStagerTrace.hrOnlyGateLine(
-                            attempted = false, reason = "stored-hypnogram",
+                            day = day, attempted = false, reason = "stored-hypnogram",
                             gravRows = grav.size, storedNights = stored.size,
                         ))
                         stored
@@ -1123,7 +1131,7 @@ object IntelligenceEngine {
                         // analyzeDay as "provided" — but they still mean this night is already known,
                         // so the heart-rate fallback stays out of it.
                         dayDiag(SleepStagerTrace.hrOnlyGateLine(
-                            attempted = false, reason = "stored-sessions-exist",
+                            day = day, attempted = false, reason = "stored-sessions-exist",
                             gravRows = grav.size, storedNights = stored.size,
                         ))
                         emptyList()
@@ -1137,10 +1145,10 @@ object IntelligenceEngine {
                         // little" is not "none", so the night it could produce is marked
                         // [DetectedSleep.hrOnly] like every other.
                         dayDiag(SleepStagerTrace.hrOnlyGateLine(
-                            attempted = true, reason = "no-motion-no-hypnogram",
+                            day = day, attempted = true, reason = "no-motion-no-hypnogram",
                             gravRows = grav.size, storedNights = 0,
                         ))
-                        SleepStager.hrOnlySessions(hr, rr, resp, traceSink = ::dayDiag)
+                        SleepStager.hrOnlySessions(day, hr, rr, resp, traceSink = ::dayDiag)
                     }
                 }
             } else {
@@ -1210,7 +1218,13 @@ object IntelligenceEngine {
             // `nInput` is set before the min-beats gate, so a sparse night still shows its count with
             // rmssd=nil). A SEPARATE analyzeRaw pass over the in-sleep R-R — does NOT touch the shipped
             // windowed avgHrv. Emitted here where `rr` is in scope; byte-identical to the Swift line.
-            val sleepRrRows = rr.filter { r -> res.sleepSessions.any { r.ts >= it.start && r.ts < it.end } }
+            // #2425: the MAIN night the #1118 gate judged, not every session of the day pooled over the gaps
+            // between them; see AnalyticsEngine.hrvDiagnosticRows. hrvOverCounted and the RSA resp gate read
+            // the same rows, so they now agree with the gate too.
+            val sleepRrRows = AnalyticsEngine.hrvDiagnosticRows(
+                rr, res.mainNightBlocks,
+                res.sleepSessions.map { SleepStageTotals.NightBlock(it.start, it.end) },
+            )
             val sleepRr = sleepRrRows.map { it.rrMs.toDouble() }
             // #1331: the RSA gate's inputs, carried to the resp diagnostic below. Declared out here because
             // the HRV block is one scope deeper; a night with no sleep R-R leaves them null and the resp
@@ -1350,10 +1364,21 @@ object IntelligenceEngine {
                 // report says WHY nothing staged. `window` is the read span in whole hours (30 h back → next
                 // local midnight, or +18 h for today). Byte-identical to the Swift line.
                 val windowHours = ((to - from) / 3_600L).toInt()
+                // Attribute each provided session the same way analyzeDay does - by the LOCAL day its
+                // END falls in - so this line and the filter that emptied the night agree by
+                // construction rather than by two readings of the same rule.
+                val longestProvided = longestProvidedForDiag(providedSleep)
                 dayDiag(
                     sleepDetectNoNightLogLine(
                         day = day, hrCount = hr.size, rrCount = rr.size, respCount = resp.size,
                         gravCount = grav.size, stepCount = steps.size, providedCount = providedSleep.size,
+                        providedEndingOnDay = providedSleep.count {
+                            AnalyticsEngine.dayString(it.end, tzOffsetSeconds) == day
+                        },
+                        providedLongestMin = longestProvided?.let { ((it.end - it.start) / 60L).toInt() },
+                        providedLongestEndDay = longestProvided?.let {
+                            AnalyticsEngine.dayString(it.end, tzOffsetSeconds)
+                        },
                         windowHours = windowHours, skinCount = skin.size,
                     ),
                 )
@@ -1473,89 +1498,85 @@ object IntelligenceEngine {
             ),
         )
 
-        // ── Seed the baseline from the UNION of imported nightly history + the nightly
-        // values just computed. This is the recovery fix: the "-noop" nightly avgHrv/
-        // restingHr that already exist (and are re-derived identically here) finally feed
-        // the baseline, so a BLE-only user crosses Baselines.minNightsSeed (4 valid nights)
-        // and recovery lights up. We fold over the in-memory pass-1 values rather than
-        // re-reading repo.days(computedId) to avoid a read-before-persist ordering hazard.
-        // Chronological (oldest-first) replay: a day present in both takes the computed value.
-        val histHrvByDay = LinkedHashMap<String, Double?>()
-        val histRhrByDay = LinkedHashMap<String, Double?>()
-        val histRespByDay = LinkedHashMap<String, Double?>()
-        for (d in hist) {
-            histHrvByDay[d.day] = d.avgHrv
-            histRhrByDay[d.day] = d.restingHr?.toDouble()
-            histRespByDay[d.day] = d.respRateBpm
-        }
-        // Imported (cloud) nightly values WIN per day: the on-device estimate only fills days the
-        // import doesn't cover AT ALL, so an import user's baseline is unchanged. Use a key-absence
-        // check, NOT putIfAbsent: Java's putIfAbsent treats a key mapped to NULL as absent, so an
-        // imported day whose avgHrv/restingHr is blank would be REPLACED by the computed estimate —
-        // diverging from the Swift mirror (`histHrvByDay[day] == nil` is true only when the KEY is
-        // absent), which keeps that imported day as a missing night. HRV/RHR are the dominant
-        // recovery drivers (~60%/~20%), so this substitution skewed Charge vs iOS. (The author already
-        // fixed this for the low-weight resp term below; HRV/RHR were missed.)
-        mergeNightlyIntoHistory(histHrvByDay, nightlyHrvByDay)
-        mergeNightlyIntoHistory(histRhrByDay, nightlyRhrByDay)
-        mergeNightlyIntoHistory(histRespByDay, nightlyRespByDay)
+        // ── Charge baselines (#2525). Each baseline is folded from the wearer's OWN nights over the last
+        // [ChargeBaselines.windowDays] calendar days, counted back from today; imported vendor nights only
+        // SEED it until the own nights alone would be trusted, then drop out (see [ChargeBaselines]). This
+        // is still the recovery fix: the "-noop" nightly avgHrv/restingHr feed the baseline, so a BLE-only
+        // user crosses Baselines.minNightsSeed (4 valid nights) and recovery lights up.
+        //
+        // Before #2525 the own nights came from this pass's scan window while `hist` (every imported row,
+        // however old) was folded in full, so the import kept about a third of the weight for good. The window
+        // is the scan window's own 21 days, so the own nights are exactly this pass's in-memory pass-1 values
+        // (a full-history repair pass scores more days; the window trims it to the same 21), and a BLE-only
+        // user folds the same nights as before. Mirrors Swift.
+        val oldestDay = AnalyticsEngine.dayString(
+            nowLocalMidnight - (maxDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds,
+        )
+        val newestDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds)
+        val importedNights = { value: (DailyMetric) -> Double? -> hist.map { it.day to value(it) } }
+        val ownNights = { byDay: Map<String, Double?> -> byDay.entries.map { it.key to it.value } }
+
         // Which SOURCE measured each night's respiration — the input `Baselines.deviceEraEpoch` (#459)
         // needs for the resp fold below. `resolvedScoreOwnerByDay` (THIS PASS's freshly resolved per-day
-        // owner, before any re-homing) must win over `hist`, not just fill its gaps: `hist` is every day
-        // already stored under `importedDeviceId` by construction (that is where a scored day is written),
-        // so filling from `hist` first would tag an Oura-owned day "whoop" on every re-score after its
-        // first — the exact "brand is lost once a wearable day is re-homed" trap `deviceEraEpoch`'s own
-        // contract warns against. `hist` still fills days outside this pass's scan window. Mirrors Swift.
-        val respSourceByDay = LinkedHashMap<String, String>()
+        // owner, before any re-homing) is the only per-night source this pass knows, and it covers every own
+        // night the window holds. The imported rows in `hist` are stored under `importedDeviceId` and are
+        // tagged with it, which buckets to WHOOP; the days this engine scores are written under `computedId`,
+        // never into `hist`. Mirrors Swift.
+        val respSourceByDay = HashMap<String, String>()
         for ((day, owner) in resolvedScoreOwnerByDay) respSourceByDay[day] = owner
-        for (d in hist) respSourceByDay.putIfAbsent(d.day, importedDeviceId)
-        // Sort once so the HRV values + their "yyyy-MM-dd" day keys stay parallel (same order/length) for
-        // the recalibration-aware foldHistory below.
-        val hrvSorted = histHrvByDay.entries.sortedBy { it.key }
-        val hrvSeq = hrvSorted.map { it.value }
-        val hrvDayKeys = hrvSorted.map { it.key }
-        val rhrSorted = histRhrByDay.entries.sortedBy { it.key }
-        val rhrSeq = rhrSorted.map { it.value }
-        val rhrDayKeys = rhrSorted.map { it.key }
-        val respSorted = histRespByDay.entries.sortedBy { it.key }
-        val respSeq = respSorted.map { it.value }
-        val respDayKeys = respSorted.map { it.key }
-        // HRV baseline honours noop.hrvBaselineEpoch; rhr/resp/skin honour noop.recoveryBaselineEpoch via
-        // their parallel day keys, so the manual Recalibrate restarts the whole Charge build-up together.
-        // A 0.0 epoch is byte-identical to the plain fold, so scoring is unchanged until the user taps it.
+        val respCandidateDays = (hist.map { it.day }.toSet() + nightlyRespByDay.keys).sorted()
+        // Resp baseline: WITHIN one brand it pooled imported (cloud) values with on-device RSA estimates;
+        // since #2525 the two meet only while the import seeds. ACROSS brands it is not acceptable: a WHOOP
+        // export reports its own measured rate (~16.1 on this history) while an Oura ring reports the rate
+        // its firmware measured (~14.6), so pooling them turns a strap SWITCH into a ~3 sigma illness-ward
+        // step against a ~0.52 bpm spread — a device artifact scored as physiology, the same failure #459
+        // named for HRV. `deviceEraEpoch` returns 0.0 for a single-brand history (every WHOOP-origin id —
+        // import, strap, the computed sibling, the Apple/HC riders — buckets to one brand), so a WHOOP-only
+        // user is unaffected; `max` with the manual Recalibrate epoch keeps whichever cut is LATER, since
+        // both mean "ignore nights before this".
+        val respEraEpoch = Baselines.deviceEraEpoch(
+            respCandidateDays.map { it to (respSourceByDay[it] ?: importedDeviceId) },
+        )
+        val respEpoch = maxOf(recoveryEpoch, respEraEpoch)
+        // HRV honours noop.hrvBaselineEpoch; rhr/resp/skin honour noop.recoveryBaselineEpoch, so the manual
+        // Recalibrate restarts the whole Charge build-up together. A 0.0 epoch drops nothing.
+        val hrvHistory = ChargeBaselines.history(
+            importedNights { it.avgHrv }, ownNights(nightlyHrvByDay), newestDay, hrvCfg, baselineEpoch,
+        )
+        val rhrHistory = ChargeBaselines.history(
+            importedNights { it.restingHr?.toDouble() }, ownNights(nightlyRhrByDay), newestDay, rhrCfg, recoveryEpoch,
+        )
+        val respHistory = ChargeBaselines.history(
+            importedNights { it.respRateBpm }, ownNights(nightlyRespByDay), newestDay, respCfg, respEpoch,
+        )
+        // Skin temperature has no imported counterpart (imported rows carry skinTempDevC, not the raw mean),
+        // so its history is the own nights alone. (PR #85)
+        val skinHistory = ChargeBaselines.history(
+            emptyList(), ownNights(nightlySkinByDay), newestDay, skinCfg, recoveryEpoch,
+        )
+        // #2525: one Recovery test-mode line naming what each of the four baselines was folded from (own
+        // nights, or own nights still seeded by the import), read off the same histories the folds consume.
+        recoveryTraceSink?.invoke(
+            ChargeBaselines.logLine(newestDay, hrvHistory, rhrHistory, respHistory, skinHistory),
+        )
         // #1614: the per-night HRV fold, traced (see [emitHrvFoldTrace] for scope and why it is a call
         // rather than an inline lambda). Sits immediately above the fold it describes, and takes the SAME
         // baselineEpoch, so the trace can only ever describe the fold the scorer actually performed.
-        emitHrvFoldTrace(recoveryTraceSink, hrvSeq, hrvDayKeys, hrvCfg, baselineEpoch)
-        val hrvBase2 = Baselines.foldHistory(hrvSeq, hrvDayKeys, hrvCfg, baselineEpoch)
-        val rhrBase2 = Baselines.foldHistory(rhrSeq, rhrDayKeys, rhrCfg, recoveryEpoch)
-        // Resp baseline: WITHIN one brand it still mixes imported (cloud) values with on-device RSA
-        // estimates, which stays an accepted tradeoff (the z-score is scale-tolerant and foldHistory
-        // winsorizes). ACROSS brands it is not acceptable, and that is new: a WHOOP export reports its own
-        // measured rate (~16.1 on this history) while an Oura ring reports the rate its firmware measured
-        // (~14.6), so pooling them turns a strap SWITCH into a ~3 sigma illness-ward step against a
-        // ~0.52 bpm spread — a device artifact scored as physiology, the same failure #459 named for HRV.
-        // `deviceEraEpoch` returns 0.0 for a single-brand history (every WHOOP-origin id — import, strap,
-        // the computed sibling, the Apple/HC riders — buckets to one brand), so a WHOOP-only user folds
-        // byte-identically to before; `max` with the manual Recalibrate epoch keeps whichever cut is
-        // LATER, since both mean "ignore nights before this". Gated on `usable` because RecoveryScorer
-        // includes the resp term whenever a baseline object is present , a CALIBRATING (<4-night)
-        // baseline would let one noisy night move recovery (mirrors the skin-temp use-site gate).
-        val respEraEpoch = Baselines.deviceEraEpoch(
-            respDayKeys.map { it to (respSourceByDay[it] ?: importedDeviceId) },
-        )
+        emitHrvFoldTrace(recoveryTraceSink, hrvHistory.values, hrvHistory.dayKeys, hrvCfg, baselineEpoch)
+        val hrvBase2 = Baselines.foldHistory(hrvHistory.values, hrvHistory.dayKeys, hrvCfg, baselineEpoch)
+        val rhrBase2 = Baselines.foldHistory(rhrHistory.values, rhrHistory.dayKeys, rhrCfg, recoveryEpoch)
+        // Gated on `usable` because RecoveryScorer includes the resp term whenever a baseline object is
+        // present , a CALIBRATING (<4-night) baseline would let one noisy night move recovery (mirrors the
+        // skin-temp use-site gate).
         val respBase2 = Baselines
-            .foldHistory(respSeq, respDayKeys, respCfg, maxOf(recoveryEpoch, respEraEpoch))
+            .foldHistory(respHistory.values, respHistory.dayKeys, respCfg, respEpoch)
             .takeIf { it.usable }
-        // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
-        // so fold purely over the pass-1 nightly means in chronological order. (PR #85)
         // Gated on `usable` for consistency with the resp baseline above AND the Swift reference
-        // (IntelligenceEngine.swift:162 `skinFold.usable ? skinFold : nil`) , the use-site re-checks
-        // `usable` too, so this is belt-and-suspenders, but it keeps the platforms byte-aligned.
-        val skinSorted = nightlySkinByDay.entries.sortedBy { it.key }
-        val skinSeq = skinSorted.map { it.value }
-        val skinDayKeys = skinSorted.map { it.key }
-        val skinBase2 = Baselines.foldHistory(skinSeq, skinDayKeys, skinCfg, recoveryEpoch).takeIf { it.usable }
+        // (`skinFold.usable ? skinFold : nil`) , the use-site re-checks `usable` too, so this is
+        // belt-and-suspenders, but it keeps the platforms byte-aligned.
+        val skinBase2 = Baselines
+            .foldHistory(skinHistory.values, skinHistory.dayKeys, skinCfg, recoveryEpoch)
+            .takeIf { it.usable }
         val baselines2 = ProfileBaselines(
             hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
         )
@@ -1842,11 +1863,8 @@ object IntelligenceEngine {
         // re-insert the local-keyed rows. Scoped to the computed source only , imported "my-whoop" rows
         // are never touched (a BLE-only WHOOP 4.0 user has no import fallback). Rows older than the
         // window keep their old keys (cosmetic off-by-one, acceptable). yyyy-MM-dd sorts
-        // chronologically, so the string range IS a date range.
-        val oldestDay = AnalyticsEngine.dayString(
-            nowLocalMidnight - (maxDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds,
-        )
-        val newestDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds)
+        // chronologically, so the string range IS a date range. `oldestDay` / `newestDay` are bound above,
+        // with the Charge baselines (#2525), which anchor their window on `newestDay`.
 
         // ── Source-only Charge/Rest fold for imported-only days (#823) ──────────────────────────────────
         // A user who ONLY imports (Health Connect, or an Oura/Fitbit/Garmin export, or Apple Health) has
@@ -1928,7 +1946,7 @@ object IntelligenceEngine {
             candidatePriorities, resolvedScoreOwnerByDay,
             IntelligencePersistence.LegacyScoreClock(nowLocalMidnight, nowSeconds, tzOffsetSeconds), out,
         )
-        repo.replaceComputedScoreWindow(computedWindow)
+        IntelligencePersistence.persistComputedWindow(repo, computedWindow, preserveUnscoredHistoryForRun)
 
         persistFitnessVitalityAndSteps(
             repo = repo,
@@ -1986,8 +2004,16 @@ object IntelligenceEngine {
         // "naps". Dedup each device's rows AMONG THEMSELVES and delete stale copies under that SAME id
         // (deleteSleepSessionRowOnly deletes under the row's own deviceId), never across ids, so a survivor
         // is never orphaned under an id the day-owner read skips. `freshStarts` (this pass's computed bank
-        // witness) only matches the computedId rows; the others fall back to longest-wins, the read-side
-        // dedup's own default. Sorted for a deterministic order. Mirrors the Swift analyzeRecent heal.
+        // witness) is handed ONLY to the computedId sweep; every other id falls back to longest-wins, the
+        // read-side dedup's own default. It used to be passed to every id on the claim that it "only
+        // matches the computedId rows" — false on an Oura day, where the pass's sessions ARE the ring's
+        // `providedSleep` rows with `startTs` copied verbatim. The ring row the pass had READ was then
+        // ranked "fresh" in the ring's own sweep and outranked every fuller re-serve the ring banked while
+        // the pass was in flight (hours, when the OS suspends the app between the read and this heal): on
+        // 09-19/20 the heal deleted the 598-min full night one second after it landed and kept the 337-min
+        // row read at 04:14, so the day ended at 04:48 instead of 08:21. `SleepSessionDedup.healWitness` is
+        // the one shared rule (twin of Swift's). Sorted for a deterministic order. Mirrors the Swift
+        // analyzeRecent heal.
         val healDeviceIds = healDeviceIds(computedId, candidatePriorities.map { it.first })
         // Compact shape of a row for the #1284 heal log — the two measures that adjudicate WHICH copy is
         // fuller (stage-segment count + decoded JSON length), in the SAME format as the dup-gen diagnostic
@@ -2004,7 +2030,8 @@ object IntelligenceEngine {
             val healable = storedSessions.filter {
                 AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) in oldestDay..newestDay
             }
-            val sweep = SleepSessionDedup.dedupe(healable, freshStarts = keptStarts)
+            val witness = SleepSessionDedup.healWitness(healId, computedId, keptStarts)
+            val sweep = SleepSessionDedup.dedupe(healable, freshStarts = witness)
             // Row-only delete: the user-facing deleteSleepSession writes a #33 dismissal tombstone, which
             // would overlap the SURVIVING night's window and permanently suppress its re-detection.
             for (stale in sweep.dropped) {
@@ -2504,6 +2531,10 @@ object IntelligenceEngine {
         return samples
     }
 
+    /** The sessions the sleep habits may learn from: those that ended before [before]. */
+    internal fun finishedSessions(sessions: List<SleepSession>, before: Long): List<SleepSession> =
+        sessions.filter { it.endTs < before }
+
     /**
      * Habitual midsleep (local seconds) AND the trailing per-night sleep DURATIONS (hours,
      * chronological) from the stored sessions over the window — the longest block per LOCAL day, so
@@ -2511,6 +2542,11 @@ object IntelligenceEngine {
      * sleep-need + regularity that thread into `analyzeDay` (Wave 0 · SL1/T1). The midsleep result is
      * byte-identical to before; the nightly-hours output is the extension. Mirrors Swift
      * `IntelligenceEngine.computeHabitualSleep`.
+     *
+     * Only sessions that ended before [finishedBefore] (the pass's local midnight) are learned from. Tonight's
+     * session is re-banked by every sync while it is still growing, and each time it moved the learned
+     * consistency and midsleep, so the day-cache signature changed and every pass re-scored the whole window.
+     * A night still being slept joins the history the day after (`computeHabitualSleep(finishedBefore:)`).
      */
     private suspend fun computeHabitualSleep(
         repo: WhoopRepository,
@@ -2518,6 +2554,7 @@ object IntelligenceEngine {
         computedId: String,
         windowStart: Long,
         windowEnd: Long,
+        finishedBefore: Long,
         offsetSec: Long,
     ): Pair<Long?, List<Double>> {
         val imported = repo.sleepSessionsForDevice(importedId, windowStart, windowEnd, 4000)
@@ -2528,7 +2565,7 @@ object IntelligenceEngine {
         // then steered the main-night pick (day assignment) to the stale block. The same collapse also
         // covers an imported night and its computed twin (the longest capture wins, exactly what the
         // per-day length rule chose anyway). Mirrors Swift.
-        val merged = SleepSessionDedup.dedupe(imported + computed).kept
+        val merged = finishedSessions(SleepSessionDedup.dedupe(imported + computed).kept, finishedBefore)
         // Longest block per LOCAL day (naps drop out), chosen by in-bed SPAN — reused for BOTH the
         // midsleep learner and the per-night durations (Wave 0 · SL1/T1), so the two can never read a
         // different history. For the DURATIONS we keep TST (span × efficiency), NOT the in-bed span:
@@ -2836,23 +2873,6 @@ object IntelligenceEngine {
      * Floor a unix-seconds timestamp to 00:00:00 of its UTC calendar day. AnalyticsEngine.dayString
      * uses UTC, so UTC midnight = ts - floorMod(ts, 86400). floorMod is correct for any sign.
      */
-    /**
-     * Merge one metric's on-device pass-1 nightly values into the imported-history map.
-     * Imported (cloud) values WIN per day; the computed estimate only fills days the import
-     * does not cover at all (key absent). Mirrors the Swift `mergeNightlyIntoHistory`.
-     */
-    internal fun mergeNightlyIntoHistory(
-        hist: LinkedHashMap<String, Double?>,
-        nightly: Map<String, Double?>,
-    ) {
-        // `day !in hist` only checks KEY presence — an imported row with a null
-        // value would shadow the real computed night forever, starving the
-        // baseline (the "Needs the strap" bug). `hist[day] == null` is true for
-        // both absent keys and null values: imported non-null wins, a null (or
-        // absent) slot is backfilled by the computed value.
-        for ((day, v) in nightly) if (hist[day] == null) hist[day] = v
-    }
-
     internal fun midnightUtc(ts: Long): Long = ts - Math.floorMod(ts, SECONDS_PER_DAY)
 
     /**
@@ -3024,6 +3044,7 @@ object IntelligenceEngine {
         skinAnchorResolvedOwners: HashSet<String>,
         skinAnchorScanFrom: Long,
         skinAnchorScanTo: Long,
+        hr: List<com.noop.data.HrSample>,
     ): DaySkinReads {
         val skin = repo.skinTempSamples(owner, from, to, StreamReadCap.SKIN)
         // #93: WHOOP 4.0 raw SpO2 PPG samples for the night; analyzeDay banks the nightly red/IR ADC
@@ -3069,7 +3090,7 @@ object IntelligenceEngine {
         // only when its off-wrist coverage reaches maxOffWristSleepFraction, so a real night with a
         // short off-wrist tail survives. Pairing needs WRIST_ON too (to bound each interval); a span
         // still open at the window end closes at `to`. Empty when the strap emitted no wrist events.
-        val wristOff = AnalyticsEngine.offWristIntervals(repo.events(owner, from, to, STREAM_LIMIT), to)
+        val wristOff = AnalyticsEngine.offWristIntervals(repo.events(owner, from, to, STREAM_LIMIT), to, hr)
         return DaySkinReads(skin, spo2, skinFamily, skinWornToleranceSec, skinAnchorRaw, wristOff)
     }
 
@@ -3239,6 +3260,27 @@ object IntelligenceEngine {
     }
 
     /**
+     * The provided session the NO-NIGHT line reports as `providedLongest` / `providedLongestEnd`: the
+     * longest, ties broken by the later END.
+     *
+     * The tie-break is the point. Selecting on duration alone left the OUTPUT undefined whenever two
+     * sessions ran the same length, because [maxByOrNull] and Swift's `max(by:)` do not agree on which of
+     * two equal elements they keep, and the field actually printed is the END day. Two equal sessions
+     * ending on different days would then render differently on the two platforms from identical input,
+     * on a line whose whole contract is being byte-identical across them.
+     *
+     * Equal-length sessions are not a corner case: the HR-only spine works in fixed epochs, so durations
+     * are quantised and repeat. Ordering by (duration, end) makes any surviving tie one where both
+     * printed fields are equal anyway, so the output is deterministic even where the choice of element is
+     * not.
+     *
+     * Pure so both the picked duration and its day key are unit-tested directly; byte-identical twin of
+     * the Swift `longestProvidedForDiag`.
+     */
+    internal fun longestProvidedForDiag(sessions: List<DetectedSleep>): DetectedSleep? =
+        sessions.maxWithOrNull(compareBy({ it.end - it.start }, { it.end }))
+
+    /**
      * #1244: one line for a day that CLEARED the >=200-HR gate yet detected NO in-bed session, so the
      * dashboard shows "HR tracked but no sleep". Today only the summary `sleep day=... totalSleepMin=nil`
      * rides the log — with no clue WHY, since every other night trace (`rhr`/`rrsample`/`hrv diag`) only
@@ -3251,21 +3293,39 @@ object IntelligenceEngine {
      */
     internal fun sleepDetectNoNightLogLine(
         day: String, hrCount: Int, rrCount: Int, respCount: Int, gravCount: Int,
-        stepCount: Int, providedCount: Int, windowHours: Int, skinCount: Int,
+        stepCount: Int, providedCount: Int, providedEndingOnDay: Int,
+        providedLongestMin: Int?, providedLongestEndDay: String?,
+        windowHours: Int, skinCount: Int,
     ): String {
         // `reason` names WHICH absence this is, because grav=0 is printed but its consequence is not.
         //
-        // `no-motion` USED to mean "and therefore nothing further was attempted" — the stager had no
+        // `no-motion` USED to mean "and therefore nothing further was attempted" - the stager had no
         // HR-only fallback, so no quantity of HR could stage a night. Since #1801 it does: a day with no
-        // gravity now also runs [SleepStager.hrOnlySessions], so this line printing `no-motion` means the
-        // motion spine was absent AND heart rate alone did not yield a night either — too little of it in
-        // the sleep band, or a run that staged to nothing. That is a stronger statement than it used to
-        // be, and the follow-up it wants is different: no longer "this strap cannot", but "why did the
-        // HR-only spine find nothing here".
+        // gravity now also runs [SleepStager.hrOnlySessions].
+        //
+        // Which is why grav=0 alone can no longer name the outcome. A 5/MG overnight capture showed this
+        // line reading `no-motion` while the HR-only spine on the SAME pass kept four sessions, the
+        // longest 311 minutes, and handed them over as `provided=3`. The reader was told nothing could
+        // stage a night while the log above said something had. So the no-gravity case splits by whether
+        // anything was actually provided:
+        //
+        //   no-motion                 no gravity, and nothing was provided either
+        //   no-motion-provided-unused no gravity, sessions WERE provided, and the night is still empty -
+        //                             they went in and no night came out, which is a question about what
+        //                             dropped them rather than about the strap
+        //
+        // Note "provided", not "HR-only". With no gravity `providedSleep` is the HR-only spine's output
+        // in the no-hypnogram branch, but it is STORED sessions in the stored-hypnogram one, and from
+        // here the two are indistinguishable. Naming the source would repeat the very over-claim this
+        // split exists to remove. The `[sleep] hr-only gate` trace is what says which branch ran.
         //
         // With motion present the inputs were there and staging still produced nothing, which remains the
         // case most worth investigating.
-        val reason = if (gravCount == 0) "no-motion" else "staged-none"
+        val reason = when {
+            gravCount > 0 -> "staged-none"
+            providedCount > 0 -> "no-motion-provided-unused"
+            else -> "no-motion"
+        }
         // #1118 follow-up: name any stream that came back AT its read cap. A read that returns exactly
         // the limit is the definition of truncated everywhere else here (`full.count >= limit`), and it
         // is the one thing a reader cannot infer from the counts alone - `grav=192698` looks healthy
@@ -3296,8 +3356,37 @@ object IntelligenceEngine {
             if (skinCount >= StreamReadCap.SKIN) add("skin")
         }
         val capNote = if (atCap.isEmpty()) "" else " atCap=${atCap.joinToString(",")}"
+        // WHERE the provided sessions fall, which `provided=` alone does not say and which is the next
+        // question every time this line reads `no-motion-provided-unused`.
+        //
+        // A session is attributed to a day by where it ENDS ([AnalyticsEngine.analyzeDay], the
+        // `tsInDay(it.end)` filter), so `provided=3` with an empty night means those three ended
+        // somewhere else. Without that, the line stops one field short of its own conclusion: a real
+        // 5/MG capture showed `provided=3` beside an HR-only spine reporting a 240-minute session, on a
+        // night the wearer demonstrably slept, and a reader still could not tell whether the spine had
+        // missed the night or the attribution had moved it. Those two want opposite fixes.
+        //
+        // [providedEndingOnDay] is the count that DID end on this day, and is therefore the number the
+        // night was built from: seeing 0 next to a non-zero `provided` is the whole diagnosis. The
+        // longest session and its end day come along because the longest is the one that should have
+        // matched, and naming its day says which neighbour absorbed it.
+        //
+        // Self-checking on purpose: `providedLongestEnd` equal to `day` while `providedHere` is 0 is a
+        // contradiction, and points at the filter rather than at the spine.
+        //
+        // Only when something was actually provided. With `provided=0` the three fields say nothing
+        // that `reason=no-motion` has not already said, and the sibling `atCap` note sets the precedent
+        // for a suffix that appears only when it carries information.
+        val providedNote = if (providedCount > 0) {
+            " providedHere=$providedEndingOnDay" +
+                " providedLongest=${providedLongestMin ?: "nil"}" +
+                " providedLongestEnd=${providedLongestEndDay ?: "nil"}"
+        } else {
+            ""
+        }
         return "sleep-detect day=$day NO-NIGHT hr=$hrCount rr=$rrCount resp=$respCount " +
-            "grav=$gravCount skin=$skinCount steps=$stepCount provided=$providedCount " +
+            "grav=$gravCount skin=$skinCount steps=$stepCount provided=$providedCount" +
+            providedNote + " " +
             "window=${windowHours}h reason=$reason$capNote"
     }
 

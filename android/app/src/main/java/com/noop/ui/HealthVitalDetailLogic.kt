@@ -250,15 +250,19 @@ internal fun vitalReadingRows(
         )
     }
 
-/** "9 Jun" for a "YYYY-MM-DD" reading day (today / yesterday read as words to match the hero "as of"
- *  line); the verbatim string if it doesn't parse. Locale.US month, matching [asOfLabel]. */
-internal fun vitalReadingDateLabel(day: String): String {
+/** Include the weekday so a recovery reading can be matched to a training day without counting dates.
+ *  Keep Today/Yesterday as context, and format the calendar date in the device's active locale. */
+internal fun vitalReadingDateLabel(
+    day: String,
+    today: LocalDate = LocalDate.now(),
+    locale: Locale = Locale.getDefault(),
+): String {
     val date = runCatching { LocalDate.parse(day) }.getOrNull() ?: return day
-    val today = LocalDate.now()
+    val dated = date.format(DateTimeFormatter.ofPattern("EEE d MMM", locale))
     return when (date) {
-        today -> "Today"
-        today.minusDays(1) -> "Yesterday"
-        else -> date.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+        today -> "Today · ${date.format(DateTimeFormatter.ofPattern("EEE", locale))}"
+        today.minusDays(1) -> "Yesterday · ${date.format(DateTimeFormatter.ofPattern("EEE", locale))}"
+        else -> dated
     }
 }
 

@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -36,6 +37,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
@@ -76,15 +78,32 @@ private fun seriesSummary(values: List<Double>, noun: String): String {
         "low ${formatLineValue(lo)}, high ${formatLineValue(hi)}"
 }
 
-/** Per-stage total summary for the Hypnogram (deep · REM · light · awake, naming only stages present). */
-private fun hypnogramSummary(stages: List<Pair<String, Float>>): String {
+/**
+ * Per-stage total summary for the Hypnogram, naming only the stages present.
+ *
+ * Spoken in the SAME order the rows are drawn in, awake · REM · light · deep (#2534). It used to announce
+ * deep first, so a screen-reader user heard a different order from the one on screen.
+ *
+ * `internal` only so the order and the apportionment can be pinned by a test; nothing else calls it.
+ */
+internal fun hypnogramSummary(stages: List<Pair<String, Float>>): String {
     if (stages.isEmpty()) return "Sleep stages, no data"
     // Weights are relative widths, not minutes, so report the share of the night in each stage.
     val total = stages.map { if (it.second.isFinite() && it.second > 0f) it.second else 0f }.sum()
     if (total <= 0f) return "Sleep stages, no data"
-    val order = listOf("deep", "rem", "light", "awake")
+    // TWO orders, deliberately separate, because they answer different questions.
+    //
+    // `spoken` is what a screen-reader user hears, and it matches the visible row stacks (#2534).
+    //
+    // `apportion` is the input order to the largest-remainder split, and it must stay the one EVERY visible
+    // surface uses. `wholePercentages` breaks ties by lower index, so the input order decides which stage
+    // gets the spare point: feeding it a different order is how the spoken percentages could disagree by
+    // one with the rows on screen for the same night. Reordering this list to match `spoken` would look
+    // tidier and would silently reintroduce that.
+    val spoken = listOf("awake", "rem", "light", "deep")
+    val apportion = listOf("awake", "light", "deep", "rem")
     val byStage = LinkedHashMap<String, Float>()
-    for (key in order) byStage[key] = 0f
+    for (key in apportion) byStage[key] = 0f
     stages.forEach { (name, w) ->
         val v = if (w.isFinite() && w > 0f) w else 0f
         val key = when (name.trim().lowercase()) {
@@ -94,12 +113,13 @@ private fun hypnogramSummary(stages: List<Pair<String, Float>>): String {
     }
     // One apportionment (largest-remainder) over the four stages so the read-out shares sum to 100 rather
     // than 99/101 — same helper the visible breakdown rows use; absent stages get 0 and are skipped below.
-    val shares = StagePercentages.wholePercentages(order.map { (byStage[it] ?: 0f).toDouble() })
-    val parts = order.mapIndexedNotNull { i, key ->
+    val shares = StagePercentages.wholePercentages(apportion.map { (byStage[it] ?: 0f).toDouble() })
+    val parts = spoken.mapNotNull { key ->
         val v = byStage[key] ?: 0f
         if (v <= 0f || shares == null) null else {
             val label = if (key == "rem") "REM" else key.replaceFirstChar { it.uppercase() }
-            "${shares[i]} percent $label"
+            // Indexed by APPORTIONMENT position, iterated in SPOKEN order.
+            "${shares[apportion.indexOf(key)]} percent $label"
         }
     }
     return if (parts.isEmpty()) "Sleep stages, no data" else "Sleep stages, " + parts.joinToString(", ")
@@ -346,6 +366,11 @@ fun LineChart(
     // Optional per-point display labels, index-aligned with [values]. Daily charts use this for a
     // human-readable date prefix ("16 Jul · 87"); live charts keep using [timestamps].
     selectionLabels: List<String>? = null,
+    // Optional color for each point and the line leading from it to the next point.
+    // The workout HR chart uses this to show when its bucket means reached each HR zone.
+    pointColors: List<Color>? = null,
+    // Override only the selection readout size; the established 30 px default stays unchanged.
+    selectionLabelTextSize: TextUnit? = null,
     // Optional sequential line-segment ids, index-aligned with [values]. Adjacent unequal ids break the
     // stroke/fill without dropping either reading; used by VO₂max when its estimator changes.
     segmentIds: List<String>? = null,
@@ -389,6 +414,10 @@ fun LineChart(
     val cleanSelectionLabels = remember(values, selectionLabels) {
         if (selectionLabels == null || selectionLabels.size != values.size) null
         else values.indices.filter { values[it].isFinite() }.map { selectionLabels[it] }
+    }
+    val cleanPointColors = remember(values, pointColors) {
+        if (pointColors == null || pointColors.size != values.size) null
+        else values.indices.filter { values[it].isFinite() }.map { pointColors[it] }
     }
     val cleanSegmentIds = remember(values, segmentIds) {
         if (segmentIds == null || segmentIds.size != values.size) null
@@ -468,10 +497,17 @@ fun LineChart(
         // separate drawWithContent overlay so a cursor drag re-issues only the marker, never the chart.
         // The pre-laid Paint for the value label is remembered, not allocated per draw. Pixel-identical:
         // same pointsFor geometry, same strokePx/pads, same gradient stops, same marker + label drawing.
-        val markerPaint = remember(color) {
+        val density = LocalDensity.current
+        val selectionTextPx = selectionLabelTextSize?.let { with(density) { it.toPx() } } ?: 30f
+        // Workout zone fills keep their color near the baseline. Light cards need a little more
+        // opacity than dark cards for the blue and gray zones to remain distinct on white.
+        val zoneFillTopAlpha = if (Palette.isLight) 0.62f else 0.52f
+        val zoneFillMiddleAlpha = if (Palette.isLight) 0.40f else 0.32f
+        val zoneFillBottomAlpha = if (Palette.isLight) 0.20f else 0.15f
+        val markerPaint = remember(color, selectionTextPx) {
             android.graphics.Paint().apply {
                 isAntiAlias = true
-                textSize = 30f
+                textSize = selectionTextPx
                 this.color = color.copy(alpha = StrandAlpha.chartLabel).toArgb()
                 typeface = android.graphics.Typeface.create(
                     android.graphics.Typeface.DEFAULT,
@@ -496,7 +532,7 @@ fun LineChart(
                         onDrawBehind { drawBaseline() }
                     } else {
                         val segments = lineChartSegmentRanges(pts.size, cleanSegmentIds)
-                        val fillPaths = if (fill) segments.map { range ->
+                        val fillPaths = if (fill && cleanPointColors == null) segments.map { range ->
                             Path().apply {
                                 val first = pts[range.first]
                                 val last = pts[range.last]
@@ -507,7 +543,30 @@ fun LineChart(
                                 close()
                             }
                         } else emptyList()
-                        val fillBrush = if (fill) {
+                        val zoneFillPaths = if (fill && cleanPointColors != null) {
+                            segments.flatMap { range ->
+                                ((range.first + 1)..range.last).map { i ->
+                                    val path = Path().apply {
+                                        moveTo(pts[i - 1].x, size.height)
+                                        lineTo(pts[i - 1].x, pts[i - 1].y)
+                                        lineTo(pts[i].x, pts[i].y)
+                                        lineTo(pts[i].x, size.height)
+                                        close()
+                                    }
+                                    val tint = cleanPointColors[i - 1]
+                                    path to Brush.verticalGradient(
+                                        colors = listOf(
+                                            tint.copy(alpha = zoneFillTopAlpha),
+                                            tint.copy(alpha = zoneFillMiddleAlpha),
+                                            tint.copy(alpha = zoneFillBottomAlpha),
+                                        ),
+                                        startY = 0f,
+                                        endY = size.height,
+                                    )
+                                }
+                            }
+                        } else emptyList()
+                        val fillBrush = if (fill && cleanPointColors == null) {
                             Brush.verticalGradient(
                                 colors = listOf(
                                     color.copy(alpha = StrandAlpha.chartFillStrong),
@@ -520,12 +579,12 @@ fun LineChart(
                         } else {
                             null
                         }
-                        val linePaths = segments.map { range ->
+                        val linePaths = if (cleanPointColors == null) segments.map { range ->
                             Path().apply {
                                 moveTo(pts[range.first].x, pts[range.first].y)
                                 for (i in (range.first + 1)..range.last) lineTo(pts[i].x, pts[i].y)
                             }
-                        }
+                        } else emptyList()
                         val lineStroke = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
                         onDrawBehind {
                             // Under the fill and the line: the rule annotates the series rather than
@@ -535,8 +594,24 @@ fun LineChart(
                             if (fillBrush != null) {
                                 for (path in fillPaths) drawPath(path = path, brush = fillBrush)
                             }
-                            // The line itself.
-                            for (path in linePaths) drawPath(path = path, color = color, style = lineStroke)
+                            for ((path, brush) in zoneFillPaths) drawPath(path = path, brush = brush)
+                            // The line itself. A zone-colored chart assigns each sampled interval the
+                            // zone at its starting bucket; gaps still follow the same segment ranges.
+                            if (cleanPointColors == null) {
+                                for (path in linePaths) drawPath(path = path, color = color, style = lineStroke)
+                            } else {
+                                for (range in segments) {
+                                    for (i in (range.first + 1)..range.last) {
+                                        drawLine(
+                                            color = cleanPointColors[i - 1],
+                                            start = pts[i - 1],
+                                            end = pts[i],
+                                            strokeWidth = strokePx,
+                                            cap = StrokeCap.Round,
+                                        )
+                                    }
+                                }
+                            }
                             // Markers only while they can still be told apart. On the ALL range a daily
                             // series is hundreds of points, and a dot every few pixels merges into a
                             // thick smear that hides the line it was meant to annotate.
@@ -564,16 +639,17 @@ fun LineChart(
                         val pts = pointsFor(cleanValues, size.width, size.height, topPad, bottomPad, yDomain, cleanTimestamps)
                         if (selectedIndex in pts.indices) {
                             val p = pts[selectedIndex]
+                            val selectedColor = cleanPointColors?.getOrNull(selectedIndex) ?: color
                             drawLine(
-                                color = color.copy(alpha = StrandAlpha.chartMarker),
+                                color = selectedColor.copy(alpha = StrandAlpha.chartMarker),
                                 start = Offset(p.x, 0f),
                                 end = Offset(p.x, size.height),
                                 strokeWidth = 1.5f,
                                 cap = StrokeCap.Round,
                             )
-                            drawCircle(color = color, radius = 5f, center = p)
+                            drawCircle(color = selectedColor, radius = 5f, center = p)
                             drawCircle(color = Palette.surfaceBase.copy(alpha = StrandAlpha.chartShadow), radius = 9f, center = p)
-                            drawCircle(color = color, radius = 4.5f, center = p)
+                            drawCircle(color = selectedColor, radius = 4.5f, center = p)
                             drawContext.canvas.nativeCanvas.apply {
                                 val label = lineChartSelectionLabel(
                                     value = cleanValues[selectedIndex],
@@ -581,7 +657,7 @@ fun LineChart(
                                     epochSec = cleanTimestamps?.getOrNull(selectedIndex),
                                     pointLabel = cleanSelectionLabels?.getOrNull(selectedIndex),
                                 )
-                                drawText(label, 8f, 32f, markerPaint)
+                                drawText(label, 8f, markerPaint.textSize + 2f, markerPaint)
                             }
                         }
                     }
@@ -1165,23 +1241,41 @@ private val chartTickTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.US
  * crossing midnight labels "00:00" and DST labels stay round; java.time resolves the spring-forward
  * gap to a valid time and the epoch-dedupe drops the resulting double tick. Pure and clock-free
  * (ChartTimeTicksTest).
+ *
+ * [deepZoom] opens the sub-hour tiers (5min/2min/1min) that the Deep Timeline's pinch-to-zoom wants.
+ * It is OFF by default because the Today HR card calls this with the RENDERED extent of its banked
+ * buckets rather than a nominal window: a morning holding ten minutes of HR would otherwise draw ten
+ * 1-minute gridlines on a small card, and the gridlines have no overlap-skip of their own.
  */
-fun chartTimeTicks(startEpochSec: Long, endEpochSec: Long, zone: ZoneId): List<Pair<Long, String>> {
+fun chartTimeTicks(
+    startEpochSec: Long,
+    endEpochSec: Long,
+    zone: ZoneId,
+    deepZoom: Boolean = false,
+): List<Pair<Long, String>> {
     if (endEpochSec <= startEpochSec) return emptyList()
-    val spanHours = (endEpochSec - startEpochSec) / 3600.0
+    val spanMinutes = (endEpochSec - startEpochSec) / 60.0
     // Thresholds sit below the nominal Today-card windows (24h/12h/6h/3h/1h) so a window whose
-    // banked data covers slightly less than nominal still lands on its intended interval.
+    // banked data covers slightly less than nominal still lands on its intended interval. The
+    // deep-zoom tiers (≤30min down to 1-min steps) serve the Deep Timeline's pinch-to-zoom, so
+    // a user zoomed onto a 5-minute window sees per-minute ticks instead of 15-min gaps.
     val stepMinutes = when {
-        spanHours >= 20.0 -> 360L
-        spanHours >= 10.0 -> 180L
-        spanHours >= 5.0 -> 120L
-        spanHours >= 2.0 -> 60L
-        else -> 15L
+        spanMinutes >= 20 * 60 -> 360L   // 6h ticks above 20h
+        spanMinutes >= 10 * 60 -> 180L   // 3h ticks above 10h
+        spanMinutes >= 5 * 60 -> 120L    // 2h ticks above 5h
+        spanMinutes >= 2 * 60 -> 60L     // 1h ticks above 2h
+        // Below 2h the static cards stop at 15min; only the zooming surface goes finer.
+        !deepZoom -> 15L
+        spanMinutes >= 60 -> 15L         // 15min ticks above 1h
+        spanMinutes >= 30 -> 5L          // 5min ticks above 30min
+        spanMinutes >= 10 -> 2L          // 2min ticks above 10min
+        else -> 1L                       // 1min ticks below 10min
     }
     var tick = Instant.ofEpochSecond(startEpochSec).atZone(zone).toLocalDate().atStartOfDay()
     val out = ArrayList<Pair<Long, String>>()
     var lastEpoch = Long.MIN_VALUE
-    // Bounded walk: even a multi-day window at 15-min steps stays well under the guard.
+    // Bounded walk: even a multi-day window at 15-min steps stays well under the guard. A deep-zoom
+    // at 1-min steps over a 10-min window is ~10 iterations, still far below it.
     var guard = 0
     while (guard++ < 4096) {
         val zoned = tick.atZone(zone)
@@ -1227,6 +1321,9 @@ fun pannedWindow(base: LongRange, deltaSeconds: Long, bounds: LongRange): LongRa
  * The Deep Timeline chart: a line over [points] within the visible [windowStart, windowEnd], pinch to
  * zoom + drag to pan (both clamped to [bounds]). Reports the settled window via [onWindowChange] so the
  * host can re-read at the new resolution. Empty-safe: with no points it draws a faint baseline.
+ *
+ * [timeTicks] (epochSec, "HH:mm") are drawn as dotted vertical gridlines under the curve, matching the
+ * Today HR chart's axis convention. The matching labels render OUTSIDE this composable by the host.
  */
 @Composable
 fun TimelineChart(
@@ -1237,11 +1334,22 @@ fun TimelineChart(
     color: Color,
     modifier: Modifier,
     onWindowChange: (LongRange) -> Unit,
+    // Round wall-clock (epochSec, "HH:mm") ticks, each drawn as a dotted gridline under the curve.
+    // The matching labels render OUTSIDE this plot-height composable by the host. Empty = no gridlines.
+    timeTicks: List<Pair<Long, String>> = emptyList(),
 ) {
     val span = (windowEnd - windowStart).coerceAtLeast(1L)
     val vis = remember(points, windowStart, windowEnd) {
         points.filter { it.ts in windowStart..windowEnd && it.value.isFinite() }
     }
+
+    // #2368: rememberUpdatedState so the gesture handler always reads the LATEST window values
+    // without being recreated. The old code captured windowStart/windowEnd in the closure, but when
+    // onWindowChange triggered a recomposition with new values, the gesture handler still used the
+    // stale captured values, causing the graph to snap back. rememberUpdatedState gives us a stable
+    // reference that always points to the current value.
+    val currentWindowStart by rememberUpdatedState(windowStart)
+    val currentWindowEnd by rememberUpdatedState(windowEnd)
 
     // ONE collapsed semantics node (summary of the VISIBLE window) so the a11y delegate reads a single
     // line instead of walking the canvas; recomputes as the zoom/pan window changes. Changes no drawing.
@@ -1254,7 +1362,7 @@ fun TimelineChart(
             .pointerInput(bounds) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     val width = size.width.toFloat().coerceAtLeast(1f)
-                    var window = windowStart..windowEnd
+                    var window = currentWindowStart..currentWindowEnd
                     // Pinch zooms about the gesture centroid; pan shifts the window.
                     if (zoom != 1f) {
                         val frac = (centroid.x / width).coerceIn(0f, 1f)
@@ -1269,6 +1377,25 @@ fun TimelineChart(
                 }
             },
     ) {
+        // Dotted round-time gridlines, FIRST so the curve reads over them (matching OverviewHRChart z-order).
+        if (timeTicks.isNotEmpty()) {
+            val gridDash = remember { PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f) }
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (size.width <= 0f || size.height <= 0f) return@Canvas
+                timeTicks.forEach { (ts, _) ->
+                    val x = ((ts - windowStart).toFloat() / span) * size.width
+                    if (x in 0f..size.width) {
+                        drawLine(
+                            color = Palette.hairline,
+                            start = Offset(x, 0f),
+                            end = Offset(x, size.height),
+                            strokeWidth = 1f,
+                            pathEffect = gridDash,
+                        )
+                    }
+                }
+            }
+        }
         Canvas(modifier = Modifier.fillMaxSize()) {
             val strokePx = 2.5f
             val topPad = strokePx + 4f

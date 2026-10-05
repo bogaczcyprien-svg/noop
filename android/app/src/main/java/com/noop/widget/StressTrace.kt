@@ -266,6 +266,20 @@ object StressTrace {
     }
 
     /**
+     * Prints the LF/HF ratio to one decimal with the same tenths arithmetic as [formatLevel].
+     *
+     * The two platforms disagreed through their printf-family formatters in OPPOSITE directions —
+     * Java's `%.1f` rounds half UP where C's rounds half to EVEN — so an exact quotient such as
+     * 9/4 spelled "2.3" here and "2.2" on iOS. A ratio has no domain ceiling, so only the floor is
+     * braced; band powers cannot go negative, but the brace keeps the two surfaces identical rather
+     * than trusting that.
+     */
+    fun formatRatio(value: Double): String {
+        val tenths = (value * 10).roundToInt().coerceAtLeast(0)
+        return "${tenths / 10}.${tenths % 10}"
+    }
+
+    /**
      * The labels up the left edge, top-down: the top of the domain down to zero.
      *
      * Fixed, not derived, for the same reason the domain is: these are the scale, and a chart whose

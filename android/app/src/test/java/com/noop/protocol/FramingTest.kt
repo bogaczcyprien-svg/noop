@@ -422,6 +422,10 @@ class FramingTest {
         assertEquals(2, streams.rr.size)
         assertEquals(RrInterval(ts = 1700000000, rrMs = 850), streams.rr[0])
         assertEquals(RrInterval(ts = 1700000000, rrMs = 870), streams.rr[1])
+        val whoop4 = extractStreams(listOf(parsed), deviceClockRef = 1700000000,
+            wallClockRef = 1700000000, family = DeviceFamily.WHOOP4)
+        assertEquals(listOf(RrSourceChannel.WHOOP4_REALTIME, RrSourceChannel.WHOOP4_REALTIME),
+            whoop4.rr.map { it.srcChannel })
     }
 
     // MARK: - WHOOP 5.0/MG REALTIME_DATA (+4) + family-aware reassembly
@@ -629,5 +633,38 @@ class FramingTest {
         val f = consoleFrame("AB".toByteArray() + byteArrayOf(0, 0, 0))
         val p = Framing.parseFrame(f, DeviceFamily.WHOOP5)
         assertEquals("AB", p.parsed["log"])
+    }
+
+    /**
+     * Twin of Swift `testFalseSOFWithAnInRangeLengthDoesNotSwallowTheFramesBehindIt`.
+     *
+     * A false start-of-frame whose declared length is PLAUSIBLE passes both the floor and the ceiling
+     * guard. Before the header-checksum gate, feed() waited for that many bytes and emitted them as one
+     * frame, consuming the valid frames inside it: they never reached a parser and nothing downstream
+     * could return them, because the CRC32 that rejects the bad frame runs after `head` moved past.
+     */
+    @Test
+    fun falseSofWithAnInRangeLengthDoesNotSwallowTheFramesBehindIt() {
+        val first = Framing.buildCommand(CommandNumber.GET_BATTERY_LEVEL, byteArrayOf(0), seq = 0)
+        val second = Framing.buildCommand(CommandNumber.GET_CLOCK, byteArrayOf(0), seq = 1)
+        val wrongCrc = (Crc.crc8(byteArrayOf(0xAA.toByte(), 0x64, 0x00), 1, 3) xor 0xFF).toByte()
+        val falseSof = byteArrayOf(0xAA.toByte(), 0x64, 0x00, wrongCrc)
+        val r = Reassembler()
+        val out = r.feed(falseSof + first + second)
+        assertEquals("a false SOF must resync by one byte, not eat the frames behind it", 2, out.size)
+        assertArrayEquals(first, out[0])
+        assertArrayEquals(second, out[1])
+        assertEquals("and the drop must be counted, not silent", 1, r.headerChecksumDrops)
+    }
+
+    /** The gate must not cost a real frame: every valid frame carries a correct header checksum. */
+    @Test
+    fun aValidFrameStillPassesTheHeaderGate() {
+        val frame = Framing.buildCommand(CommandNumber.GET_BATTERY_LEVEL, byteArrayOf(0), seq = 0)
+        val r = Reassembler()
+        val out = r.feed(frame)
+        assertEquals(1, out.size)
+        assertArrayEquals(frame, out[0])
+        assertEquals("a real frame must never be counted as a false SOF", 0, r.headerChecksumDrops)
     }
 }

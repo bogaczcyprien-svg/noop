@@ -212,7 +212,12 @@ struct StageDetailView: View {
         // Label above the trace, plot inset 10pt to line up with the stage-timeline rows' strips
         // (the old 44+12 gutter matched the removed Hypnogram's y-axis column). (ryanAtriumAi #988)
         VStack(alignment: .leading, spacing: 2) {
-            Text("Move")
+            // Same label as `SleepView.motionStrip`, which this is a byte-identical copy of. The trace is
+            // normalised to THIS night's peak, so the tallest spike is full height whatever its absolute
+            // size and heights do not compare between nights; the strap calibrates no absolute magnitude.
+            // This copy renders on Today (`TodayView`, `LiquidTodayView`), so letting the two drift would
+            // put two different names on one chart across two screens.
+            Text("Move, relative to tonight")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
             if night.motionEpochs.count >= 2 {
@@ -379,15 +384,16 @@ struct StageDetailView: View {
 
     /// The four stage rows that replace the old footer "label · value" grid, read like WHOOP's sleep
     /// detail: a colour swatch, the UPPERCASE stage name, the share-of-night % in the stage colour, a
-    /// proportional bar in the stage colour over a faint track, and the right-aligned duration. Same data
-    /// as the prior footer (`s.rem` / `s.deep` / `s.light` / `s.awake` over `s.total`) — no new numbers.
+    /// proportional bar in the stage colour over a faint track, and the right-aligned duration. Same data as
+    /// the prior footer, ordered by chart depth (awake / REM / light / deep) so Today and the Sleep detail
+    /// agree; the values and colours stay attached to their own stage. No new numbers.
     @ViewBuilder
     private func stageBreakdownRows(_ s: Stages, palette: SleepStagePalette = .noop) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-            stageBreakdownRow(.rem,   minutes: s.rem,   total: s.total, percent: stageSharePercent(.rem, s), palette: palette)
-            stageBreakdownRow(.deep,  minutes: s.deep,  total: s.total, percent: stageSharePercent(.deep, s), palette: palette)
-            stageBreakdownRow(.light, minutes: s.light, total: s.total, percent: stageSharePercent(.light, s), palette: palette)
             stageBreakdownRow(.awake, minutes: s.awake, total: s.total, percent: stageSharePercent(.awake, s), palette: palette)
+            stageBreakdownRow(.rem,   minutes: s.rem,   total: s.total, percent: stageSharePercent(.rem, s), palette: palette)
+            stageBreakdownRow(.light, minutes: s.light, total: s.total, percent: stageSharePercent(.light, s), palette: palette)
+            stageBreakdownRow(.deep,  minutes: s.deep,  total: s.total, percent: stageSharePercent(.deep, s), palette: palette)
         }
     }
 
@@ -483,9 +489,9 @@ struct StageDetailView: View {
                 .padding(.horizontal, 10)
                 .padding(.bottom, 2)
             stageTimelineRow(.awake, minutes: s.awake, percent: stageSharePercent(.awake, s), intervals: smoothed, origin: origin, span: span)
+            stageTimelineRow(.rem,   minutes: s.rem,   percent: stageSharePercent(.rem, s), intervals: smoothed, origin: origin, span: span)
             stageTimelineRow(.light, minutes: s.light, percent: stageSharePercent(.light, s), intervals: smoothed, origin: origin, span: span)
             stageTimelineRow(.deep,  minutes: s.deep,  percent: stageSharePercent(.deep, s), intervals: smoothed, origin: origin, span: span)
-            stageTimelineRow(.rem,   minutes: s.rem,   percent: stageSharePercent(.rem, s), intervals: smoothed, origin: origin, span: span)
             // onset · midpoint · wake clock labels, aligned with the rows' inner strips.
             HStack {
                 Text(Self.stageAxisFormatter.string(from: night.onsetDate))

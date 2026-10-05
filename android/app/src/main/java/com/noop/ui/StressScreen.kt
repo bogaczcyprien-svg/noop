@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -57,7 +58,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import com.noop.analytics.DaytimeBaselines
 import com.noop.analytics.DaytimeStress
 import com.noop.analytics.HrvFreqDomain
 import com.noop.analytics.StressIndex
@@ -126,6 +126,7 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     // banked HR + R-R via the SAME 0–3 proxy the daily score uses. Null until the read
     // completes; DaytimeStress.Result.EMPTY when the day has no usable intraday HR.
     var daytime by remember { mutableStateOf<DaytimeStress.Result?>(null) }
+    var daytimeUsesPersonalBaseline by remember { mutableStateOf(false) }
     // ADDITIVE, on-demand advanced readouts, computed live from the SAME day's R-R the daytime
     // timeline already reads. These do NOT feed the 0..3 score or the timeline; they are two extra,
     // clearly-labelled HRV lenses surfaced in their own card. Each stays null when its engine's
@@ -166,6 +167,7 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
                     val personal = NoopPrefs.stressPersonalBaseline(context)
                     val core = runCatching { loadDaytimeCore(vm, personal) }.getOrNull()
                     daytime = core?.daytime ?: DaytimeStress.Result.EMPTY
+                    daytimeUsesPersonalBaseline = core?.usesPersonalBaseline == true
                     val beats = core?.rr.orEmpty()
                     val lenses = if (beats.isEmpty()) null else runCatching {
                         withContext(Dispatchers.Default) {
@@ -186,7 +188,7 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_stress_screen_stress_bad33342),
-        subtitle = "Autonomic load from HRV and resting heart rate",
+        subtitle = uiString(R.string.stress_screen_subtitle),
         // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
         // into the theme canvas behind the header + hero vessel, full-bleed (full-width, up behind the
         // status bar via the scaffold's topBackground plumbing), and the cards float OVER it on the flat
@@ -198,7 +200,9 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
         fullBleedBackground = screenBackdropFullBleed(showDayCycleBackground, skyBehindCards),
     ) {
         when {
-            model != null -> StressContent(model, daytime, stressIndex, freqHrv, onBreathe)
+            model != null -> StressContent(
+                model, daytime, daytimeUsesPersonalBaseline, stressIndex, freqHrv, onBreathe,
+            )
             !storedLoaded -> item { StressLoading() }
             else -> item { StressEmpty() }
         }
@@ -215,6 +219,7 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
 private data class DaytimeCore(
     val daytime: DaytimeStress.Result,
     val rr: List<RrInterval>,
+    val usesPersonalBaseline: Boolean,
 )
 
 /**
@@ -245,7 +250,7 @@ private suspend fun loadDaytimeCore(
     val tzOffsetSeconds = zone.rules.getOffset(Instant.ofEpochSecond(nowSeconds)).totalSeconds.toLong()
     val hr = vm.repo.hrSamplesUnion(vm.activeStrapId, from, nowSeconds, limit = 200_000)
     if (hr.size < DaytimeStress.minHourHrSamples) {
-        return@withContext DaytimeCore(DaytimeStress.Result.EMPTY, emptyList())
+        return@withContext DaytimeCore(DaytimeStress.Result.EMPTY, emptyList(), false)
     }
     val rr = vm.repo.rrIntervalsUnion(vm.activeStrapId, from, nowSeconds, limit = 200_000)
     // Wrist accelerometer for the motion gate: an ambulatory hour is EXERTION, not stress, so it is
@@ -256,12 +261,10 @@ private suspend fun loadDaytimeCore(
     // history exists (DaytimeBaselines.scoringMode is the degradation gate); else the day's own calm
     // hours (DayRelative, the default). The trailing-history reads happen only past the HR-count guard
     // above and only while the toggle is ON, so the default read is byte-identical to before. Twin of
-    // the iOS StressView daytimeScoringMode.
-    val mode = if (personalBaseline) {
-        daytimeScoringMode(vm, todayWindow.day, zone)
-    } else {
-        DaytimeStress.ScoringMode.DayRelative
-    }
+    // the shared iOS DaytimeStressMode resolver.
+    val mode = selectedDaytimeStressMode(
+        vm.repo, vm.activeStrapId, todayWindow.day, zone, personalBaseline,
+    )
     // includeTimeline: the SLIDING read, so the screen's line moves in half-hours instead of stepping
     // through whole clock hours (#2144). The scored unit is still a full hour; this only decides how
     // often that hour is re-read, so a thin ten minutes now costs the windows that overlap it rather
@@ -274,53 +277,11 @@ private suspend fun loadDaytimeCore(
     val daytime = DaytimeStress.analyze(hr, rr, gravity, tzOffsetSeconds, mode, includeTimeline = true)
     // ADDITIVE advanced readouts from the SAME `rr`. Each engine self-gates and returns null when
     // its requirement is not met, in which case its row is simply hidden in the UI.
-    DaytimeCore(daytime, rr)
-}
-
-/**
- * Build the personal daytime baselines from the trailing [baselineHistoryDays] local days (TODAY
- * EXCLUDED — it's the day being scored, not part of its own baseline) and return the scoring mode for
- * today's intraday read: BaselineRelative once there's enough real worn daytime-HR history for a usable
- * baseline, else DayRelative (the unchanged default). Reads each past day's raw HR once (bounded per
- * day) via [vm].repo; unworn days (no HR) are skipped without an R-R read. Faithful twin of the iOS
- * StressView.daytimeScoringMode. [todayLocalDay] is today's date in [zone]. Each day is reduced
- * to its aggregate as it is read (#2107), so only the aggregates are retained, never the streams.
- */
-private suspend fun daytimeScoringMode(
-    vm: AppViewModel,
-    todayLocalDay: LocalDate,
-    zone: ZoneId,
-): DaytimeStress.ScoringMode {
-    // 30 mirrors the app's other rolling baselines (nightly resting-HR / HRV) and the iOS baselineHistoryDays.
-    val baselineHistoryDays = 30
-    // #2107: keep each day's AGGREGATE, never its streams. This used to accumulate 30 x
-    // DaytimeDayStreams, each holding up to 200,000 HR plus 200,000 R-R samples, and hand the lot to
-    // the fold. The fold's first act is to reduce a day to two Doubles, so all that was ever wanted
-    // from thirty days was sixty numbers; holding the samples alive to produce them is what exhausted
-    // a 256MB heap on a worn 5.0 and crashed the app with an OutOfMemoryError. Reducing here lets each
-    // day's samples become garbage at the end of its own iteration.
-    val aggregates = ArrayList<DaytimeBaselines.DayAggregate>(baselineHistoryDays)
-    // Oldest → newest so the EWMA fold replays the history in order.
-    for (back in baselineHistoryDays downTo 1) {
-        val window = stressLocalDayWindow(todayLocalDay.minusDays(back.toLong()), zone)
-        val dayHr = vm.repo.hrSamplesUnion(
-            vm.activeStrapId,
-            window.fromEpochSecond,
-            window.toEpochSecondInclusive,
-            limit = 200_000,
-        )
-        if (dayHr.isEmpty()) continue   // unworn day — no floor to learn, skip the R-R read
-        val dayRr = vm.repo.rrIntervalsUnion(
-            vm.activeStrapId,
-            window.fromEpochSecond,
-            window.toEpochSecondInclusive,
-            limit = 200_000,
-        )
-        aggregates.add(
-            DaytimeBaselines.dayDaytimeAggregate(dayHr, dayRr, window.offsetSeconds.toLong()),
-        )
-    }
-    return DaytimeBaselines.scoringModeFromAggregates(aggregates)
+    DaytimeCore(
+        daytime,
+        rr,
+        usesPersonalBaseline = mode is DaytimeStress.ScoringMode.BaselineRelative,
+    )
 }
 
 // MARK: - Loaded content
@@ -332,6 +293,7 @@ private suspend fun daytimeScoringMode(
 private fun androidx.compose.foundation.lazy.LazyListScope.StressContent(
     model: StressModel,
     daytime: DaytimeStress.Result?,
+    daytimeUsesPersonalBaseline: Boolean,
     stressIndex: StressIndex.Components?,
     freqHrv: HrvFreqDomain.Bands?,
     onBreathe: () -> Unit,
@@ -362,8 +324,24 @@ private fun androidx.compose.foundation.lazy.LazyListScope.StressContent(
 
     // 3 · Today's intraday timeline — when in the day stress ran high, + a passive Breathe
     //     suggestion when the recent hours stay elevated.
-    if (daytime != null && daytime.scored.isNotEmpty()) {
-        item { StressDaytimeSection(daytime, onBreathe, modifier = Modifier.staggeredAppear(2)) }
+    // #2535: THREE states, not two. `daytime` is null only while the read is still running, and this used
+    // to render nothing in that case, so a fold that takes seconds looked exactly like a day with no data.
+    // The reporter described it as "detail page shows nothing, 15 secs later the data appears". The screen's
+    // existing `StressLoading` is wired to `storedLoaded`, which flips almost immediately; the expensive read
+    // is this one, and it had no affordance at all.
+    when {
+        daytime == null -> item { StressDaytimeLoading(modifier = Modifier.staggeredAppear(2)) }
+        daytime.scored.isNotEmpty() -> item {
+            StressDaytimeSection(
+                daytime,
+                daytimeUsesPersonalBaseline,
+                onBreathe,
+                modifier = Modifier.staggeredAppear(2),
+            )
+        }
+        // Read finished and the day has no usable intraday HR. Staying silent is deliberate and unchanged:
+        // an empty result is a fact about the day, not something still in flight.
+        else -> Unit
     }
 
     // 4 · Trend over the chosen window.
@@ -551,7 +529,7 @@ private fun StressAdvancedCard(
                         StatTile(
                             modifier = m,
                             label = uiString(R.string.l10n_stress_screen_autonomic_balance_lf_hf_776cb6f7),
-                            value = String.format(Locale.US, "%.1f", ratio),
+                            value = StressTrace.formatRatio(ratio),
                             caption = "Sympathetic vs parasympathetic tone from frequency-domain HRV. Higher leans sympathetic (stress-ward).",
                             accent = StressRamp.STEADY,
                         )
@@ -608,6 +586,7 @@ private const val staleTimelineSeconds: Long = 150L * 60L
 @Composable
 private fun StressDaytimeSection(
     day: DaytimeStress.Result,
+    usesPersonalBaseline: Boolean,
     onBreathe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -664,12 +643,27 @@ private fun StressDaytimeSection(
                 }
 
                 Text(
-                    uiString(R.string.l10n_stress_screen_the_line_traces_your_autonomic_load_804f4028) +
-                        " against your own calm hours today (the same 0-3 proxy as the score " +
-                        "above, read hour by hour). Hours without enough data are skipped.",
+                    uiString(
+                        if (usesPersonalBaseline) {
+                            R.string.stress_timeline_caption_personal
+                        } else {
+                            R.string.stress_timeline_caption_day
+                        }
+                    ),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
+                if (day.activityMaskedHours > 0) {
+                    Text(
+                        pluralStringResource(
+                            R.plurals.stress_hours_excluded_moving,
+                            day.activityMaskedHours,
+                            day.activityMaskedHours,
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
                 // Where the curve actually stops, said plainly, and only when it is far enough behind
                 // the clock to look broken (#2144). The caption above gives the rule; a reader looking
                 // at a line that ends at 2pm on an axis running to 4pm wants to know that THIS hour is
@@ -716,7 +710,11 @@ private fun StressDaytimeSection(
  * the drawing differs, because Glance has to render to a Bitmap and Compose does not.
  */
 @Composable
-internal fun StressTodayCard(points: List<StressPoint>, modifier: Modifier = Modifier) {
+internal fun StressTodayCard(
+    points: List<StressPoint>,
+    activityMaskedHours: Int,
+    modifier: Modifier = Modifier,
+) {
     val stats = remember(points) { StressTrace.stats(points) }
     val ticks = remember(points) { StressTrace.timeTicks(points) }
     val textTertiary = Palette.textTertiary
@@ -736,9 +734,7 @@ internal fun StressTodayCard(points: List<StressPoint>, modifier: Modifier = Mod
                 Overline(uiString(R.string.hosted_card_stress_title), modifier = Modifier.weight(1f))
                 if (stats != null) {
                     Text(
-                        uiString(R.string.trends_peak) +
-                            " ${StressTrace.formatLevel(stats.peak.level ?: 0.0)} · " +
-                            pointTimeLabel(stats.peak.ts),
+                        uiString(R.string.trends_complete_04771532, StressTrace.formatLevel(stats.peak.level ?: 0.0), pointTimeLabel(stats.peak.ts)),
                         style = NoopType.footnote,
                         color = Palette.textSecondary,
                     )
@@ -890,11 +886,21 @@ internal fun StressTodayCard(points: List<StressPoint>, modifier: Modifier = Mod
                 }
 
                 Text(
-                    uiString(R.string.l10n_stress_screen_avg_a178769d) +
-                        " ${StressTrace.formatLevel(stats.mean)}",
+                    uiString(R.string.l10n_stress_screen_avg_complete_9c906427, StressTrace.formatLevel(stats.mean)),
                     style = NoopType.footnote,
                     color = textTertiary,
                 )
+                if (activityMaskedHours > 0) {
+                    Text(
+                        pluralStringResource(
+                            R.plurals.stress_hours_excluded_moving,
+                            activityMaskedHours,
+                            activityMaskedHours,
+                        ),
+                        style = NoopType.footnote,
+                        color = textTertiary,
+                    )
+                }
             }
         }
     }
@@ -928,8 +934,6 @@ private fun DaytimeStressLine(hours: List<DaytimeStress.HourPoint>) {
     if (levels.size < 2) return
 
     var scrubFrac by remember { mutableStateOf<Float?>(null) }
-    // Same blue→green→amber WHOOP ramp as the hero PipBar / totals bar (no gold).
-    val gradient = remember { Brush.horizontalGradient(*StressRamp.stops.toTypedArray()) }
 
     // Capture Compose colors at composition time — DrawScope lambdas run on the render thread.
     val hairline = Palette.hairline
@@ -1005,6 +1009,42 @@ private fun DaytimeStressLine(hours: List<DaytimeStress.HourPoint>) {
                     val topPad = 8.dp.toPx()
                     val botPad = 8.dp.toPx()
                     val usable = (h - topPad - botPad).coerceAtLeast(1f)
+
+                    // The ramp runs DOWN the chart, not across the day (#2431).
+                    //
+                    // This was `Brush.horizontalGradient`, the same blue/green/amber ramp the hero
+                    // PipBar and the totals bar use. Those are horizontal BARS, where length carries the
+                    // value, so a ramp along x is right for them. Here the value is on y, so along x it
+                    // coloured by time of day instead: a calm 9pm hour drew amber and a tense 7am one
+                    // drew blue. The colour said nothing about the score while looking exactly as though
+                    // it did, and it contradicted the 0-1 LOW / 1-2 MEDIUM / 2-3 HIGH legend this screen
+                    // prints under the chart. The iOS side moved to a vertical ramp in #2053; this one
+                    // never followed.
+                    //
+                    // `yForC` already maps the 0-3 level onto y, so a vertical ramp over the same band
+                    // makes vertical position the level. Amber at the top, blue at the bottom, matching
+                    // the gauge higher up this file.
+                    //
+                    // The bounds are `yForC`'s own, not the whole canvas and not `h - botPad`: the
+                    // canvas would sit a pad out from the level it claims at both ends, and `h - botPad`
+                    // parts company with `yForC` once `usable` hits its 1px floor on a very short chart.
+                    //
+                    // The stops are mirrored about the midpoint (`1f - at`), which both flips the ramp
+                    // and keeps the fractions. A bare colour list would be spaced EVENLY, tracking
+                    // `StressRamp.color` only while the stops sit at 0/0.5/1. That matters because the
+                    // lone-hour dot below is coloured by `StressRamp.color(level)` while the line is
+                    // coloured by position: mirroring makes the two sample the same ramp at the same
+                    // place for any spacing, so reweighting the stops later cannot quietly put the dot
+                    // and the line back into disagreement.
+                    val levelStops = StressRamp.stops
+                        .map { (at, color) -> (1f - at) to color }
+                        .reversed()
+                        .toTypedArray()
+                    val gradient = Brush.verticalGradient(
+                        *levelStops,
+                        startY = topPad,
+                        endY = topPad + usable,
+                    )
                     val chartLeft = yAxisPx
                     val chartW = (w - chartLeft).coerceAtLeast(1f)
                     val stepX = if (levels.size > 1) chartW / (levels.size - 1) else chartW
@@ -1225,8 +1265,7 @@ private fun SustainedBreatheCard(day: DaytimeStress.Result, onBreathe: () -> Uni
                 StatePill("${day.sustainedRun}h elevated", tone = StrandTone.Warning, showsDot = true)
             }
             Text(
-                uiString(R.string.l10n_stress_screen_your_last_day_sustainedrun_hours_have_194825dd, day.sustainedRun) +
-                    "of paced breathing can help downshift your nervous system.",
+                uiString(R.string.l10n_stress_screen_your_last_day_sustainedrun_hours_have_194825dd, day.sustainedRun),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -1396,7 +1435,7 @@ private fun StressTrendSection(model: StressModel, modifier: Modifier = Modifier
                             )
                         }
                         Text(
-                            uiString(R.string.l10n_stress_screen_avg_a178769d) + " " + String.format(Locale.US, "%.1f", avg),
+                            uiString(R.string.l10n_stress_screen_avg_complete_9c906427, String.format(Locale.US, "%.1f", avg)),
                             style = NoopType.captionNumber,
                             color = Palette.textSecondary,
                         )
@@ -1479,11 +1518,7 @@ private fun StressMethodologyCard(model: StressModel, modifier: Modifier = Modif
                 color = Palette.textPrimary,
             )
             Text(
-                uiString(R.string.l10n_stress_screen_we_compare_today_s_resting_heart_a9cd0955) +
-                    " baseline. A higher-than-usual resting HR and a lower-than-usual HRV " +
-                    "both push the score up, classic signs the body is activated. The " +
-                    "combined shift is mapped onto a 0-3 scale: 0 is calm, 1.5 sits at " +
-                    "your baseline, 3 is highly activated.",
+                uiString(R.string.l10n_stress_screen_we_compare_today_s_resting_heart_a9cd0955),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -1518,6 +1553,39 @@ private fun androidx.compose.foundation.layout.RowScope.BandLegend(range: String
 }
 
 // MARK: - Empty / loading states
+
+/**
+ * The intraday timeline while its read is still running (#2535).
+ *
+ * Deliberately NOT the same as [StressEmpty]: that one says there is no stress history at all, which is a
+ * conclusion. This one says the answer is still being computed, which is what a caller waiting on the
+ * thirty-day fold actually needs to see.
+ *
+ * Keeps the header and the tint [StressDaytimeSection] uses, so the section does not appear out of nowhere
+ * when the read lands. The height is approximate, not equal: the real card carries a chart and is taller.
+ * Twin of the Swift `daytimeLoading`.
+ */
+@Composable
+private fun StressDaytimeLoading(modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader("Today's Timeline", overline = "Intraday")
+        NoopCard(tint = Palette.stressColor) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    uiString(R.string.l10n_stress_screen_reading_today_s_heart_rate_7491835a),
+                    style = NoopType.subhead,
+                    color = Palette.textTertiary,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun StressLoading() {

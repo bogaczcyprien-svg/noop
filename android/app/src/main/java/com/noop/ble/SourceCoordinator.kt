@@ -467,6 +467,13 @@ class SourceCoordinator(
                     // #polar-debug: read the toggle live at connect so a Polar strap logs its identified
                     // model (default off; the Test Centre only exposes the toggle when a Polar strap is paired).
                     polarDebug = { NoopPrefs.polarDebugLogging(ctx) },
+                    // The per-sample host-received readout belongs to the modes that exist for it; without one,
+                    // the log carries the summary instead (twin of BLEManager's wiring).
+                    hostReceivedDetail = {
+                        val tc = com.noop.testcentre.TestCentre.from(ctx)
+                        tc.active(com.noop.testcentre.TestDomain.HRV) ||
+                            tc.active(com.noop.testcentre.TestDomain.CONNECTION)
+                    },
                 )
             }
         }
@@ -580,6 +587,7 @@ class SourceCoordinator(
                 }
             },
             onsetKeying = { NoopPrefs.ouraOnsetKeying(ctx) },  // #1284 residual 3
+            notifyMaskFull = { NoopPrefs.ouraNotifyMaskFull(ctx) },  // packed-notification A/B
             log = straplog,           // Oura connect/auth/stream lifecycle → the SAME exported strap log (#421)
             onBattery = batterySink,  // ring battery → the same live state the WHOOP strap battery uses
             onModel = { model -> scope.launch { runCatching { registry.setModel(id, model) } } },  // #772: correct a name-guessed gen

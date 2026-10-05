@@ -126,6 +126,7 @@ import com.noop.analytics.Baselines
 import com.noop.analytics.DayCycleMode
 import com.noop.analytics.HrZoneSet
 import com.noop.analytics.HrZones
+import com.noop.analytics.ProfileWeightSync
 import com.noop.analytics.UserProfile
 import com.noop.analytics.Zones
 import com.noop.R
@@ -224,6 +225,27 @@ class ProfileStore(private val prefs: SharedPreferences) {
     var weightKg: Double
         get() = prefs.getFloat(KEY_WEIGHT, 75f).toDouble().coerceIn(WEIGHT_MIN, WEIGHT_MAX)
         set(v) = prefs.edit().putFloat(KEY_WEIGHT, v.coerceIn(WEIGHT_MIN, WEIGHT_MAX).toFloat()).apply()
+
+    /**
+     * Opt-in "Use weight from Health Connect", OFF by default. When ON, every Health Connect import
+     * copies the newest Health Connect weight into [weightKg] ([HealthConnectWeightSync]) and Settings
+     * locks the weight stepper. Android only: Apple platforms have no Health Connect. Deliberately NOT
+     * in the `.noopbak` whitelist, like the other install-specific toggles: a restored device needs its
+     * own Health Connect grant before this means anything, and there is no Swift twin to keep equal.
+     */
+    var useHealthConnectWeight: Boolean
+        get() = prefs.getBoolean(KEY_USE_HC_WEIGHT, false)
+        set(v) = prefs.edit().putBoolean(KEY_USE_HC_WEIGHT, v).apply()
+
+    /**
+     * ISO day of the Health Connect reading last copied into [weightKg]; null before the first sync.
+     * Provenance for the Settings caption only, never a value input. Not backed up, as above.
+     */
+    var healthConnectWeightDay: String?
+        get() = prefs.getString(KEY_HC_WEIGHT_DAY, null)
+        set(v) = prefs.edit().apply {
+            if (v == null) remove(KEY_HC_WEIGHT_DAY) else putString(KEY_HC_WEIGHT_DAY, v)
+        }.apply()
 
     var heightCm: Double
         get() = prefs.getFloat(KEY_HEIGHT, 178f).toDouble().coerceIn(HEIGHT_MIN, HEIGHT_MAX)
@@ -415,7 +437,7 @@ class ProfileStore(private val prefs: SharedPreferences) {
     }
 
     companion object {
-        private const val PREFS = "noop_profile"
+        internal const val PREFS = "noop_profile"
         /** Date of birth as epoch millis — the #146 source of truth for [age]. */
         private const val KEY_DOB = "date_of_birth"
         /** Pre-#146 age key, now kept mirrored from the DOB so the `.noopbak` whitelist (Int age)
@@ -423,6 +445,10 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val KEY_AGE = "age"
         private const val KEY_SEX = "sex"
         private const val KEY_WEIGHT = "weight_kg"
+        private const val KEY_USE_HC_WEIGHT = "use_health_connect_weight"
+        private const val KEY_HC_WEIGHT_DAY = "health_connect_weight_day"
+        /** Keys a background Health Connect import may rewrite while Settings is open. */
+        internal val HEALTH_CONNECT_WEIGHT_KEYS = setOf(KEY_WEIGHT, KEY_USE_HC_WEIGHT, KEY_HC_WEIGHT_DAY)
         private const val KEY_HEIGHT = "height_cm"
         private const val KEY_WAIST = "waist_cm"
         private const val KEY_HRMAX = "hr_max_override"
@@ -541,6 +567,19 @@ fun SettingsScreen(
         }
         expPrefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { expPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    // "Use weight from Health Connect": the importer rewrites the profile weight after every sync, and
+    // the periodic auto-sync can land while this screen is open. Same mechanism as above, so the weight
+    // row and its "From Health Connect" caption follow the write instead of waiting for a re-entry.
+    DisposableEffect(Unit) {
+        val profilePrefs = context.getSharedPreferences(ProfileStore.PREFS, Context.MODE_PRIVATE)
+        // Held strongly for the effect's lifetime, for the same weak-listener reason as above.
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key in ProfileStore.HEALTH_CONNECT_WEIGHT_KEYS) rev++
+        }
+        profilePrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { profilePrefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     var backupBusy by remember { mutableStateOf(false) }
@@ -983,6 +1022,9 @@ fun SettingsScreen(
                     )
                 }
                 SettingsRowDivider()
+                // With "Use weight from Health Connect" ON the synced reading owns the value, so the
+                // stepper is locked rather than letting a manual edit be overwritten on the next sync.
+                val weightFromHc = profile.useHealthConnectWeight
                 SettingsFormRow(label = uiString(R.string.l10n_settings_screen_weight_69c0b815)) {
                     // Imperial mode steps in whole pounds and stores the kg equivalent; metric steps in
                     // 0.5 kg. The profile is always SI — only the entry unit changes.
@@ -992,6 +1034,7 @@ fun SettingsScreen(
                             value = "%.0f".format(lb),
                             unit = "lb",
                             accessibility = "Weight, ${lb.roundToInt()} pounds",
+                            enabled = !weightFromHc,
                             onMinus = { mutate { profile.weightKg = (lb - 1) / UnitFormatter.POUNDS_PER_KILOGRAM } },
                             onPlus = { mutate { profile.weightKg = (lb + 1) / UnitFormatter.POUNDS_PER_KILOGRAM } },
                         )
@@ -1000,11 +1043,39 @@ fun SettingsScreen(
                             value = "%.1f".format(profile.weightKg),
                             unit = "kg",
                             accessibility = "Weight in kilograms",
+                            enabled = !weightFromHc,
                             onMinus = { mutate { profile.weightKg -= 0.5 } },
                             onPlus = { mutate { profile.weightKg += 0.5 } },
                         )
                     }
                 }
+                if (weightFromHc) {
+                    val syncedDay = profile.healthConnectWeightDay
+                    Text(
+                        text = if (syncedDay != null) {
+                            uiString(
+                                R.string.l10n_settings_screen_weight_from_health_connect_caption_5ca6ea7d,
+                                ProfileWeightSync.captionDate(syncedDay),
+                            )
+                        } else {
+                            uiString(R.string.l10n_settings_screen_weight_from_health_connect_none_dd3f4884)
+                        },
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
+                    )
+                }
+                SettingsRowDivider()
+                SettingsToggleRow(
+                    title = uiString(R.string.l10n_settings_screen_use_weight_from_health_connect_c1fe3e2a),
+                    detail = uiString(R.string.l10n_settings_screen_use_weight_from_health_connect_detail_40238f8a),
+                    checked = weightFromHc,
+                    onCheckedChange = { on ->
+                        mutate { profile.useHealthConnectWeight = on }
+                        // Apply the stored Health Connect weight now instead of waiting for the next
+                        // import; the same write the post-import hook does.
+                        if (on) scope.launch { HealthConnectWeightSync.syncFromRepository(context, vm.repo); mutate {} }
+                    },
+                )
                 SettingsRowDivider()
                 SettingsFormRow(label = uiString(R.string.l10n_settings_screen_height_3f608b49)) {
                     // Imperial mode steps in whole inches and stores the cm equivalent; metric steps in cm.
@@ -2041,8 +2112,11 @@ fun SettingsScreen(
                     )
                     live.batteryPct?.let { pct ->
                         StatePill(
-                            title = uiString(R.string.l10n_settings_screen_battery_pct_roundtoint_e02e2891, pct.roundToInt()) +
-                                if (live.charging == true) " · Charging" else "",
+                            title = uiString(
+                                R.string.l10n_settings_screen_battery_pct_roundtoint_e02e2891,
+                                pct.roundToInt(),
+                                if (live.charging == true) " · " + uiString(R.string.l10n_live_screen_charging_5f99fe21) else "",
+                            ),
                             tone = batteryTone(pct),
                             showsDot = false,
                         )
@@ -2147,8 +2221,7 @@ fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(uiString(R.string.l10n_settings_screen_strap_name_350de547), style = NoopType.subhead, color = Palette.textPrimary)
                         Text(
-                            uiString(R.string.l10n_settings_screen_rename_your_strap_s_bluetooth_name_6032668b) +
-                                " reboots to apply, then reconnects with the new name.",
+                            uiString(R.string.l10n_settings_screen_rename_your_strap_s_bluetooth_name_6032668b),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )
@@ -2468,9 +2541,7 @@ fun SettingsScreen(
                                 color = Palette.textPrimary,
                             )
                             Text(
-                                uiString(R.string.l10n_settings_screen_runs_the_continuous_hrv_stream_only_3fed47c5) +
-                                " Note: continuous background HRV capture (including daytime naps) is paused outside this window. " +
-                                "For on-demand daytime HRV readings (including naps), use the \"Take an HRV reading\" button on the Live screen.",
+                                uiString(R.string.l10n_settings_screen_runs_the_continuous_hrv_stream_only_3fed47c5),
                                 style = NoopType.footnote,
                                 color = Palette.textTertiary,
                             )
@@ -2555,8 +2626,7 @@ fun SettingsScreen(
                 }
 
                 // "WHOOP 4.0 vs 5.0/MG — what each can read and why" (FI-2 / #490). Shown to BOTH model
-                // owners, so a 4.0 user understands their strap is fully supported (and why the firmware
-                // broadcast-out is 5/MG-only while NOOP's own re-broadcast in Data Sources works on a 4.0).
+                // owners, so either generation's supported features and protocol differences are clear.
                 val modelComparisonInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
@@ -3060,10 +3130,7 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_a_transparent_cardiorespiratory_recipe_that_recovers_eebe00c2) +
-                        " V1 staging, and is now the default. It only changes how already-detected nights are " +
-                        "split into stages (detection and scores are unchanged); turn it off to fall back to " +
-                        "V1. Takes effect on the next nights staged.",
+                    uiString(R.string.l10n_settings_screen_a_transparent_cardiorespiratory_recipe_that_recovers_eebe00c2),
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -3099,12 +3166,7 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_reviews_each_scored_wake_block_for_537924ea) +
-                        " change in body position) instead of just a heart-rate rise. A wake block with no " +
-                        "locomotion and a stable posture -- a hot night, a brief turn-over -- is folded back " +
-                        "into light sleep; a real get-up is left alone. Self-checks how much motion detail " +
-                        "your strap actually recorded and stays off on a night that's too sparse to trust " +
-                        "(older WHOOP 4.0 firmware, mainly). Off by default; takes effect on the next nights staged.",
+                    uiString(R.string.l10n_settings_screen_reviews_each_scored_wake_block_for_537924ea),
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -3648,8 +3710,7 @@ fun SettingsScreen(
                 SettingsNoteRow(
                     icon = Icons.Filled.Info,
                     iconTint = Palette.textTertiary,
-                    text = uiString(R.string.l10n_settings_screen_importing_overwrites_everything_currently_on_this_297b76ae) +
-                        " Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Android or Mac. On-device computed rows are marked APPROXIMATE in its Source column; the .noopbak backup stays the lossless restore path.",
+                    text = uiString(R.string.l10n_settings_screen_importing_overwrites_everything_currently_on_this_297b76ae),
                 )
 
                 // #644: .noopbak is a plain ZIP, not an encrypted container — anyone who gets the file

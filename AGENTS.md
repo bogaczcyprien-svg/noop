@@ -3,7 +3,9 @@
 Guidance for anyone (human or AI agent) submitting a pull request. This is the high-signal map;
 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) is the full guide (BLE safety contract, design-system
 rules, add-a-metric/screen/command recipes), [`docs/BUILD.md`](docs/BUILD.md) covers signing/pairing,
-and [`docs/IOS.md`](docs/IOS.md) covers the iOS target. Read this first; follow the links for depth.
+[`docs/IOS.md`](docs/IOS.md) covers the iOS target, and [`docs/SCOPE.md`](docs/SCOPE.md) names the
+specific WHOOP-app features that stay out of scope (and their local equivalents). Read this first;
+follow the links for depth.
 
 ## What NOOP is (and the hard scope limits)
 
@@ -110,6 +112,8 @@ Versions are pinned by the repo — install these before the loops below:
 cd Packages/WhoopProtocol && swift build && swift test     # also OuraProtocol
 # Android JVM unit tests (run on Linux/macOS, no device):
 cd android && ./gradlew testFullDebugUnitTest              # add --tests "com.noop.…" to filter
+# After a branch switch, ALWAYS: --no-build-cache --rerun-tasks. Gradle can otherwise serve
+# generated sources (Room/KSP) from the previous branch and fail classes you never touched.
 cd android && ./gradlew compileFullDebugKotlin             # compile the whole app module
 # macOS app (needs Xcode on macOS):
 xcodegen generate && xcodebuild -project Strand.xcodeproj -scheme Strand \
@@ -120,20 +124,21 @@ xcodegen generate && xcodebuild -project Strand.xcodeproj -scheme Strand \
 | Workflow | Covers | Runner | Default state |
 |---|---|---|---|
 | `swift-packages.yml` | TWO jobs. `test`: `swift test` over **`Packages/**`** (WhoopProtocol, WhoopStore, StrandAnalytics, StrandImport, StrandDesign, NoopLocalAccess). `tools`: `swift build` + `swift test` over **`Tools/SleepBench`, `Tools/SleepPSG`, `Tools/Backfill`** — Backfill has no test target, so it is build-only. Path-filtered to those directories. | macos-15 | **active** |
-| `app-build.yml` | Builds the **app targets** (`Strand` macOS + `NOOPiOS` iOS) **and runs `StrandTests`** on the macOS/`Strand` leg only — the iOS leg is compile-only. iOS leg needs **macos-26** (iOS 26 SDK / `glassEffect`). | macos-15 / macos-26 | **disabled** (on-demand) |
+| `app-build.yml` | Builds the **app targets** (`Strand` macOS + `NOOPiOS` iOS) **and runs `StrandTests`** on the macOS/`Strand` leg only — the iOS leg is compile-only. iOS leg needs **macos-26** (iOS 26 SDK / `glassEffect`). | macos-15 / macos-26 | **active** — auto-runs on PRs touching its paths (`Strand/**`, `StrandTests/**`, `StrandiOS*/**`, `NOOPWatch*/**`, `Packages/**`, `project.yml`). NO push trigger, so a direct commit to `main` needs a manual dispatch. |
 | `android.yml` | `assembleFullDebug` + `testFullDebugUnitTest` | ubuntu | **active**, path-filtered to `android/**` |
 | `source-hygiene.yml` | Doc comments that bind to nothing (`Tools/doc_comment_lint.py`) | ubuntu | **active** |
 | `i18n-coverage.yml` | Diff-scoped translation gate (`Tools/i18n_audit.py --ci`) | ubuntu | **active** |
-| `tools-python.yml` | `unittest discover` over `Tools/` and `Tools/linux-capture` | ubuntu | **active**, path-filtered |
+| `tools-python.yml` | `unittest discover` over `Tools/` and `Tools/linux-capture` | ubuntu | **active**, NO path filter. The core `Tools/` suites assert on product source (`test_home_i18n.py` reads `TodayScreen.kt`, `AppModel.swift`, the xcstrings catalogues), so no path list describes its inputs. Runs on every PR and every push to `main`. |
+| `tools-python-windows.yml` | The `Tools/linux-capture` tests a second time, under legacy Windows console encodings | windows | **active**, path-filtered to `Tools/linux-capture/**`. Those tests read nothing outside their own package, and the runner bills at twice a Linux minute. |
 | `prune-stale-branches.yml` | Deletes branches whose PR merged or closed unmerged | ubuntu | **active**, weekly + dispatch |
 | `fork-testing-build.yml` / `fork-release.yml` | Staging / release builds (apk + mac + ios) | — | on dispatch |
 
-**The trap:** `swift-packages` does **NOT** compile the app targets. So if you touch **app-target
-Swift** — anything under `Strand/`, `StrandiOS/`, `StrandiOSShared/`, `StrandiOSWidgets/` (Views,
-`AppModel`, `BLEManager`, `Repository`, `RootTabView`, widget publish, …) — **no default CI validates
-it**, because `app-build.yml` is disabled. A compile error there (e.g. `'self' used before all stored
-properties are initialized`) will pass every green check and still be broken. If you change app-target
-Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `app-build.yml` on demand.
+**The trap:** `swift-packages` does **NOT** compile the app targets. App-target Swift under
+`Strand/`, `StrandiOS/`, `StrandiOSShared/`, `StrandiOSWidgets/` and the watch targets is validated by
+**`app-build.yml`**, which runs automatically on relevant PRs and runs `StrandTests` on its macOS leg.
+When changing app-target Swift, build locally with `xcodebuild … build` or verify that both Apple
+build checks passed on the current PR head. A green package suite alone is not app-build evidence.
+The workflow has no push trigger; a direct non-release commit to `main` needs an on-demand dispatch.
 
 ### Local walls (things that will *not* build where you expect)
 - **On Linux:** `WhoopProtocol` / `OuraProtocol` (pure) build & test with a bare toolchain. The
@@ -145,8 +150,8 @@ Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `
   and a change can break it silently.
 - **App targets** (`Strand`, `NOOPiOS`) need **Xcode on macOS**; `StrandTests` runs only under
   `xcodebuild … test` on macOS — locally, or via `app-build.yml`, which does run it on the `Strand` leg.
-  Since that workflow is **disabled by default**, app-target tests are only as validated as your last
-  on-demand dispatch: writing them is not the same as having run them.
+  The workflow runs automatically on relevant PRs; verify its macOS test step passed on the current
+  head. Writing app-target tests is not the same as having run them.
 - **BLE behavior cannot be CI- or Linux-tested.** Anything on the CoreBluetooth / offload / live-HR
   path (`Strand/BLE`, `Strand/Collect`, Android `com.noop.ble`) must be **validated on a real strap**;
   compile-success proves nothing about connection behavior. Say what you tested on hardware.
@@ -196,6 +201,32 @@ Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `
   whether the thing will actually happen, since a countdown is a promise and an unarmed alarm has none
   to make. Counting gated call sites is the weak version of that last test and it passes while a fourth
   reader resolves the fact by itself: assert the single resolver instead.
+- **A gate must be able to fail on the change that caused it.** The same rule again, moved out to CI:
+  when a check cannot see what invalidates it, the failure lands on whoever pushes next and reads as
+  their fault. Three live instances, all hit in one day. The parity-governance path filter excludes
+  product source, so ordinary feature merges moved the derived sets, the stored authority stopped
+  reproducing, and nothing reported it until the 04:17 schedule failed against a commit that changed
+  none of it; that needed hand repair twice in a day, and in between, a contributor running
+  `parity_ratchet.py --base upstream/main` got an error belonging to main rather than to their branch.
+  That half is now shut: the repository-acceptance suite, the one test in that workflow which is about
+  PRODUCT source rather than about the scanner, runs on the unfiltered `tools-python` leg, and a guard
+  in `test_core_tools_filter_covers_every_governance_tool_path` asserts it stays there. On the day it
+  landed, a fourth merge had already turned main red by orphaning a function into a test-only call site,
+  and three more PRs were then found drifting the authority before they merged, each with its own CI
+  green against a base that no longer existed. The scanner's own unit tests stay path-filtered,
+  which is correct: those genuinely are about the scanner. Note what the remedy was NOT. Naming product
+  paths in the filter only moves the trap, because the list is whatever the assertions happen to read
+  today, which is the #1691 lesson written into that same guard test after a `Tools/**` filter silenced
+  a suite reading `TodayScreen.kt` and main carried it red through nine merges.
+  The governance discovery floor is an exact count, so a legitimate future removal of one test prints
+  "discovery is broken, not the suite" on main against a change that removed nothing. And GitHub's
+  fork-PR approval gate re-arms on every force-push, parking workflows at `action_required`, which the
+  check-runs API reports as a total of zero rather than as a failure.
+  Two defences. Never gate a CI poll on `failures == 0`: an approval-parked or not-yet-registered roster
+  has no failures and is not green. Require `non-success == 0` plus a stable total plus a roster floor
+  for the paths touched, which is the only thing that stopped a PR merging with its compile legs unrun
+  (#2343). And where a gate's trigger structurally cannot include what invalidates it, say so in the
+  error text, so the person holding the failure can tell whose it is.
 - **Device / strap model resolution:** map a registry `model` label to a family through the ONE
   canonical resolver (`DeviceFamily.forRegistryModel` on both platforms), never a scattered
   string compare — the wizard stores `"4.0"`, other paths `"WHOOP 4.0"`, and single-spelling checks

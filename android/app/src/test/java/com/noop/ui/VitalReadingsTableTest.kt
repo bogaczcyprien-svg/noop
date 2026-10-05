@@ -39,8 +39,16 @@ class VitalReadingsTableTest {
     @Test fun rowsAreNewestFirst() {
         val rows = vitalReadingRows(spo2Readings, "%", strap, spo2Format)
         // Ascending input (01 → 03) must render descending (03 → 01).
-        assertEquals(listOf("3 Jan", "2 Jan", "1 Jan"), rows.map { it.time })
+        assertEquals(listOf("Sat 3 Jan", "Fri 2 Jan", "Thu 1 Jan"), rows.map { it.time })
         assertEquals("97 %", rows.first().value)   // the newest reading leads
+    }
+
+    @Test fun readingDatesShowWeekdaysIncludingTodayAndYesterday() {
+        val today = LocalDate.parse("2026-09-30")
+        assertEquals("Today · Wed", vitalReadingDateLabel("2026-09-30", today, Locale.US))
+        assertEquals("Yesterday · Tue", vitalReadingDateLabel("2026-09-29", today, Locale.US))
+        assertEquals("Sat 26 Sep", vitalReadingDateLabel("2026-09-26", today, Locale.US))
+        assertEquals("bad-day", vitalReadingDateLabel("bad-day", today, Locale.US))
     }
 
     @Test fun sourceLabelsResolvePerSample() {

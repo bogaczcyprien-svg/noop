@@ -64,6 +64,20 @@ object StrainScorer {
     /** Top of the Effort scale (was 21.0 — rescaled to 0–100 for "Effort"). */
     const val maxStrain: Double = 100.0
 
+    /** Top of WHOOP's Day Strain axis. Every inherited 0–21 value maps through [effortValueFromWhoopStrain]. */
+    const val whoopMaxStrain: Double = 21.0
+
+    /**
+     * Map any value on WHOOP's 0–21 Day Strain axis onto NOOP's current 0–[maxStrain] Effort axis.
+     * This is a value conversion rather than a one-off threshold constant so every range boundary
+     * inherited from the 0–21 scale uses the same proportional mapping.
+     * Swift twin: `StrainScorer.effortValue`. Multiplies by the pre-divided ratio so the result is
+     * bit-identical to the importers' existing rescale of the same fact
+     * (WhoopCsvImporter.DAY_STRAIN_TO_EFFORT_SCALE, Swift's dayStrainToEffortScale);
+     * `value * maxStrain / whoopMaxStrain` disagrees with them by an ULP on about a quarter of inputs.
+     */
+    fun effortValueFromWhoopStrain(value: Double): Double = value * (maxStrain / whoopMaxStrain)
+
     /**
      * Logarithmic-map denominator D. Chosen so the Edwards daily ceiling
      * (top zone weight 5 sustained 24 h = 7200) maps to exactly maxStrain:
@@ -308,6 +322,39 @@ object StrainScorer {
         return acc
     }
 
+    /**
+     * Minutes in each Edwards zone, indexed by the zone's own weight: `[0]` is time BELOW zone 1,
+     * `[1..5]` are zones 1 to 5.
+     *
+     * `[0]` is the bucket no existing line can show. Edwards scores sub-50 %HRR time as exactly zero, so
+     * it never reaches `trimp` and nothing downstream reports it, yet it is the quantity #2438's step 2
+     * proposes to weight. `[1..5]` are the zone shares step 1 fits its weights on, readable until now
+     * only from a WHOOP export rather than from what NOOP itself saw.
+     *
+     * Sums to the same duration TRIMP integrates over, so the six buckets and `trimp` describe exactly
+     * the same time. That is CREDITED time, not wall-clock wear: [sampleDurationsMinutes] clamps each
+     * reading to [maxSampleGapMin], so a ten-minute dropout contributes two minutes here. Anyone wanting
+     * a wear-coverage floor (#2438 step 2) needs a different quantity, and summing these will not give
+     * it to them.
+     *
+     * The caller must pass `hrReserve > 0`: [zoneWeight] divides by it, and the refusal path reaches this
+     * line with a reserve that can be zero or negative.
+     *
+     * Byte-identical to the Swift twin `StrainScorer.zoneMinutes`.
+     */
+    fun zoneMinutes(
+        hr: List<HrSample>,
+        restingHR: Double,
+        hrReserve: Double,
+        durations: List<Double>,
+    ): List<Double> {
+        val out = DoubleArray(6)
+        for (i in hr.indices) {
+            out[zoneWeight(hr[i].bpm.toDouble(), restingHR, hrReserve)] += durations[i]
+        }
+        return out.toList()
+    }
+
     fun banisterTRIMP(
         hr: List<HrSample>,
         restingHR: Double,
@@ -390,6 +437,137 @@ object StrainScorer {
     }
 
     /**
+     * One line naming WHERE the day's HRmax came from, and what the day's own heart rate actually
+     * reached — the pair of numbers #2438's step 0 turns on.
+     *
+     * The `effort score` line beside this one already reports the HRmax it used, but it can only say
+     * `provided` or `default`, and `provided` is two different answers at once: a manual override, and
+     * the Tanaka age formula. Those are the two the step-0 proposal treats differently ("a manual
+     * override always wins"), so a contributed log cannot currently be read for it. This line splits
+     * them, and carries the day's observed peak next to the formula value so the gap between the
+     * yardstick a day was scored against and the one the day's own heart rate suggests is a subtraction
+     * rather than an inference.
+     *
+     * `peak` is the day's RAW maximum, not a percentile. That is deliberate: the rule under discussion
+     * counts days whose peak passed a threshold ("reached on at least two different days in the last
+     * 90"), so the per-day maximum is the quantity that rule is written in, and a reader can evaluate
+     * the rule from a run of these lines before anything is built. A single artefact spike is visible as
+     * the one day that disagrees with its neighbours, which is the same thing the two-day requirement
+     * exists to absorb.
+     *
+     * Changes no score. [hrmaxSource] is the branch the CALLER took, because the branch is only visible
+     * there — [strain] receives an HRmax with its provenance already discarded.
+     *
+     * No PII: a day key and four bpm values. Byte-identical string to the Swift twin `dayCalibrationLine`.
+     */
+    fun dayCalibrationLine(
+        day: String, hrmax: Double?, hrmaxSource: String,
+        tanaka: Double?, observedPeak: Double?, restingHR: Double,
+    ): String =
+        // The formatters live on WorkoutDetector, where `effort bout` needed them first. Sharing them
+        // rather than copying is what keeps a day line and a bout line in the same log rounding the same
+        // way; a second copy would be free to drift, and these two lines are read side by side.
+        "effort calib day=$day hrmax=${WorkoutDetector.round0(hrmax)}" +
+            " src=$hrmaxSource tanaka=${WorkoutDetector.round0(tanaka)}" +
+            " peak=${WorkoutDetector.round0(observedPeak)} rhr=${WorkoutDetector.round0(restingHR)}"
+
+    /**
+     * The ` sustained=` field appended to [dayCalibrationLine]: the same day's peak held across
+     * consecutive samples ([sustainedPeak]), so a run of lines shows how much of each day's `peak` was a
+     * single sample. Its own function, appended by the caller, so the calibration line's existing contract
+     * stays as it is. Same formatter as the fields before it; null renders as `nil`, not 0.
+     *
+     * Byte-identical to the Swift twin `sustainedPeakField`.
+     */
+    fun sustainedPeakField(sustainedPeak: Double?): String =
+        " sustained=${WorkoutDetector.round0(sustainedPeak)}"
+
+    /** Consecutive samples a `sustained` peak must hold for, and the span they must fit in. */
+    const val sustainedPeakSamples = 5
+    const val sustainedPeakWindowS = 60L
+
+    /**
+     * The highest bpm that [sustainedPeakSamples] consecutive samples all reached within
+     * [sustainedPeakWindowS] seconds, or null when no run of samples is that dense.
+     *
+     * The `sustained` field beside the raw `peak` on the `effort calib` line (#2438). On ring days the raw
+     * daily maximum is nearly always one isolated sample: over 60 days of Oura heart rate it sat above the
+     * age formula on 58 days, and this value on none, while 98 % of the samples at or above 165 bpm lay in
+     * a ±30 s window whose median was under 120. A step-0 rule read off the raw peak would raise a ring
+     * wearer's HRmax from artefacts, so contributed logs carry both, and the rule can be written against
+     * whichever one holds up on straps.
+     *
+     * The minimum over each run, not its mean: one spike inside five ordinary samples must not lift the
+     * value, which is the whole point of the field. Null rather than a fallback to the raw peak, so a sparse
+     * day reads as "not measured" and not as "held".
+     *
+     * Byte-identical to the Swift twin `sustainedPeak`.
+     */
+    fun sustainedPeak(
+        hr: List<HrSample>,
+        samples: Int = sustainedPeakSamples,
+        windowS: Long = sustainedPeakWindowS,
+    ): Double? {
+        if (samples <= 0 || hr.size < samples) return null
+        // Ordered by (ts, bpm), not ts alone: Swift's sort is not stable and Kotlin's is, so two samples
+        // sharing a second could otherwise form different runs on the two platforms.
+        val sorted = hr.sortedWith(compareBy({ it.ts }, { it.bpm }))
+        var best: Int? = null
+        for (i in 0..(sorted.size - samples)) {
+            val last = i + samples - 1
+            if (sorted[last].ts - sorted[i].ts > windowS) continue
+            val held = (i..last).minOf { sorted[it].bpm }
+            best = maxOf(best ?: held, held)
+        }
+        return best?.toDouble()
+    }
+
+    /**
+     * The ` span=` field appended after `sustained=`: how many seconds the run behind that value covered
+     * ([sustainedPeakSpan]). Its own function, appended by the caller, like [sustainedPeakField]. Null
+     * renders as `nil`, not 0.
+     *
+     * Byte-identical to the Swift twin `sustainedPeakSpanField`.
+     */
+    fun sustainedPeakSpanField(spanS: Long?): String = " span=${spanS ?: "nil"}"
+
+    /**
+     * The seconds covered by the run that sets [sustainedPeak], or null when that is null.
+     *
+     * [sustainedPeak] bounds a run's span from above only, so the same value can stand for five samples
+     * inside four seconds of dense heart rate or across a whole minute of sparse heart rate. On one ring
+     * with all-day heart rate the winning run covered 4 s on some days and 57 s on others. This field
+     * carries the span beside the value, so a contributed log says which kind of hold it was.
+     *
+     * When several runs reach the same value, the longest span among them: the strongest evidence that
+     * the value was held. Same rule and same ordering as [sustainedPeak], so the two fields always
+     * describe the same run.
+     *
+     * Byte-identical to the Swift twin `sustainedPeakSpan`.
+     */
+    fun sustainedPeakSpan(
+        hr: List<HrSample>,
+        samples: Int = sustainedPeakSamples,
+        windowS: Long = sustainedPeakWindowS,
+    ): Long? {
+        if (samples <= 0 || hr.size < samples) return null
+        val sorted = hr.sortedWith(compareBy({ it.ts }, { it.bpm }))
+        var bestHeld: Int? = null
+        var bestSpan = 0L
+        for (i in 0..(sorted.size - samples)) {
+            val last = i + samples - 1
+            val span = sorted[last].ts - sorted[i].ts
+            if (span > windowS) continue
+            val held = (i..last).minOf { sorted[it].bpm }
+            val b = bestHeld
+            if (b != null && (b > held || (b == held && bestSpan >= span))) continue
+            bestHeld = held
+            bestSpan = span
+        }
+        return if (bestHeld == null) null else bestSpan
+    }
+
+    /**
      * One line naming what an Effort score was computed FROM, or why it could not be computed.
      *
      * The gap this closes: [strain] is the only score in the app with no trace at all. WorkoutDetector,
@@ -400,6 +578,10 @@ object StrainScorer {
      *
      * `enough` is the [strain] gate spelled out: dense (>= minReadings) OR sparse-but-sustained. `trimp`
      * and `strain` are absent when the gate refused, which is exactly the case a bare 0 hides.
+     *
+     * Swift twin: `StrainScorer.scoreFunnelLine`. Reciprocal, and phrased with the word "twin" on
+     * purpose: the scanner's claim patterns require it, so a "Byte-identical to ..." sentence reads as
+     * a claim to a human while the ledger sees nothing.
      */
     fun scoreFunnelLine(
         day: String,
@@ -411,12 +593,19 @@ object StrainScorer {
         method: Method,
         trimp: Double?,
         strain: Double?,
+        zoneMinutes: List<Double>? = null,
     ): String =
         "effort score day=$day hr=$hrSamples enough=$enough" +
             " hrMax=${round1(maxHR)}(${if (maxHRProvided) "provided" else "default"})" +
             " rhr=${round1(restingHR)} reserve=${round1(maxHR - restingHR)}" +
             " method=${method.name.lowercase()}" +
-            " trimp=${trimp?.let { round1(it) } ?: "n/a"} strain=${strain?.let { round1(it) } ?: "n/a"}"
+            " trimp=${trimp?.let { round1(it) } ?: "n/a"} strain=${strain?.let { round1(it) } ?: "n/a"}" +
+            // Per-zone minutes, appended last so every field before this one keeps its position and the
+            // existing parsers are unaffected. Absent rather than zeroed when the reserve is invalid: a
+            // refused day has no zones, and six zeros would read as a day spent entirely below zone 1.
+            (zoneMinutes?.takeIf { it.size == 6 }
+                ?.let { z -> (0..5).joinToString("") { " z$it=${round1(z[it])}" } }
+                ?: " zones=n/a")
 
     /** One decimal, locale-independent, so two platforms' lines compare byte for byte. */
     private fun round1(v: Double): String = String.format(java.util.Locale.US, "%.1f", v)
@@ -491,8 +680,14 @@ object StrainScorer {
         }
         val scored = trimpToStrain(trimp, resolvedDenominator)
         diag?.let {
+            // Walked only inside this let, so a normal scoring pass never pays for a diagnostic nobody
+            // is reading: it is a second O(n) pass and analyzeRecent's prep is already the expensive
+            // half. `hrReserve` is safe here, the refusal path above already returned for
+            // `effMax <= restingHR`. Emitted under BOTH methods on purpose: the zones describe what the
+            // day WAS, not how it was scored, and #2438 fits an Edwards-shaped model either way.
+            val zones = zoneMinutes(hr, restingHR, hrReserve, durations)
             it(scoreFunnelLine(day, hr.size, enoughData, effMax, maxHR != null, restingHR, method,
-                               trimp = trimp, strain = scored))
+                               trimp = trimp, strain = scored, zoneMinutes = zones))
         }
         return scored
     }

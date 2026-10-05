@@ -2,6 +2,7 @@ package com.noop.widget
 
 import com.noop.analytics.DaytimeStress
 import com.noop.data.WhoopRepository
+import com.noop.ui.selectedDaytimeStressMode
 import com.noop.ui.stressLocalDayWindowContaining
 import java.time.Instant
 import java.time.ZoneId
@@ -22,17 +23,19 @@ import kotlinx.coroutines.withContext
  * tick, which is almost every tick, this costs one cheap query and returns the previous curve. Stress
  * is scored hourly, so even a busy day recomputes about as often as it has new hours.
  *
- * SCORING MODE. Always the DayRelative default, never the opt-in personal-baseline lens. Resolving
- * that mode reads fourteen trailing days of heart rate to decide whether enough worn history exists,
- * and that is a cost the screen can afford on demand and a background tick cannot. The consequence is
- * worth stating plainly: with the personal-baseline toggle on, the widget shows the default lens while
- * the screen shows the refined one, so the two can differ. Honouring the toggle here would mean
- * fourteen days of reads on a repeating schedule, which is the worse of the two.
+ * SCORING MODE. Background callers keep the DayRelative default: resolving the personal lens reads
+ * trailing days of heart rate, a cost a foreground screen can afford and an unprompted tick cannot.
+ * Today's hosted card passes its selected foreground lens explicitly, so it agrees with Stress detail;
+ * the home-screen widget does not opt in and remains a deliberately cheaper background surface.
  */
 internal object StressWidgetProducer {
 
-    /** Today's curve and the local day it belongs to. */
-    data class Curve(val points: List<StressPoint>, val epochDay: Long)
+    /** Today's curve, honest activity-masked hour count, and the local day they belong to. */
+    data class Curve(
+        val points: List<StressPoint>,
+        val epochDay: Long,
+        val activityMaskedHours: Int,
+    )
 
     /** What the last computation saw and produced, swapped in as ONE value.
      *
@@ -43,11 +46,30 @@ internal object StressWidgetProducer {
     private data class Memo(
         val fingerprint: Pair<Int, Long>,
         val day: Long,
+        val personalBaseline: Boolean,
         val points: List<StressPoint>,
+        val activityMaskedHours: Int,
     )
 
+    /**
+     * ONE SLOT PER LENS, not one slot carrying the lens.
+     *
+     * The lens became part of the memo's identity so an unchanged heart-rate fingerprint could not
+     * replay one surface's curve into the other. With a single slot that is correct and useless: three
+     * background callers ask with the default lens and Today asks with the selected one, so when the
+     * toggle is on each call evicts the other's entry and every call misses whatever the fingerprint
+     * says. Today re-asks every [RESCORE_INTERVAL_MS], so the trailing-history read the fingerprint gate
+     * exists to avoid was being paid on essentially every tick. Keyed by lens, each surface keeps its
+     * own gate. Two entries at most, so this is a pair of slots rather than a cache that grows.
+     *
+     * An IMMUTABLE map republished behind `@Volatile`, which is what the single slot already was and
+     * has to stay: four callers reach this producer, on a BLE connection service, the widget worker, the
+     * view model and a Compose effect, so they can be inside it at once. A mutable map here would be a
+     * data race on the table itself, not merely a lost entry. Copying two references on a write that
+     * only happens when the fingerprint moved is not a cost worth avoiding.
+     */
     @Volatile
-    private var memo: Memo? = null
+    private var memos: Map<Boolean, Memo> = emptyMap()
 
     /** How soon a FAILED attempt may be retried. Short, because the widget is blank until it succeeds. */
     const val RESCORE_RETRY_MS: Long = 60L * 1000L
@@ -125,6 +147,7 @@ internal object StressWidgetProducer {
     suspend fun todayCurve(
         repo: WhoopRepository,
         deviceId: String?,
+        personalBaseline: Boolean = false,
         nowSeconds: Long = System.currentTimeMillis() / 1000L,
         zone: ZoneId = ZoneId.systemDefault(),
     ): Curve? = withContext(Dispatchers.Default) {
@@ -143,14 +166,21 @@ internal object StressWidgetProducer {
             // Same day, same heart rate: nothing can have changed the score, so nothing is read. The day
             // is part of the check because a fingerprint that happens to match across midnight would
             // otherwise serve yesterday's curve as today's.
-            val memoHit = memo?.takeIf { it.day == day && it.fingerprint == fingerprint }
-            if (memoHit != null) return@runCatching Curve(memoHit.points, day)
+            // The foreground personal lens and the background widget can call this producer in either
+            // order. The preference is part of the identity so one surface can never receive the other
+            // lens merely because today's HR fingerprint is unchanged.
+            val memoHit = memos[personalBaseline]?.takeIf {
+                it.day == day && it.fingerprint == fingerprint
+            }
+            if (memoHit != null) {
+                return@runCatching Curve(memoHit.points, day, memoHit.activityMaskedHours)
+            }
 
             val hr = repo.hrSamplesUnion(deviceId, from, nowSeconds, limit = 200_000)
-            val points = if (hr.size < DaytimeStress.minHourHrSamples) {
+            val result = if (hr.size < DaytimeStress.minHourHrSamples) {
                 // Too little signal to score honestly. An EMPTY curve, not a null: this is a real
                 // answer about today, and the widget should drop yesterday's line rather than keep it.
-                emptyList()
+                DaytimeStress.Result.EMPTY
             } else {
                 val rr = repo.rrIntervalsUnion(deviceId, from, nowSeconds, limit = 200_000)
                 // Wrist accelerometer for the motion gate, so an ambulatory hour reads as exertion
@@ -159,26 +189,36 @@ internal object StressWidgetProducer {
                 val gravity = repo.gravitySamplesUnion(deviceId, from, nowSeconds, limit = 200_000)
                 val tzOffsetSeconds =
                     zone.rules.getOffset(Instant.ofEpochSecond(nowSeconds)).totalSeconds.toLong()
+                val mode = selectedDaytimeStressMode(
+                    repo, deviceId, window.day, zone, personalBaseline,
+                )
                 DaytimeStress.analyze(
-                    hr, rr, gravity, tzOffsetSeconds, DaytimeStress.ScoringMode.DayRelative,
+                    hr, rr, gravity, tzOffsetSeconds, mode,
                     includeTimeline = true,
                     // The half-step display series rather than the bare hours: same scored window,
                     // same reference, read twice as often, so the curve tracks the day instead of
-                    // stepping through it. Nothing here counts hours, so the overlap is free.
-                ).timeline.map {
-                    // startTs is the wall-clock bucket start with the local shift already undone, so it
-                    // is a true instant and formats correctly against the device's zone.
-                    StressPoint(ts = it.startTs, level = it.level, moving = it.maskedForActivity)
-                }
+                    // stepping through it. Coverage copy reads `activityMaskedHours` from the
+                    // non-overlapping hourly result below; counting these display points would
+                    // double-count the half-step windows.
+                )
+            }
+            val points = result.timeline.map {
+                // startTs is the wall-clock bucket start with the local shift already undone, so it
+                // is a true instant and formats correctly against the device's zone.
+                StressPoint(ts = it.startTs, level = it.level, moving = it.maskedForActivity)
             }
 
-            memo = Memo(fingerprint, day, points)
-            Curve(points, day)
+            memos = memos + (
+                personalBaseline to Memo(
+                    fingerprint, day, personalBaseline, points, result.activityMaskedHours,
+                )
+            )
+            Curve(points, day, result.activityMaskedHours)
         }.getOrNull()
     }
 
-    /** Drops the memo so a test starts from a known state. */
+    /** Drops both memo slots so a test starts from a known state. */
     fun resetForTest() {
-        memo = null
+        memos = emptyMap()
     }
 }

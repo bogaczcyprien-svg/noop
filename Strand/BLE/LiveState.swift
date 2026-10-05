@@ -483,7 +483,26 @@ public final class LiveState: ObservableObject {
         return String(watts)
     }
     /// Rolling log of human-readable lines for the on-device verification checklist.
-    @Published public var log: [String] = []
+    ///
+    /// NOT `@Published`, deliberately (#2547). `LiveState` carries dozens of `@Published` properties on one
+    /// `ObservableObject`, and an `ObservableObject` invalidates EVERY observer on ANY published change, so
+    /// publishing per appended line woke every view in the app for each line. A history drain plus a
+    /// re-score burst emits hundreds a minute and iOS killed the app for sustained background CPU (#2521).
+    ///
+    /// Reads are still SYNCHRONOUS and uncoalesced: this returns the buffer as it is right now, so code that
+    /// appends and then inspects the log in the same turn sees its own line. Only the PUBLISH is coalesced,
+    /// via `logRevision`. Capture is never delayed or dropped.
+    public var log: [String] { logBuffer }
+
+    /// The backing store. Mutated only by `append(log:)`.
+    private var logBuffer: [String] = []
+
+    /// Ticks when the log has changed, at most once per `publishCoalesceSeconds` however fast lines arrive.
+    ///
+    /// This is the property SwiftUI observes for the log. The Android twin is
+    /// `boundedRevision(ble.logRevision, coalesceMs = 250)` in `TestCentreScreen.kt`, which throttles the
+    /// same way; this brings the platforms level.
+    @Published public private(set) var logRevision: UInt64 = 0
 
     // MARK: - Connection status (single source of truth, #266)
 
@@ -677,6 +696,53 @@ public final class LiveState: ObservableObject {
         }
     }
 
+    /// Blank the live heart rate and the latest R-R packet while the link stays up: the strap reported itself
+    /// off the wrist, or sent a run of samples it could not measure (`LiveHeartRateReadability`). `rrRecent`
+    /// and `rrSeq` are left alone. The next readable sample sets the heart rate again.
+    ///
+    /// R-R first: the heart-rate write is the one the surfaces listen for, and by the time it lands both are gone,
+    /// so `AppModel`'s median resets on it and the banner is handed nil rather than the old number.
+    public func clearLiveHeartRate() {
+        if !rr.isEmpty { rr.removeAll() }
+        if heartRate != nil { heartRate = nil }
+    }
+
+    /// How long the live heart rate may stand with no readable sample before it is cleared. A WHOOP 5.0 taken off the
+    /// wrist can simply go quiet, with the link still up — no 0 bpm, no WRIST_OFF (a tester's log, 23 Sep 2026) — and
+    /// nothing else would ever clear the last number. Normal gaps between samples were at most 2 s in that log, so ten
+    /// seconds cannot blank a strap that is being worn.
+    public static let heartRateSilenceSeconds: TimeInterval = 10
+    /// Instance copy of `heartRateSilenceSeconds`, so a test can shorten the wait.
+    var heartRateSilence: TimeInterval = LiveState.heartRateSilenceSeconds
+    private var heartRateSilenceTimer: DispatchSourceTimer?
+    private var heartRateSilenceArmedAt: DispatchTime?
+
+    /// A readable heart-rate sample arrived (`BLEManager`'s standard profile, `FrameRouter`'s realtime frames): move the
+    /// silence deadline on. One timer, rescheduled at most every tenth of the wait (once a second in use), so it costs
+    /// nothing while samples flow and fires once when they stop.
+    public func noteReadableHeartRate() {
+        let now = DispatchTime.now()
+        let rearmNanos = UInt64(heartRateSilence / 10 * 1_000_000_000)
+        if let armed = heartRateSilenceArmedAt, now.uptimeNanoseconds &- armed.uptimeNanoseconds < rearmNanos { return }
+        heartRateSilenceArmedAt = now
+        let timer = heartRateSilenceTimer ?? {
+            let t = DispatchSource.makeTimerSource(queue: .main)
+            t.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.heartRateWentSilent() } }
+            t.resume()
+            heartRateSilenceTimer = t
+            return t
+        }()
+        timer.schedule(deadline: now + heartRateSilence, leeway: .nanoseconds(Int(rearmNanos)))
+    }
+
+    private func heartRateWentSilent() {
+        heartRateSilenceArmedAt = nil
+        guard heartRate != nil else { return }
+        append(log: AppModel.stamped("HR: no readable heart-rate sample for \(Int(heartRateSilence)) s; "
+                                     + "live heart rate cleared"))
+        clearLiveHeartRate()
+    }
+
     /// Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or
     /// R-R strip can't outlive the link. Called on CoreBluetooth disconnect (BLEManager), the twin of
     /// the `charging = nil` / `encryptedBond = false` clears on the same path.
@@ -691,52 +757,57 @@ public final class LiveState: ObservableObject {
         lastFrameAtUnix = nil             // #987: a stale "last frame" freshness must not outlive it either
         ouraWearState = nil               // a stale worn/charging badge must not outlive the link either
         ouraBatteryPct = nil              // nor a stale ring charge (#2075)
-        // Perf: flush the durable log tail on disconnect (mirroring is batched in `append`), so a completed
-        // session's tail is always persisted for a later scheduled export despite the per-line throttle.
-        Self.persistTail(log)
-        logsSincePersist = 0
     }
 
     /// Cap on the in-app strap-log ring buffer. Raised from the old ~1h (200 lines) to retain a rolling
-    /// ~24h of activity (#510 — maddognik's protocol RE wants a full day to correlate against): a busy
-    /// live session emits a few lines a minute, so 5,000 lines comfortably spans a day. Each line is a
-    /// short redacted string (~100 bytes), so the worst-case buffer is well under ~1 MB — bounded, never
-    /// unbounded. Drives the Live log card AND the shareable `exportableLogText()`.
+    /// ~24h of activity (#510 — maddognik's protocol RE wants a full day to correlate against), when a busy
+    /// live session emitted a few lines a minute. Since the once-a-second standard-HR transport line (#1767)
+    /// a streaming strap fills it in about 50 minutes, so exports read the whole log from disk (`archive`);
+    /// this buffer drives the Live log card and the Test Centre readouts. Each line is a short redacted string
+    /// (~100 bytes), so the worst-case buffer is well under ~1 MB — bounded, never unbounded.
+    /// The tail of `log` that the Live screen's card RENDERS: its last `tailLines` lines.
+    ///
+    /// Returns a SLICE, not a range, and that is the load-bearing part. The card draws it in a `LazyVStack`,
+    /// whose row closures can run in a later main-actor turn than the body that produced them (on scroll,
+    /// with no re-evaluation). A range plus `log[idx]` would then read a buffer that `append(log:)` may have
+    /// trimmed in between and crash out of bounds. A slice is a copy-on-write value snapshot, so the rows it
+    /// hands out stay valid however the live buffer moves.
+    ///
+    /// Its `indices` are ABSOLUTE positions in `log`, which is what makes them usable as identity: between
+    /// trims an append shifts only the window edges, so every shared row keeps its id, and
+    /// `scrollTo(log.indices.last)` always addresses a row that is actually rendered, which a LEADING window
+    /// would not. Empty log or a non-positive tail yields an empty slice. (#2521)
+    ///
+    /// `nonisolated` because it is pure over its arguments and touches nothing on the actor, the same way
+    /// `redactPii` and `logSafeDeviceName` below are. Without it the method inherits `LiveState`'s
+    /// `@MainActor` and a plain `XCTestCase` cannot call it at all.
+    nonisolated static func renderedTail(_ log: [String], tailLines: Int) -> ArraySlice<String> {
+        guard tailLines > 0 else { return log[log.endIndex..<log.endIndex] }
+        return log.suffix(tailLines)
+    }
+
     static let maxLogLines = 5_000
 
-    /// Perf: the durable UserDefaults tail (`persistTail`) only feeds a scheduled export that fires hours
-    /// later, so it needn't be current to the last line. Mirroring the whole tail on EVERY append was a
-    /// hot-path cost that grew as more diagnostics (offload/backfill/#700/#714/#720) funnel through this one
-    /// sink. Persist in batches of `persistEveryNLines` instead, and always flush on disconnect
-    /// (`clearBiometrics`) so a finished session stays durable; a few unmirrored lines on an abrupt kill is
-    /// harmless for a debug tail. iOS-only — Android's `logBuffer` is an O(1) `ArrayDeque` with no per-line
-    /// persist, already correct.
-    private static let persistEveryNLines = 32
-    private var logsSincePersist = 0
     /// Amortize the ring trim: let the buffer overrun by this slack, then trim back to the cap in one batch
     /// — turning an O(n) `Array.removeFirst` on every line at steady state into one per `trimSlack` lines.
     /// Still hard-bounded (never exceeds `maxLogLines + trimSlack`).
     private static let trimSlack = 256
 
     public func append(log line: String, domain: TestDomain? = nil) {
-        // FIRST append of this process: rescue the previous process's durable tail into the generation ring
-        // before this process's own `persistTail` overwrites it (see `rollLogGenerationsIfNeeded`). Latched,
-        // so this is one Bool test per line after the first.
-        Self.rollLogGenerationsIfNeeded()
         // Tag inert when nil (today's behaviour, byte-identical). When tagged, prefix a compact,
         // parseable marker the export filters on. Redaction is STILL the only scrub point
         // (redactPii below); tagging happens BEFORE redaction so the scrub covers the whole line.
         let tagged = domain.map { "[\($0.id)] " + line } ?? line
-        log.append(Self.redactPii(tagged))
+        let safe = Self.redactPii(tagged)
+        logBuffer.append(safe)
         // Batched trim: overrun by `trimSlack`, then trim back to the cap in one shot (amortized O(1)/line).
-        if log.count > Self.maxLogLines + Self.trimSlack { log.removeFirst(log.count - Self.maxLogLines) }
-        // Batched durable-tail mirror: persist every `persistEveryNLines` lines, not on every line;
-        // `clearBiometrics()` flushes on disconnect so a completed session is always fully mirrored.
-        logsSincePersist += 1
-        if logsSincePersist >= Self.persistEveryNLines {
-            logsSincePersist = 0
-            Self.persistTail(log)
+        if logBuffer.count > Self.maxLogLines + Self.trimSlack {
+            logBuffer.removeFirst(logBuffer.count - Self.maxLogLines)
         }
+        // Onto disk as it is logged, so a restart loses nothing and an export carries the runs before it.
+        // BEFORE the coalesced publish and never inside it: capture is per line, only the notification waits.
+        Self.archive.append(safe)
+        publishLogCoalesced()
         // #990: fold the Backfiller's per-session "session persisted N rows" summary into the persisted
         // ALL-TIME drained-rows tally, right here at the single log sink (no new BLE seam). The summary
         // is emitted unconditionally whenever rows landed (#150), so the cumulative counter accrues on
@@ -744,6 +815,72 @@ public final class LiveState: ObservableObject {
         // the common per-line cost to one substring scan.
         if line.contains("session persisted"), let rows = ConnectionReadout.drainedRowsFromSummary(line) {
             TestCentre.noteDrainedRows(rows)
+        }
+    }
+
+    /// How often at most the log publishes, however fast lines arrive. Matches the Android twin's 250ms.
+    ///
+    /// `nonisolated` because a `static let` in a `@MainActor` type IS actor-isolated, and this is the default
+    /// argument of the `nonisolated` decision function below, which could not then reach it. Same reason
+    /// `legacyTailKey` further down carries the keyword.
+    nonisolated static let publishCoalesceSeconds: Double = 0.25
+
+    /// What the coalescer should do, given when it last published and whether a flush is already queued.
+    ///
+    /// Pure, so the policy is tested without a clock or a run loop: the async half below is then a thin
+    /// adapter with no decisions of its own. Leading edge plus a trailing flush, which is what makes the
+    /// contract "the last line of a burst always lands" rather than "the last line is dropped until the next
+    /// one arrives". (#2547)
+    /// `Equatable` compares the `scheduleIn` payload EXACTLY, and it is the result of floating-point
+    /// subtraction, so a test asserting a whole expected case is comparing doubles for equality. Destructure
+    /// and use an accuracy instead: `0.25 - (100.10 - 100)` is `0.15000000000000568`, not `0.15`.
+    enum LogPublishDecision: Equatable {
+        /// Enough time has passed; publish on this line.
+        case publishNow
+        /// Inside the window with nothing queued; publish once after this many seconds.
+        case scheduleIn(Double)
+        /// Inside the window and a flush is already queued, which will cover this line.
+        case alreadyQueued
+    }
+
+    nonisolated static func logPublishDecision(
+        now: Double, lastPublish: Double, flushQueued: Bool, interval: Double = publishCoalesceSeconds,
+    ) -> LogPublishDecision {
+        let elapsed = now - lastPublish
+        if elapsed >= interval { return .publishNow }
+        if flushQueued { return .alreadyQueued }
+        // Clamped into [0, interval]. A clock that went backwards must neither ask for a negative sleep nor
+        // stall the log for longer than one window: without the upper clamp a `lastPublish` in the future
+        // makes `interval - elapsed` exceed the interval, and the log would sit un-notified for that long.
+        return .scheduleIn(min(interval, max(0, interval - elapsed)))
+    }
+
+    private var lastLogPublish: Double = -.greatestFiniteMagnitude
+    private var logFlushQueued = false
+
+    /// Bump `logRevision` now, or once at the end of the current window.
+    private func publishLogCoalesced() {
+        let now = ProcessInfo.processInfo.systemUptime
+        switch Self.logPublishDecision(now: now, lastPublish: lastLogPublish, flushQueued: logFlushQueued) {
+        case .alreadyQueued:
+            return
+        case .publishNow:
+            lastLogPublish = now
+            logRevision &+= 1
+        case .scheduleIn(let wait):
+            logFlushQueued = true
+            Task { @MainActor [weak self] in
+                // `try?` and NOT an early return on failure, deliberately. The flag is what suppresses every
+                // other publish in the window, so the one thing this closure must always do is clear it. A
+                // cancelled sleep throws; swallowing that and falling through still clears the flag and
+                // publishes. Rewriting this as `try await` with the error propagating would leave the flag
+                // set forever, and the log would keep capturing while the UI silently froze.
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                guard let self else { return }
+                self.logFlushQueued = false
+                self.lastLogPublish = ProcessInfo.processInfo.systemUptime
+                self.logRevision &+= 1
+            }
         }
     }
 
@@ -755,120 +892,34 @@ public final class LiveState: ObservableObject {
         return log.filter { $0.hasPrefix(prefix) }
     }
 
-    // MARK: - Durable log tail (#510, scheduled debug export)
+    // MARK: - The log on disk
 
-    /// The in-memory `log` lives only for the life of the process, so a scheduled debug auto-export that
-    /// fires hours after the last live session (the Apple analogue of Android's `StrapLogBuffer`) would
-    /// otherwise find nothing to write. We mirror the rolling log to a single UserDefaults key so the
-    /// scheduled export can read the last day's lines even with no live BLE session open. Small and
-    /// bounded: capped to the tail (`tailLimit`, well under `maxLogLines`) of short redacted strings, so
-    /// the persisted blob stays a few hundred KB at most. On-device only; nothing is sent anywhere.
-    private static let tailKey = "strapLog.tail"
-    /// How many recent lines the durable tail retains — a sensible day's worth for a scheduled export,
-    /// smaller than the live `maxLogLines` ring so the persisted copy stays modest.
-    static let tailLimit = 2_000
+    /// Every line of every run, kept across restarts within a fixed size — see `StrapLogArchive`. Opened at the
+    /// first line or export of the process; that first use also carries over the lines the UserDefaults ring
+    /// kept before the log moved to disk, then drops the ring's keys.
+    nonisolated static let archive: StrapLogArchive = {
+        let fm = FileManager.default
+        let directory = (try? StorePaths.strapLogDirectory())
+            ?? fm.temporaryDirectory.appendingPathComponent("strap-log", isDirectory: true)
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let archive = StrapLogArchive(directory: directory)
+        let defaults = UserDefaults.standard
+        archive.importLegacy(StrapLogArchive.legacyRingLines(
+            generations: (defaults.array(forKey: legacyGenerationsKey) as? [[String]]) ?? [],
+            tail: (defaults.array(forKey: legacyTailKey) as? [String]) ?? [],
+            now: Date()))
+        defaults.removeObject(forKey: legacyGenerationsKey)
+        defaults.removeObject(forKey: legacyTailKey)
+        return archive
+    }()
 
-    /// Mirror the most recent `tailLimit` lines to UserDefaults (called from `append`). Synchronous and
-    /// cheap (a single small array write); UserDefaults coalesces the disk flush. `nonisolated` (touches
-    /// only UserDefaults, no actor state) so the background/static export path can read the twin getter.
-    nonisolated private static func persistTail(_ lines: [String]) {
-        let tail = lines.count > tailLimit ? Array(lines.suffix(tailLimit)) : lines
-        UserDefaults.standard.set(tail, forKey: tailKey)
-    }
+    /// Where the ring kept its runs (#510, #1263), read once to carry them over.
+    private nonisolated static let legacyTailKey = "strapLog.tail"
+    private nonisolated static let legacyGenerationsKey = "strapLog.generations"
 
-    /// The persisted log tail, newest-last — what a scheduled export reads when no live session is open.
-    /// Empty if nothing has ever been logged on this device. `nonisolated` so a background task with no
-    /// main-actor instance can read it.
-    nonisolated public static func persistedLogTail() -> [String] {
-        (UserDefaults.standard.array(forKey: tailKey) as? [String]) ?? []
-    }
-
-    // MARK: - Previous-process log generations (the "why did the app stop" record)
-
-    /// WHY THIS EXISTS. The in-memory `log` lives for the life of the PROCESS, and `exportableLogText()`
-    /// renders exactly that — so an export taken after a restart begins at the restart and the lines that
-    /// would explain the restart are gone. Worse, the single durable slot did not survive either: a fresh
-    /// process starts logging and, 32 lines in, `persistTail` OVERWRITES `strapLog.tail` with the new
-    /// (short) array, destroying the previous session's tail before anyone can read it.
-    ///
-    /// That is not hypothetical — it has now cost THREE consecutive overnight Oura captures, each time the
-    /// same way: the app restarted after wake, and the whole night (connection drops, drain timings, the
-    /// `0x6A` lines) was gone by the time the bundle was exported. An unexplained restart is exactly when
-    /// the previous lines matter most.
-    ///
-    /// So: at the first append of each process, the surviving tail is ROLLED into a small ring of previous
-    /// generations (and the live slot cleared, so a generation is never double-counted). Exports render the
-    /// generations oldest-first ahead of the current process, which keeps `report.txt` in chronological
-    /// order — the log-parsing tools read it unchanged, they simply get more of the night.
-    private static let generationsKey = "strapLog.generations"
-    /// How many previous processes to keep. Three covers the observed failure shape (a wake-time restart,
-    /// occasionally two) without turning a debug tail into a database.
-    static let maxLogGenerations = 3
-    /// Per-generation line cap — smaller than the live `tailLimit` because what explains a stop is the END
-    /// of the previous session. 3 × 1,000 short redacted lines ≈ 300 KB of UserDefaults, bounded.
-    static let generationTailLimit = 1_000
-    /// Once-per-process latch: the roll must happen BEFORE the first `persistTail` of this process, and
-    /// exactly once, or a second roll would push this process's own partial tail in as a "previous" one.
-    nonisolated(unsafe) private static var didRollGenerations = false
-
-    /// Roll the surviving durable tail into the generation ring. Idempotent per process, and a NO-OP when
-    /// the tail is empty — so a launch that logs nothing (or a run right after a roll) never pushes an
-    /// empty generation and never evicts a real one.
-    nonisolated static func rollLogGenerationsIfNeeded(now: Date = Date()) {
-        if didRollGenerations { return }
-        didRollGenerations = true
-        let tail = persistedLogTail()
-        guard !tail.isEmpty else { return }
-        let iso = ISO8601DateFormatter()
-        iso.timeZone = TimeZone(identifier: "UTC")
-        // The stamp is when the roll happened (i.e. this launch), NOT when those lines were written — the
-        // lines carry their own clock. Said plainly in the text so nobody reads it as the session's end.
-        let clipped = tail.count > generationTailLimit ? Array(tail.suffix(generationTailLimit)) : tail
-        // Say the KEPT count, and say so when the head was dropped. The header used to report only
-        // `tail.count` (the pre-clip total), so a generation that had lost its first 1,000 lines still
-        // announced "2,000 line(s)" and read as a complete session — a reader (or a log tool) then
-        // measures the missing head as silence. Both numbers are printed: the pre-clip total is what
-        // tells anyone how much is gone.
-        let count = clipped.count == tail.count
-            ? "\(tail.count) line(s)"
-            : "\(clipped.count) of \(tail.count) line(s), head clipped"
-        let header = "===== previous app session, \(count), rolled at "
-            + iso.string(from: now) + " (this launch) ====="
-        var gens = persistedLogGenerations()
-        gens.append([header] + clipped)
-        if gens.count > maxLogGenerations { gens.removeFirst(gens.count - maxLogGenerations) }
-        UserDefaults.standard.set(gens, forKey: generationsKey)
-        // Clear the live slot: this tail now belongs to a generation, and leaving it would duplicate it in
-        // every export until 32 fresh lines happen to overwrite it.
-        UserDefaults.standard.set([String](), forKey: tailKey)
-    }
-
-    /// The stored generations, oldest-first. Each element's first line is its own separator header.
-    nonisolated static func persistedLogGenerations() -> [[String]] {
-        (UserDefaults.standard.array(forKey: generationsKey) as? [[String]]) ?? []
-    }
-
-    /// The previous processes' lines, oldest-first, ready to sit AHEAD of the current session in an export.
-    /// Empty string when there are none, so a caller can concatenate unconditionally.
-    nonisolated static func previousSessionsText() -> String {
-        let gens = persistedLogGenerations()
-        guard !gens.isEmpty else { return "" }
-        return gens.map { $0.joined(separator: "\n") }.joined(separator: "\n") + "\n"
-            + "===== current app session =====\n"
-    }
-
-    /// Drop every stored generation (Settings → the same place the log is cleared from).
-    nonisolated static func clearLogGenerations() {
-        UserDefaults.standard.removeObject(forKey: generationsKey)
-    }
-
-    /// Tests only: clear the once-per-process latch so a test can stand in for a fresh app launch.
-    nonisolated static func resetGenerationRollLatchForTesting() { didRollGenerations = false }
-
-    /// A shareable strap-log body sourced from the DURABLE tail, for a background / scheduled export that
-    /// runs with no live `LiveState` instance. Mirrors `exportableLogText()`'s header so a scheduled drop
-    /// reads the same as a manual share; falls back to the live `log` is not available here by design
-    /// (this is a `static` so a background task needs no main-actor instance).
+    /// A shareable strap-log body read from disk, for a background / scheduled export that runs with no live
+    /// `LiveState` instance. Mirrors `exportableLogText()`'s header so a scheduled drop reads the same as a
+    /// manual share (this is a `static` so a background task needs no main-actor instance).
     nonisolated public static func scheduledExportText(extraHeaderLines: [String] = []) -> String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         #if os(iOS)
@@ -876,7 +927,7 @@ public final class LiveState: ObservableObject {
         #else
         let osName = "macOS"
         #endif
-        var header = "NOOP strap log (scheduled export) — \(osName)\nApp: \(v)\n\(osName): "
+        var header = "NOOP strap log (scheduled export) — \(osName)\nApp: \(Self.appIdentityLine)\n\(osName): "
             + ProcessInfo.processInfo.operatingSystemVersionString + "\n"
         // #453: the BODY is scrubbed as it is appended, but these header lines come from the diagnostics
         // block and never pass through that path - and they carry device ids, which embed a BLE address
@@ -885,9 +936,32 @@ public final class LiveState: ObservableObject {
             header += extraHeaderLines.map { Self.redactPii($0) }.joined(separator: "\n") + "\n"
         }
         header += String(repeating: "-", count: 40) + "\n"
-        // Same generations-then-current shape as `exportableLogText()`: a scheduled drop that fires after a
-        // restart must not report only the (possibly empty) current tail.
-        return header + previousSessionsText() + persistedLogTail().joined(separator: "\n")
+        // Same earlier-runs-then-current shape as `exportableLogText()`: a scheduled drop that fires after a
+        // restart reports the runs before it, not only the (possibly empty) current one.
+        return header + archive.exportText()
+    }
+
+    /// `<version> (<build>) <bundle id>` for the export header.
+    ///
+    /// The build number and the bundle id were both absent (#2553). The build matters because a tester is
+    /// routinely asked to confirm they are on a particular staging build, and the version alone cannot say.
+    /// The bundle id matters because the `.ipa` ships unsigned and a re-signer can rewrite it, which changes
+    /// how Apple Health identifies this app as a source and which background-task identifiers iOS accepts.
+    ///
+    /// The version and build identify nobody. The bundle id is the app's own identifier and normally does
+    /// not either, but `Config/BundleId.xcconfig` exists so someone building from source can set their own
+    /// `BUNDLE_ID_PREFIX`, and that string is whatever they chose. It is printed anyway, and NOT routed
+    /// through `redactPii`, because seeing the real id IS the diagnostic and masking it would defeat the
+    /// point on exactly the builds most likely to need it.
+    ///
+    /// Shared by both header builders on purpose: the two used to construct the same `App:` line
+    /// independently, which is how a field goes into one export and not the other.
+    nonisolated static var appIdentityLine: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        let bundleID = Bundle.main.bundleIdentifier ?? "?"
+        return "\(version) (\(build)) \(bundleID)"
     }
 
     /// Scrub personal identifiers from a strap-log line so it's safe to share publicly (#445): BLE MAC
@@ -1091,19 +1165,13 @@ public final class LiveState: ObservableObject {
     /// session log. Shared so BOTH the Live screen's log card AND a macOS Settings shortcut (#507 — a 4.0
     /// owner couldn't find the log on Mac) build the SAME text. Call on the main thread (button taps).
     func exportableLogText(extraHeaderLines: [String] = []) -> String {
-        // #1263: roll here too, not only in `append`. A restart's export is the whole point of the
-        // generation ring, and a user can open the app and tap Report BEFORE this process logs its first
-        // line — at which point the previous session is still in `tailKey` (unrolled) and the in-memory
-        // `log` is empty, so `previousSessionsText()` below would miss it. The roll is latched + a no-op on
-        // an empty tail, so this is harmless when `append` already ran.
-        Self.rollLogGenerationsIfNeeded()
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         #if os(iOS)
         let osName = "iOS"
         #else
         let osName = "macOS"
         #endif
-        var header = "NOOP strap log - \(osName)\nApp: \(v)\n\(osName): "
+        var header = "NOOP strap log - \(osName)\nApp: \(Self.appIdentityLine)\n\(osName): "
             + ProcessInfo.processInfo.operatingSystemVersionString + "\n"
         #if os(iOS)
         let diagLines = IOSDiagnostics.capture().summaryLines()
@@ -1120,9 +1188,11 @@ public final class LiveState: ObservableObject {
             header += extraHeaderLines.map { Self.redactPii($0) }.joined(separator: "\n") + "\n"
         }
         header += String(repeating: "-", count: 40) + "\n"
-        // Previous processes first, so the body stays in chronological order and the log-parsing tools read
-        // it unchanged — they just get the night that a wake-time restart used to erase.
-        return header + Self.previousSessionsText() + log.joined(separator: "\n")
+        // Earlier runs first, so the body stays in chronological order and the log-parsing tools read it
+        // unchanged; then this whole run, from disk — not only the newest `maxLogLines` the screen keeps.
+        // An export before this process logs anything (Report tapped right after a restart) still carries
+        // the run before it (#1263).
+        return header + Self.archive.exportText()
     }
 }
 
