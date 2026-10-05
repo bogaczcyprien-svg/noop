@@ -32,14 +32,23 @@
           "NSMotionUsageDescription": "NOOP reads your iPhone's step count for a walking or running workout to show steps in the activity summary. It stays on your device. Nothing leaves it."
         }
       },
-      "version": "11.8.0",
-      "buildVersion": "414",
-      "versionDate": "2026-10-04",
-      "versionDescription": "Fork build: sleep onset now requires HR to also settle toward its sleep-level baseline, not just stillness; Coach (AI) now always replies in French; intervals.icu Activities on Today capped to the 2 most recent with a See all link.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v11.8.0-fork6/NOOP-v11.8.0-fork6-ios.ipa",
-      "size": 21823472,
+      "version": "12.0.0",
+      "buildVersion": "436",
+      "versionDate": "2026-10-05",
+      "versionDescription": "Merged upstream NOOP v12.0.0 (Today ring redraw/perf cleanup, Key Metrics view, consistent day-swipe, WHOOP 4.0 direct BLE HR broadcast, personal daytime-stress baseline, LF/HF ratio parity fix, sleep-detect honesty fix, 10th language). Fork tuning on top: Effort's Edwards zone cut-offs raised +5 points so ordinary daytime HR no longer scores a visible Effort while real workouts are barely affected; sleep-onset HR margin tightened from 5% to 2% above the night's own median so a still-but-awake stretch is less likely to be counted as asleep.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork1/NOOP-v12.0.0-fork1-ios.ipa",
+      "size": 22277201,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.0.0",
+          "buildVersion": "436",
+          "date": "2026-10-05",
+          "localizedDescription": "Merged upstream NOOP v12.0.0 (Today ring redraw/perf cleanup, Key Metrics view, consistent day-swipe, WHOOP 4.0 direct BLE HR broadcast, personal daytime-stress baseline, LF/HF ratio parity fix, sleep-detect honesty fix, 10th language). Fork tuning on top: Effort's Edwards zone cut-offs raised +5 points so ordinary daytime HR no longer scores a visible Effort while real workouts are barely affected; sleep-onset HR margin tightened from 5% to 2% above the night's own median so a still-but-awake stretch is less likely to be counted as asleep.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork1/NOOP-v12.0.0-fork1-ios.ipa",
+          "size": 22277201,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "11.8.0",
           "buildVersion": "414",
