@@ -183,6 +183,14 @@ struct StrandiOSApp: App {
             // intervals.icu wellness push (fork addition): off until the user enables it in
             // Settings; no-ops otherwise, safe to wire unconditionally like the line above.
             await IntervalsICURunner.shared.pushLastNightIfEnabled()
+            // intervals.icu activity PULL (fork addition): the reverse direction, previously only
+            // reachable from the Settings screen's "Importer maintenant" button, so a run/swim/anything
+            // logged on intervals.icu only showed up in NOOP once the user remembered to tap it by hand.
+            // No sport-type filter exists anywhere in this pull path (`IntervalsICUImporter`/`Client`) -
+            // every activity type intervals.icu returns is imported the same way. Guarded only by having
+            // an API key configured (throws immediately, before any network call, otherwise), same
+            // safe-to-call-unconditionally shape as every other line here.
+            await IntervalsICURunner.shared.importRecent()
             // Morning sleep-recap notification (fork addition): off until enabled; no-ops otherwise.
             await SleepRecapNotifier.shared.postIfDue()
             // HRV trend notification (fork addition): off until enabled; no-ops otherwise.
