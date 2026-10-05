@@ -149,12 +149,15 @@ final class EffortHRmaxOverrideTests: XCTestCase {
     /// The day key the fixture's timestamps fall in, under the tests' UTC offset.
     private static let day = "2026-09-26"
 
-    /// A calendar day at 60 bpm with a 40-minute block at 140, which is zone 2 under Tanaka and zone 1
+    /// A calendar day at 60 bpm with a 40-minute block at 160, which is zone 3 under Tanaka and zone 2
     /// under a 195 override. The two yardsticks have to actually disagree or the comparison is vacuous.
+    /// (Was 140/zone 2/zone 1 against the textbook 50/60/70/80/90 Edwards cut-offs; this fork's own
+    /// +5-point cut-offs — see `edwardsZones`'s doc comment — moved 140 to a tie between the two
+    /// yardsticks, so the probe moved to 160 to keep the two zones apart.)
     private func dayHR() -> [HRSample] {
         let base = 1_790_380_800   // 2026-09-26T00:00:00Z
         return (0 ..< 7200).map { i in
-            HRSample(ts: base + i, bpm: (i >= 1800 && i < 4200) ? 140 : 60)
+            HRSample(ts: base + i, bpm: (i >= 1800 && i < 4200) ? 160 : 60)
         }
     }
 
