@@ -141,8 +141,17 @@ public enum StrainScorer {
     public static let banisterBWomen: Double = 1.67
 
     /// Edwards zone cut-offs as (%HRR threshold, weight), highest-first.
+    ///
+    /// Fork tuning: raised +5 points off the textbook Edwards cut-offs (50/60/70/80/90) at this
+    /// user's own request, after a day with no formal exercise but ~1h of ordinary daytime HR just
+    /// over the stock 50% floor scored a visible Effort (#1545's "cost of being alive" problem, but
+    /// for Edwards rather than Banister — see `banisterSedentaryHRR`'s doc comment for the same shape
+    /// on the other method). Raising the floor means a day whose HR only brushes past it now scores
+    /// zero there instead of a full zone-1 minute, while a real workout — which spends real time well
+    /// above 60–70% HRR — loses comparatively little. A personal-preference trade, not upstreamed or
+    /// re-validated against WHOOP's own cut-offs.
     static let edwardsZones: [(threshold: Double, weight: Int)] = [
-        (90.0, 5), (80.0, 4), (70.0, 3), (60.0, 2), (50.0, 1),
+        (95.0, 5), (85.0, 4), (75.0, 3), (65.0, 2), (55.0, 1),
     ]
 
     /// TRIMP accumulation method.

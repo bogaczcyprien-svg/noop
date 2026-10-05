@@ -204,8 +204,11 @@ final class StrainScorerTests: XCTestCase {
     ///
     /// Twin: `StrainRestingHrTest.restingHrChangesTheZoneASampleLandsIn`.
     func testRestingHrChangesTheZoneASampleLandsIn() {
-        XCTAssertEqual(StrainScorer.zoneWeight(136, restingHR: 60, hrReserve: 130), 1)
-        XCTAssertEqual(StrainScorer.zoneWeight(136, restingHR: 50, hrReserve: 140), 2)
+        // 143 bpm (not the historical 136): the fork's +5-point zone cut-offs (see `edwardsZones`'s
+        // doc comment) moved exactly where this split sits, so the sample needed to move with it to
+        // still demonstrate zone 1 vs. zone 2 rather than zone 1 vs. zone 1.
+        XCTAssertEqual(StrainScorer.zoneWeight(143, restingHR: 60, hrReserve: 130), 1)
+        XCTAssertEqual(StrainScorer.zoneWeight(143, restingHR: 50, hrReserve: 140), 2)
         // ...and that carries all the way through to the score, not just the zone.
         let window = hr(136, 1200)   // well past the >=600-sample gate this file pins above
         let asDefault = StrainScorer.strain(window, maxHR: 190, restingHR: 60)
