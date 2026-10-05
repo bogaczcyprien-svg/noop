@@ -178,6 +178,15 @@ public enum SleepStager {
     public static let minWindowSamples: Int = 3
     /// A run is HR-confirmed only if mean HR ≤ baseline × this.
     public static let hrSleepBaselineMult: Double = 1.05
+    /// `onsetAndFinalWake`'s own, tighter version of `hrSleepBaselineMult` — ONSET only, never final
+    /// wake. Fork tuning at the user's own request: even with HR corroboration at the shared 1.05
+    /// margin, a real night still had the displayed onset land ~30 min before the user actually fell
+    /// asleep (a long lying-still-but-awake stretch beforehand). Narrowing the allowed band to 2%
+    /// above the window's own median HR (was 5%) makes an awake-but-still epoch with only slightly
+    /// elevated HR fail the onset check more often, pushing the credited onset later. Not upstreamed,
+    /// not validated against a PSG reference — a personal preference tuning, same spirit as
+    /// `onsetPersistEpochs`'s own doc comment.
+    public static let onsetHRSleepMult: Double = 1.02
     /// Skip HR refinement (trust gravity) when fewer than this many HR samples.
     public static let hrRefineMinSamples: Int = 30
     /// Consecutive epochs required to declare onset AND (symmetrically) to confirm the final wake.
@@ -1660,15 +1669,15 @@ public enum SleepStager {
     /// data) corroborates the ONSET run only. Motion-only Cole-Kripke cannot tell "lying still
     /// awake" from "asleep" — that is an intrinsic limit of actigraphy. This window is already a
     /// session `confirmSleepWithHR` accepted, so its own median HR stands in for the window's
-    /// sleep-level baseline (same `hrSleepBaselineMult` band that session-level gate uses, applied
-    /// per-epoch here): a still epoch only counts toward the onset run once HR has ALSO settled to
-    /// at/below that band, not merely once the wrist stopped moving. A short pre-sleep awake-in-bed
-    /// stretch is a small fraction of a real night, so the median stays at the true sleep level (the
-    /// same right-skew argument `confirmSleepWithHR`'s doc comment makes). Epochs with no HR, or a
-    /// window with too little HR data to trust a baseline (`hrRefineMinSamples`), pass through
-    /// unchanged — this can only ever make onset detection MORE conservative, never less, versus the
-    /// motion-only behaviour every existing caller already relies on. Final wake is untouched
-    /// (unreported, narrower scope is safer for the core stager).
+    /// sleep-level baseline, narrowed to `onsetHRSleepMult` (tighter than the session-level gate's own
+    /// `hrSleepBaselineMult` — see that constant's doc comment for why): a still epoch only counts
+    /// toward the onset run once HR has ALSO settled to at/below that band, not merely once the wrist
+    /// stopped moving. A short pre-sleep awake-in-bed stretch is a small fraction of a real night, so
+    /// the median stays at the true sleep level (the same right-skew argument `confirmSleepWithHR`'s
+    /// doc comment makes). Epochs with no HR, or a window with too little HR data to trust a baseline
+    /// (`hrRefineMinSamples`), pass through unchanged — this can only ever make onset detection MORE
+    /// conservative, never less, versus the motion-only behaviour every existing caller already relies
+    /// on. Final wake is untouched (unreported, narrower scope is safer for the core stager).
     static func onsetAndFinalWake(_ ckFlags: [Bool], hr: [Double] = []) -> (Int, Int) {
         let n = ckFlags.count
         if n == 0 { return (0, 0) }
@@ -1680,7 +1689,7 @@ public enum SleepStager {
         func onsetEligible(_ i: Int) -> Bool {
             guard ckFlags[i] else { return false }
             guard let onsetHRBaseline, i < hr.count, !hr[i].isNaN else { return true }
-            return hr[i] <= onsetHRBaseline * hrSleepBaselineMult
+            return hr[i] <= onsetHRBaseline * onsetHRSleepMult
         }
 
         var onset: Int? = nil
