@@ -16,13 +16,15 @@ final class ManualWorkoutRescoreRestingHrTests: XCTestCase {
     private let profile = UserProfile(weightKg: 70, heightCm: 175, age: 35, sex: "male")
     private let hrMax = 190.0
 
-    /// An hour at 148 bpm, 30 s cadence — chosen because the Edwards zone FLIPS with the reserve:
+    /// An hour at 155 bpm, 30 s cadence — chosen because the Edwards zone FLIPS with the reserve. (Was
+    /// 148 bpm against the textbook 50/60/70/80/90 cut-offs; this fork's own +5-point cut-offs — see
+    /// `edwardsZones`'s doc comment — moved the 148 bpm crossing to a tie, so the probe moved too.)
     private func window() -> [HRSample] {
-        (0..<120).map { HRSample(ts: $0 * 30, bpm: 148) }
+        (0..<120).map { HRSample(ts: $0 * 30, bpm: 155) }
     }
 
     /// A measured resting of 45 must score the same window strictly higher than the default 60:
-    /// 148 bpm is 71.0% of a 45-resting reserve (zone 3) but 67.7% of a 60-resting one (zone 2).
+    /// 155 bpm is 75.9% of a 45-resting reserve (zone 3) but 73.1% of a 60-resting one (zone 2).
     func testMeasuredRestingScoresHigherThanTheDefaultForAFitWearer() {
         let def = ManualWorkoutRescore.scored(windowSamples: window(), profile: profile, hrMax: hrMax)
         let measured = ManualWorkoutRescore.scored(windowSamples: window(), profile: profile,

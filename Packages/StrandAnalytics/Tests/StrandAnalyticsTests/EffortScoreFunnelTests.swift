@@ -45,8 +45,14 @@ final class EffortScoreFunnelTests: XCTestCase {
     // MARK: - Per-zone minutes (#2438)
 
     /// Sample series whose bpm values straddle every Edwards threshold from BOTH sides, one minute apart
-    /// so each reading is credited exactly one minute. The expected list is shared with the Kotlin twin.
-    private static let zoneProbe: [Int] = [60, 60, 60, 119, 120, 131, 132, 143, 144, 155, 156, 167, 168]
+    /// so each reading is credited exactly one minute.
+    ///
+    /// Built against this fork's own +5-point zone cut-offs (55/65/75/85/95 — see `edwardsZones`'s doc
+    /// comment), not the textbook 50/60/70/80/90 the Kotlin twin still uses: the two are no longer
+    /// byte-identical here, same as the rest of this fork-only tuning. The expected bucket counts below
+    /// are unchanged from before the tuning, since the straddle is still one minute to either side of
+    /// each (now-shifted) threshold.
+    private static let zoneProbe: [Int] = [60, 60, 60, 125, 126, 137, 138, 149, 150, 161, 162, 173, 174]
 
     private func probeSamples() -> [HRSample] {
         Self.zoneProbe.enumerated().map { HRSample(ts: 1_700_000_000 + $0.offset * 60, bpm: $0.element) }

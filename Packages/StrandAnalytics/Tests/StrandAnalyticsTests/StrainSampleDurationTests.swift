@@ -18,8 +18,10 @@ final class StrainSampleDurationTests: XCTestCase {
     private let maxHR = 190.0
     private var reserve: Double { maxHR - rest }
 
-    /// A bpm solidly in Edwards zone 4 (85% HRR).
-    private var hard: Int { Int(rest + 0.85 * reserve) }
+    /// A bpm solidly in Edwards zone 4. 90% HRR, not the textbook recipe's 85%: this fork raises every
+    /// cut-off +5 points (see `edwardsZones`'s doc comment), and 85% now sits just under the new zone 4
+    /// floor (85%) rather than solidly inside it.
+    private var hard: Int { Int(rest + 0.90 * reserve) }
 
     private func series(_ ts: Int...) -> [HRSample] { ts.map { HRSample(ts: $0, bpm: hard) } }
 
