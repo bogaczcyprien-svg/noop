@@ -89,6 +89,7 @@ struct LiquidTodayView: View {
     // share one computation rather than scoring the day three times.
     @State private var hostedStressHours: [DaytimeStress.HourPoint] = []
     @State private var hostedStressActivityMaskedHours = 0
+    @State private var hostedStressSleepMaskedHours = 0
 
     // sheets / expanders
     @State private var guideSection: ScoreSection?
@@ -861,6 +862,12 @@ struct LiquidTodayView: View {
                     }
                     if let maskedCaption = stressActivityMaskedHoursCaption(hostedStressActivityMaskedHours) {
                         Text(maskedCaption)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let sleepCaption = stressSleepMaskedHoursCaption(hostedStressSleepMaskedHours) {
+                        Text(sleepCaption)
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1902,9 +1909,11 @@ struct LiquidTodayView: View {
             )?.result
             hostedStressHours = result?.timeline ?? []
             hostedStressActivityMaskedHours = result?.activityMaskedHours ?? 0
+            hostedStressSleepMaskedHours = result?.sleepMaskedHours ?? 0
         } else {
             hostedStressHours = []
             hostedStressActivityMaskedHours = 0
+            hostedStressSleepMaskedHours = 0
         }
 
         // First load done — bring the hero gauges + sky to life now the launch churn has settled.

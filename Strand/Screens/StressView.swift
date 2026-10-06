@@ -13,6 +13,16 @@ func stressActivityMaskedHoursCaption(_ count: Int) -> String? {
         : String(localized: "\(count) hours excluded — you were moving.")
 }
 
+/// Same shape, for hours excluded because they overlapped a detected sleep session (a sleep-in
+/// morning crossing the 06:00 waking boundary) rather than the motion gate. See
+/// `DaytimeStress.HourPoint.maskedForSleep`'s doc comment.
+func stressSleepMaskedHoursCaption(_ count: Int) -> String? {
+    guard count > 0 else { return nil }
+    return count == 1
+        ? String(localized: "1 hour excluded — you were still asleep.")
+        : String(localized: "\(count) hours excluded — you were still asleep.")
+}
+
 // MARK: - Stress Monitor
 //
 // A clear, Whoop-style "Stress Monitor": one 0–3 number, a band (LOW/MEDIUM/HIGH),
@@ -196,8 +206,15 @@ struct StressView: View {
         // detached task is decorative and the work races the UI for cores anyway. StressDayCurve
         // learned that on this same issue; the continuation in UnescalatedWork is what keeps the
         // priority honest.
+        // Exclude the night that belongs to this day from its OWN daytime stress read — a sleep-in
+        // morning crossing the 06:00 waking boundary is still asleep, not a tense start to the day.
+        // `daySleepSpan` was already fetched above for the chart's shading; reused here, not refetched.
+        let sleepSpans: [(start: Int, end: Int)] = daySleepSpan.map {
+            [(Int($0.start.timeIntervalSince1970), Int($0.end.timeIntervalSince1970))]
+        } ?? []
         daytime = await runUnescalated(priority: .userInitiated) {
-            DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, tzOffsetSeconds: tz, mode: mode,
+            DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, sleepSpans: sleepSpans,
+                                  tzOffsetSeconds: tz, mode: mode,
                                   includeTimeline: true)
         }
 
@@ -318,12 +335,18 @@ struct StressView: View {
         guard hr.count >= DaytimeStress.minHourHRSamples else { return nil }
         let rr = await repo.rrIntervals(from: from, to: to, limit: 200_000)
         let gravity = await repo.gravitySamplesUnion(from: from, to: to, limit: 200_000)
+        // Same sleep exclusion `loadDaytime` applies to `selectedDay` — without it, a past day in
+        // the weekday-baseline average would unfairly look worse purely for having had a sleep-in
+        // morning scored as tense, which the paged day itself no longer does.
+        let sleeps = await repo.sleepSessions(from: from - 12 * 3600, to: to, limit: 4)
+        let sleepSpans: [(start: Int, end: Int)] = sleeps.map { ($0.startTs, $0.endTs) }
         let mode = await DaytimeStressMode.selected(
             repo: repo, startOfToday: startOfDay, calendar: cal,
             personalBaseline: PuffinExperiment.stressPersonalBaselineEnabled
         )
         let result = await runUnescalated(priority: .utility) {
-            DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, tzOffsetSeconds: tz, mode: mode,
+            DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, sleepSpans: sleepSpans,
+                                  tzOffsetSeconds: tz, mode: mode,
                                   includeTimeline: false)
         }
         guard !result.scored.isEmpty else { return nil }
@@ -596,6 +619,12 @@ struct StressView: View {
 
                     if let maskedCaption = stressActivityMaskedHoursCaption(day.activityMaskedHours) {
                         Text(maskedCaption)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let sleepCaption = stressSleepMaskedHoursCaption(day.sleepMaskedHours) {
+                        Text(sleepCaption)
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)

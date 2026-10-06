@@ -395,6 +395,7 @@ struct TodayView: View {
     // rows, and the iOS widget shares the same computation rather than scoring the day twice.
     @State private var hostedStressHours: [DaytimeStress.HourPoint] = []
     @State private var hostedStressActivityMaskedHours = 0
+    @State private var hostedStressSleepMaskedHours = 0
 
     // TODAY's in-progress Effort (NOOP 0–100 axis), recomputed over the day's HR (local-midnight→now)
     // each load so the gauge tracks today as it accumulates rather than waiting on the heavy daily pass
@@ -2528,6 +2529,12 @@ struct TodayView: View {
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if let sleepCaption = stressSleepMaskedHoursCaption(hostedStressSleepMaskedHours) {
+                        Text(sleepCaption)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         case .asleepDuration: AsleepDurationCard(data: AsleepDurationData.build(days: repo.days))
@@ -4613,6 +4620,7 @@ struct TodayView: View {
         guard HostedCardPrefs.decodeEnabled(hostedCardsRaw).contains(.stressToday) else {
             hostedStressHours = []
             hostedStressActivityMaskedHours = 0
+            hostedStressSleepMaskedHours = 0
             return
         }
         // `timeline`, not `hours`: the half-step display series, so the curve tracks the day rather
@@ -4623,6 +4631,7 @@ struct TodayView: View {
         )?.result
         hostedStressHours = result?.timeline ?? []
         hostedStressActivityMaskedHours = result?.activityMaskedHours ?? 0
+        hostedStressSleepMaskedHours = result?.sleepMaskedHours ?? 0
     }
 
     private func loadHostedSleepModel() async {

@@ -80,6 +80,13 @@ enum StressDayCurve {
             // than as stress. Empty on hardware or imports without gravity, which degrades to no masking
             // exactly as the screen does.
             let gravity = await repo.gravitySamplesUnion(from: from, to: to, limit: 200_000)
+            // The night that belongs to today, so hours still genuinely asleep past the 06:00 waking
+            // boundary (a sleep-in morning, which is most mornings) are excluded from today's
+            // stress exactly like an ambulatory hour is — see `DaytimeStress.HourPoint
+            // .maskedForSleep`'s doc comment. Widened 12h back so a session that started the
+            // evening before (crossing local midnight) is still found.
+            let sleeps = await repo.sleepSessions(from: from - 12 * 3600, to: to, limit: 4)
+            let sleepSpans: [(start: Int, end: Int)] = sleeps.map { ($0.startTs, $0.endTs) }
             let tz = TimeZone.current.secondsFromGMT(for: now)
             let mode = await DaytimeStressMode.selected(
                 repo: repo,
@@ -105,7 +112,7 @@ enum StressDayCurve {
             // the UI for cores at the UI's own quality of service. This runs unprompted on activation
             // and after every Health sync, exactly when the UI is busy, so it must yield.
             scored = await runUnescalated {
-                DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity,
+                DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, sleepSpans: sleepSpans,
                                       tzOffsetSeconds: tz, mode: mode,
                                       includeTimeline: true)
             }
