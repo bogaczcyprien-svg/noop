@@ -33,13 +33,22 @@
         }
       },
       "version": "12.0.0",
-      "buildVersion": "437",
-      "versionDate": "2026-10-05",
-      "versionDescription": "intervals.icu activities (any sport, not just rides) now pull in automatically after every strap sync, instead of only on a manual \"Importer maintenant\" tap.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork2/NOOP-v12.0.0-fork2-ios.ipa",
-      "size": 22278166,
+      "buildVersion": "438",
+      "versionDate": "2026-10-06",
+      "versionDescription": "Stress screen redesign (day navigation, continuous sleep reading, Outside Activity/Sleep context cards, vs-typical-weekday comparison) + a real fix for hours still asleep being scored as daytime stress. SpO2 candidate now shows its sample count and its unverified disclaimer actually appears. Settings > Check for updates now has a one-tap Install button via SideStore. New Planned Training section with a Today preview of your next intervals.icu session.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork3/NOOP-v12.0.0-fork3-ios.ipa",
+      "size": 22422817,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.0.0",
+          "buildVersion": "438",
+          "date": "2026-10-06",
+          "localizedDescription": "Stress screen redesign (day navigation, continuous sleep reading, Outside Activity/Sleep context cards, vs-typical-weekday comparison) + a real fix for hours still asleep being scored as daytime stress. SpO2 candidate now shows its sample count and its unverified disclaimer actually appears. Settings > Check for updates now has a one-tap Install button via SideStore. New Planned Training section with a Today preview of your next intervals.icu session.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork3/NOOP-v12.0.0-fork3-ios.ipa",
+          "size": 22422817,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "12.0.0",
           "buildVersion": "437",
