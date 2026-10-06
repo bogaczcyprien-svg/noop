@@ -19,6 +19,13 @@ public final class IntervalsICUSettings: ObservableObject {
     /// itself shows per day (sleep, resting HR, HRV, weight, steps).
     public enum WellnessField: String, CaseIterable {
         case hrv, restingHR, sleep, weight, steps
+        /// NOOP's own computed Charge (recovery, 0-100) — not a raw input like the others, the
+        /// SCORE itself. Maps to intervals.icu's `readiness` field (the Wellness schema has no
+        /// dedicated "recovery"/"charge" field; `readiness` is the closest fit for a single
+        /// composite number). Added at explicit user request: pushing HRV/resting-HR alone lets
+        /// intervals.icu compute ITS OWN readiness-like figure from raw inputs, which is not the
+        /// same number as NOOP's Charge — this sends NOOP's own number instead.
+        case charge
         fileprivate var key: String { "noop.intervalsicu.push.\(rawValue)" }
     }
 

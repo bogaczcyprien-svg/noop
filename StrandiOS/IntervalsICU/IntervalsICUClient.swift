@@ -148,6 +148,7 @@ public struct IntervalsICUClient {
     /// Fork addition, the reverse direction of `activities(oldest:newest:)`: NOOP never reads this
     /// back, matching the one-way-export convention the self-hosted push client already follows.
     public func putWellness(date: String, hrv: Double?, restingHR: Int?,
+                            readiness: Double? = nil,
                             sleepSecs: Int?, sleepScore: Int?,
                             weightKg: Double? = nil, steps: Int? = nil) async throws {
         guard let url = URL(string: "https://intervals.icu/api/v1/athlete/\(athleteId)/wellness/\(date)")
@@ -160,6 +161,9 @@ public struct IntervalsICUClient {
         if let sleepScore { body["sleepScore"] = sleepScore }
         if let weightKg { body["weight"] = weightKg }
         if let steps { body["steps"] = steps }
+        // NOOP's own computed Charge (recovery, 0-100) — the Wellness schema's `readiness` field is
+        // the closest fit for a single composite recovery number. See WellnessField.charge's doc.
+        if let readiness { body["readiness"] = readiness }
 
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"

@@ -72,6 +72,7 @@ public enum IntervalsICUWellnessPush {
             date: latest.day,
             hrv: fields.contains(.hrv) ? latest.avgHrv : nil,
             restingHR: fields.contains(.restingHR) ? latest.restingHr : nil,
+            readiness: fields.contains(.charge) ? latest.recovery : nil,
             sleepSecs: sleepSecs,
             sleepScore: sleepScore,
             weightKg: fields.contains(.weight) ? ProfileStore().weightKg : nil,

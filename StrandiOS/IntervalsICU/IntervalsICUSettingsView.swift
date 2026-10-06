@@ -70,8 +70,11 @@ struct IntervalsICUSettingsView: View {
         }
     }
 
+    // Charge + Sommeil listed first, Pas last — the explicit priority the user gave when asking
+    // for this field ("surtout ma charge, récup et sommeil" over steps).
     private var fieldOptions: [(field: IntervalsICUSettings.WellnessField, label: String)] {
-        [(.hrv, "HRV"), (.restingHR, "FC de repos"), (.sleep, "Sommeil (durée + score)"),
+        [(.charge, "Charge (récup)"), (.sleep, "Sommeil (durée + score)"),
+         (.hrv, "HRV"), (.restingHR, "FC de repos"),
          (.weight, "Poids"), (.steps, "Pas")]
     }
 
