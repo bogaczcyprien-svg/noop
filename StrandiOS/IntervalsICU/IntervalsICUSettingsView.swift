@@ -49,6 +49,13 @@ struct IntervalsICUSettingsView: View {
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if settings.pushEnabled {
+                    Text("Dernier envoi : \(runner.lastPushResult ?? "pas encore tenté depuis l'activation")")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
