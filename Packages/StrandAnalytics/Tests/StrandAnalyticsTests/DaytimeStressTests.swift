@@ -235,14 +235,14 @@ final class DaytimeStressTests: XCTestCase {
     // MARK: - Motion gate
 
     /// Gravity for one local hour. `activeFraction` of the records step far enough between
-    /// consecutive samples to clear `WorkoutDetector.motionThreshold` (0.20 g L2); the rest hold
+    /// consecutive samples to clear `DaytimeStress.stressMotionThreshold` (0.45 g L2); the rest hold
     /// still. The alternating ±step keeps every active record above the floor rather than only the
     /// first, so the produced active fraction matches `activeFraction` closely.
     private func hourGravity(_ hour: Int, activeFraction: Double, n: Int = 120) -> [GravitySample] {
         let base = hour * 3_600
         let activeCount = Int((Double(n) * activeFraction).rounded())
         return (0..<n).map { i in
-            // 0.5 g of step per axis-pair is comfortably above the 0.20 walk floor when it alternates.
+            // 0.5 g of step per axis-pair clears the 0.45 g stress-motion bar when it alternates.
             let x = i < activeCount ? (i % 2 == 0 ? 0.5 : 0.0) : 0.0
             return GravitySample(ts: base + i * 30, x: x, y: 0, z: 1)
         }

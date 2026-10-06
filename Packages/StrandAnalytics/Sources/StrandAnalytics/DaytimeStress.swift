@@ -67,14 +67,28 @@ public enum DaytimeStress {
     // is actually observable. Orthogonal to `ScoringMode` below: masking decides WHICH hours score,
     // the mode decides WHAT reference they score against.
 
-    /// An hour whose gravity-derived activity is ambulatory for at least this fraction of its records
-    /// is EXERTION, not stress — masked, not scored. "Ambulatory" = a per-record activity intensity
-    /// above `WorkoutDetector.motionThreshold` (0.20 L2-g, the codebase's calibrated walk floor: desk
-    /// ≈ 0.05–0.10 g, walking ≈ 0.2–0.4 g). 0.30 means "at least 30 % of the hour was walking or
-    /// moving"; below it, a stray reach or one trip to the kitchen does not mask a desk hour. An
-    /// hourly grain is coarse — this is the gate that later allows finer epochs, at which point the
-    /// fraction can tighten. Range (0, 1].
+    /// An hour whose gravity-derived activity clears `stressMotionThreshold` for at least this
+    /// fraction of its records is EXERTION, not stress — masked, not scored. 0.30 means "at least
+    /// 30 % of the hour was at or above that bar"; below it, a stray reach or one trip to the kitchen
+    /// does not mask a desk hour. An hourly grain is coarse — this is the gate that later allows finer
+    /// epochs, at which point the fraction can tighten. Range (0, 1].
     public static let activityMaskFraction: Double = 0.30
+    /// FORK TUNING, not upstreamed: the per-record intensity bar the motion gate masks on.
+    /// Deliberately set ABOVE `WorkoutDetector.motionThreshold` (0.20 L2-g, the codebase's calibrated
+    /// WALK floor — desk ≈ 0.05–0.10 g, walking ≈ 0.2–0.4 g per that constant's own doc), not equal to
+    /// it. At 0.20, ordinary brisk walking — which sits inside that same 0.2–0.4 g walking band —
+    /// cleared the bar on nearly every record, so a 2-hour walk masked both hours outright instead of
+    /// being read as (mildly elevated, still real) stress, the opposite of what a stress monitor
+    /// should do with a day's ordinary movement. WHOOP's own Stress score keeps reading through
+    /// ordinary daily activity and only stops at genuine exertion; this fork now does the same. 0.45
+    /// sits just above the walking band's own documented 0.4 g ceiling, so brisk walking no longer
+    /// trips the gate while sustained jogging/running-level motion still does. Separate constant from
+    /// `WorkoutDetector.motionThreshold` on purpose — that one still gates workout AUTO-DETECTION
+    /// and `SedentaryDetector` elsewhere, which is unrelated and must not move with this. Not
+    /// independently validated against a ground-truth corpus (see the file's APPROXIMATE/non-clinical
+    /// note); it is a reasoned extrapolation from this codebase's own documented walk-floor
+    /// calibration, not a new physiological estimate.
+    public static let stressMotionThreshold: Double = 0.45
     /// Post-exercise shadow: HR stays elevated for a while AFTER exertion ends, so the single hour
     /// that immediately FOLLOWS a directly-ambulatory hour is ALSO masked WHILE its mean HR is still
     /// above the calm reference by this margin (bpm). A following hour whose HR has already returned
@@ -477,10 +491,11 @@ public enum DaytimeStress {
         let aggs = aggregate(hrByBucket, rrByBucket)
 
         // 2b) Motion gate: bucket the day's gravity-derived activity by the SAME local hour and mark
-        //     each hour AMBULATORY when at least `activityMaskFraction` of its records clear the
-        //     calibrated walk floor (`WorkoutDetector.motionThreshold`) — reusing the exact activity
-        //     series `SedentaryDetector` / `WorkoutDetector` already trust. Empty gravity → no active
-        //     buckets → nothing masked below (byte-identical to the pre-motion behaviour).
+        //     each hour AMBULATORY when at least `activityMaskFraction` of its records clear
+        //     `stressMotionThreshold` — reusing the exact activity series `SedentaryDetector` /
+        //     `WorkoutDetector` already trust, just scored against a higher, stress-specific bar (see
+        //     that constant's doc for why it is not `WorkoutDetector.motionThreshold`). Empty gravity →
+        //     no active buckets → nothing masked below (byte-identical to the pre-motion behaviour).
         // Derived ONCE and re-bucketed per grid. `activitySeries` walks the whole day's gravity, so
         // recomputing it for the second grid would have doubled the most expensive part of the motion
         // gate to answer the same question about the same samples.
@@ -493,7 +508,7 @@ public enum DaytimeStress {
                 let bucket = bucketOf(p.ts + tzOffsetSeconds, phase: phase)
                 var e = counts[bucket] ?? (0, 0)
                 e.total += 1
-                if p.intensity > WorkoutDetector.motionThreshold { e.active += 1 }
+                if p.intensity > stressMotionThreshold { e.active += 1 }
                 counts[bucket] = e
             }
             for (b, e) in counts where e.total > 0 {
