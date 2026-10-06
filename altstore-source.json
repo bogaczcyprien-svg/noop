@@ -33,13 +33,22 @@
         }
       },
       "version": "12.0.0",
-      "buildVersion": "439",
+      "buildVersion": "440",
       "versionDate": "2026-10-06",
-      "versionDescription": "Added a Plus > \"Entrainement planifie\" entry, reachable independently of the Today preview card, so the real state (nothing planned vs. a load error) is always visible even when the card itself shows nothing.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork4/NOOP-v12.0.0-fork4-ios.ipa",
-      "size": 22424182,
+      "versionDescription": "Fixed the Next Session (Planned Training) Today card so it always shows a stable state instead of sometimes rendering nothing while its data loads. Added a separate \"Check for upstream updates\" button in Settings for ryanbr/noop's own releases, alongside this fork's own updater.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork5/NOOP-v12.0.0-fork5-ios.ipa",
+      "size": 22436782,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.0.0",
+          "buildVersion": "440",
+          "date": "2026-10-06",
+          "localizedDescription": "Fixed the Next Session (Planned Training) Today card so it always shows a stable state instead of sometimes rendering nothing while its data loads. Added a separate \"Check for upstream updates\" button in Settings for ryanbr/noop's own releases, alongside this fork's own updater.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork5/NOOP-v12.0.0-fork5-ios.ipa",
+          "size": 22436782,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "12.0.0",
           "buildVersion": "439",
