@@ -698,14 +698,10 @@ struct LiquidTodayView: View {
 
     private var heroCard: some View {
         HStack(alignment: .top, spacing: 4) {
-            // #543 carry: an unscored today shows the last scored night's REAL Charge (labelled as prior by
-            // the state pill) rather than an empty vessel, matching the classic Today, the widget/watch/Live
-            // Activity (`Repository.widgetAnchor`) and Android. Effort deliberately does NOT carry — it is
-            // today's own accumulation, so yesterday's number would be a false statement, not a stale one.
-            HeroScoreCell(label: String(localized: "Charge"), score: chargeDisplay.pct,
-                          tint: chargeDisplay.pct.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.chargeColor,
-                          animated: dataLoaded, onGuide: { guideSection = .charge },
-                          detailRoute: .metric(HeroRingMetric.charge))
+            // Fork layout, explicit request: Effort on the LEFT, Charge/Recovery in the MIDDLE, Rest on
+            // the right (was Charge-Effort-Rest). Purely an ordering change — nothing about what each
+            // cell shows or how it's scored moved.
+            //
             // #45: the hero Effort must honour the user's Effort scale like every other Effort read-out.
             // Show the value on the chosen scale (0–100 or WHOOP 0–21) with the matching vessel max, and
             // one decimal on the compressed 0–21 axis to match the app-wide `effortDisplay` convention
@@ -718,6 +714,14 @@ struct LiquidTodayView: View {
                           decimals: effortScale == .whoop ? 1 : 0,
                           detailRoute: .metric(HeroRingMetric.effort),
                           targetRange: effortTargetRange(recovery: chargeDisplay.pct))
+            // #543 carry: an unscored today shows the last scored night's REAL Charge (labelled as prior by
+            // the state pill) rather than an empty vessel, matching the classic Today, the widget/watch/Live
+            // Activity (`Repository.widgetAnchor`) and Android. Effort deliberately does NOT carry — it is
+            // today's own accumulation, so yesterday's number would be a false statement, not a stale one.
+            HeroScoreCell(label: String(localized: "Charge"), score: chargeDisplay.pct,
+                          tint: chargeDisplay.pct.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.chargeColor,
+                          animated: dataLoaded, onGuide: { guideSection = .charge },
+                          detailRoute: .metric(HeroRingMetric.charge))
             HeroScoreCell(label: String(localized: "Rest"), score: restScore, tint: StrandPalette.restColor,
                           animated: dataLoaded, onGuide: { guideSection = .rest },
                           detailRoute: .metric(HeroRingMetric.rest))

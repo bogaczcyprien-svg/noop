@@ -179,14 +179,15 @@ public enum SleepStager {
     /// A run is HR-confirmed only if mean HR ≤ baseline × this.
     public static let hrSleepBaselineMult: Double = 1.05
     /// `onsetAndFinalWake`'s own, tighter version of `hrSleepBaselineMult` — ONSET only, never final
-    /// wake. Fork tuning at the user's own request: even with HR corroboration at the shared 1.05
-    /// margin, a real night still had the displayed onset land ~30 min before the user actually fell
-    /// asleep (a long lying-still-but-awake stretch beforehand). Narrowing the allowed band to 2%
-    /// above the window's own median HR (was 5%) makes an awake-but-still epoch with only slightly
-    /// elevated HR fail the onset check more often, pushing the credited onset later. Not upstreamed,
-    /// not validated against a PSG reference — a personal preference tuning, same spirit as
-    /// `onsetPersistEpochs`'s own doc comment.
-    public static let onsetHRSleepMult: Double = 1.02
+    /// wake. Fork tuning at the user's own request, tightened TWICE now: 5% → 2% still left the
+    /// displayed onset reading early on real nights, so an awake-but-still epoch no longer gets ANY
+    /// headroom above the window's own median sleep HR — it must be AT OR BELOW it, not just close to
+    /// it. A still-awake stretch beforehand typically sits a few bpm above where that same person's
+    /// genuine sleep HR settles, so removing the margin entirely makes those epochs fail the onset
+    /// check instead of narrowly passing it, pushing the credited onset later toward when sleep
+    /// actually began. Not upstreamed, not validated against a PSG reference — a personal preference
+    /// tuning, same spirit as `onsetPersistEpochs`'s own doc comment.
+    public static let onsetHRSleepMult: Double = 1.00
     /// Skip HR refinement (trust gravity) when fewer than this many HR samples.
     public static let hrRefineMinSamples: Int = 30
     /// Consecutive epochs required to declare onset AND (symmetrically) to confirm the final wake.

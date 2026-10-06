@@ -80,10 +80,14 @@ public enum RecoveryScorer {
     public static let wActivityBalance: Double = 0.05
 
     /// Logistic spread: ±2 z-units ≈ full Red–Green band (15%–95%). Fork tuning: raised from the
-    /// upstream 1.6 to make Charge move more visibly night to night for the same underlying z —
-    /// a personal-preference trade (more responsive, also more reactive to ordinary noise), not
-    /// upstreamed or re-validated against a reference.
-    public static let logisticK: Double = 2.0
+    /// upstream 1.6 to 2.0 to make Charge move more visibly night to night, then walked back to 1.7
+    /// on explicit user feedback that it over-corrected — an ordinary bad-but-not-sick night (around
+    /// z ≈ -1.3 to -1.5) was reading as single digits ("5%"), a number the user associates with
+    /// actually being ill, when they judged the real night closer to ~20%. 1.7 keeps most of the
+    /// extra night-to-night movement over upstream's 1.6 while pulling the tail back in from 2.0's
+    /// overshoot. Still a personal-preference trade, not upstreamed or re-validated against a
+    /// reference.
+    public static let logisticK: Double = 1.7
     /// Logistic offset so Z=0 → 58%.
     public static let logisticZ0: Double = -0.20
     /// WHOOP-published population-average recovery (%). Cold-start fallback.
