@@ -296,7 +296,7 @@ struct IntervalsICUNextPlannedCard: View {
     /// the SAME call gave no way to tell "no API key" from "fetch failed" from "fetched zero events"
     /// from "the view itself never mounted". The diagnostic line below makes that visible on-device
     /// instead of guessing blind over chat.
-    private enum LoadState: Equatable {
+    private enum LoadState {
         case loading
         case noApiKey
         case fetchFailed
