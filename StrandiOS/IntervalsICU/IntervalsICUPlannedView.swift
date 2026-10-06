@@ -294,8 +294,14 @@ struct IntervalsICUNextPlannedCard: View {
     @State private var next: IntervalsICUEvent?
     @State private var loaded = false
 
+    /// ALWAYS renders a stable shell (loading / has-a-session / nothing-planned), never a bare
+    /// `EmptyView()` with no sibling content. A card that can momentarily have zero size while its
+    /// one-shot `.task` is still pending read as genuinely absent on Today's reorderable section
+    /// list — `IntervalsICUActivitiesSection` next to it never does this (it always shows at least
+    /// "Chargement…"/"Aucune activité"), which is the shape this now matches.
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Planned Training", overline: "intervals.icu")
             if let next {
                 NavigationLink {
                     IntervalsICUPlannedScreen()
@@ -303,8 +309,14 @@ struct IntervalsICUNextPlannedCard: View {
                     cardBody(next)
                 }
                 .buttonStyle(.plain)
-            } else if loaded {
-                EmptyView()   // nothing planned — no card rather than an empty one
+            } else {
+                StrandCard(padding: 18) {
+                    Text(loaded
+                         ? String(localized: "No planned workouts in the next 3 weeks.")
+                         : String(localized: "Loading…"))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
             }
         }
         .task { await load() }
