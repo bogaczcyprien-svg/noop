@@ -15,6 +15,29 @@ public struct IntervalsICUActivity: Decodable {
     let max_heartrate: Double?
 }
 
+/// One calendar entry from the Events API — a planned workout when `category == "WORKOUT"`, or one of
+/// several other kinds (RACE_A/B/C, NOTE, PLAN, HOLIDAY, SICK, …) intervals.icu's calendar also uses
+/// this same endpoint for. Fields verified against intervals.icu's own OpenAPI spec
+/// (https://intervals.icu/api/v1/docs) and the "Downloading planned workouts from the API" forum post,
+/// not guessed. `workout_doc` (the full interval-by-interval structure) is deliberately NOT decoded
+/// here — `description` already carries a plain-text summary, and the structured steps are real
+/// complexity for a feature whose job is "what's coming up", not a workout-structure viewer.
+public struct IntervalsICUEvent: Decodable {
+    let id: Int
+    let start_date_local: String?
+    /// The SPORT ("Ride", "Run", …) — distinct from `category`, which is the calendar-item KIND.
+    let type: String?
+    /// The calendar-item kind: "WORKOUT" for a planned session; "RACE_A"/"RACE_B"/"RACE_C"/"NOTE"/
+    /// "PLAN"/"HOLIDAY"/"SICK"/"INJURED"/etc. for everything else this same endpoint also returns.
+    let category: String?
+    let name: String?
+    let description: String?
+    /// Planned duration estimate, seconds.
+    let moving_time: Int?
+    /// Planned distance estimate, metres.
+    let distance: Double?
+}
+
 public enum IntervalsICUError: Error {
     case invalidURL
     case http(Int)
@@ -59,6 +82,37 @@ public struct IntervalsICUClient {
         guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
         do {
             return try JSONDecoder().decode([IntervalsICUActivity].self, from: data)
+        } catch {
+            throw IntervalsICUError.decoding
+        }
+    }
+
+    /// Fetches calendar events (planned workouts and everything else the calendar holds — races,
+    /// notes, …) with a start date in [oldest, newest] (local calendar days, inclusive). Pass
+    /// `category: "WORKOUT"` to ask the API itself to filter to planned sessions only, which is what
+    /// every caller in this app wants — "Download planned workouts from the API"
+    /// (forum.intervals.icu/t/downloading-planned-workouts-from-the-api/93737) is the documented shape
+    /// this mirrors. Fork addition.
+    public func events(oldest: String, newest: String, category: String? = nil) async throws -> [IntervalsICUEvent] {
+        var components = URLComponents(string: "https://intervals.icu/api/v1/athlete/\(athleteId)/events")
+        var items = [
+            URLQueryItem(name: "oldest", value: oldest),
+            URLQueryItem(name: "newest", value: newest),
+        ]
+        if let category { items.append(URLQueryItem(name: "category", value: category)) }
+        components?.queryItems = items
+        guard let url = components?.url else { throw IntervalsICUError.invalidURL }
+
+        var request = URLRequest(url: url)
+        let credentials = Data("API_KEY:\(apiKey)".utf8).base64EncodedString()
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw IntervalsICUError.http(0) }
+        guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
+        do {
+            return try JSONDecoder().decode([IntervalsICUEvent].self, from: data)
         } catch {
             throw IntervalsICUError.decoding
         }

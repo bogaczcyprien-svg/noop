@@ -13,6 +13,7 @@ extension TodaySection {
         case .recoveryVitals: return "heart.text.square"
         case .yourCards: return "rectangle.stack"
         case .intervalsActivities: return "figure.outdoor.cycle"
+        case .plannedTraining: return "calendar"
         case .menstrualCycle: return "drop.degreesign"
         case .journal: return "book.closed"
         case .addedCards: return "rectangle.stack.badge.plus"
@@ -30,6 +31,7 @@ extension TodaySection {
         case .recoveryVitals: return StrandPalette.metricCyan
         case .yourCards: return StrandPalette.accent
         case .intervalsActivities: return StrandPalette.effortColor
+        case .plannedTraining: return StrandPalette.accent
         case .menstrualCycle: return StrandPalette.restColor
         case .journal: return StrandPalette.metricAmber
         case .addedCards: return StrandPalette.accent

@@ -36,6 +36,10 @@ enum TodaySection: String, CaseIterable, Identifiable {
     /// order, per the user's explicit ask. Renders empty on macOS (the feature lives under
     /// `StrandiOS/IntervalsICU`).
     case intervalsActivities
+    /// Fork-only, iOS-only (no Android twin): the next upcoming planned workout from intervals.icu's
+    /// calendar, tapping through to the full agenda. Placed right after `.intervalsActivities` —
+    /// same source, "what's coming" beside "what happened". Renders empty on macOS.
+    case plannedTraining
     case menstrualCycle
     case journal
     /// Cards hosted from the Trends / Sleep tabs (#today-hosted-cards). Renders the `HostedCardPrefs`
@@ -57,6 +61,7 @@ enum TodaySection: String, CaseIterable, Identifiable {
         case .recoveryVitals: return String(localized: "Recovery Vitals")
         case .yourCards:      return String(localized: "Your Cards")
         case .intervalsActivities: return String(localized: "intervals.icu Activities")
+        case .plannedTraining: return String(localized: "Planned Training")
         case .menstrualCycle: return String(localized: "Menstrual Cycle")
         case .journal:        return String(localized: "Journal")
         case .addedCards:     return String(localized: "Added Cards")
@@ -67,7 +72,7 @@ enum TodaySection: String, CaseIterable, Identifiable {
     /// widget (#656) is last by default, where it was first added, above the data-sources card.
     static let defaultOrder: [TodaySection] = [
         .hero, .liveSession, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards,
-        .intervalsActivities, .menstrualCycle, .journal, .addedCards,
+        .intervalsActivities, .plannedTraining, .menstrualCycle, .journal, .addedCards,
     ]
 }
 

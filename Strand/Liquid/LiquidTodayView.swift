@@ -379,6 +379,8 @@ struct LiquidTodayView: View {
                         case .yourCards: yourCardsSection
                         case .intervalsActivities:
                             if selectedDayOffset == 0 { intervalsActivitiesSection }
+                        case .plannedTraining:
+                            if selectedDayOffset == 0 { plannedTrainingSection }
                         case .menstrualCycle:
                             if selectedDayOffset == 0 { MenstrualCycleHomeCard() }
                         // #656: the persistent journal widget (last-7-days strip + tap-through). Now a
@@ -827,6 +829,19 @@ struct LiquidTodayView: View {
     private var intervalsActivitiesSection: some View {
         #if os(iOS)
         IntervalsICUActivitiesSection(limit: 2)
+        #else
+        EmptyView()
+        #endif
+    }
+
+    /// Fork: the next upcoming planned workout from intervals.icu's calendar — name, when, what it
+    /// involves — tapping through to the full agenda. iOS-only; renders nothing on macOS. The card
+    /// itself self-hides (EmptyView) when nothing is planned, so an athlete between training blocks
+    /// doesn't get an empty slot on Today.
+    @ViewBuilder
+    private var plannedTrainingSection: some View {
+        #if os(iOS)
+        IntervalsICUNextPlannedCard()
         #else
         EmptyView()
         #endif

@@ -1959,6 +1959,8 @@ struct TodayView: View {
             yourCardsSection
         case .intervalsActivities:
             if selectedDayOffset == 0 { intervalsActivitiesSection }
+        case .plannedTraining:
+            if selectedDayOffset == 0 { plannedTrainingSection }
         case .menstrualCycle:
             if selectedDayOffset == 0 { MenstrualCycleHomeCard() }
         case .journal:
@@ -2471,6 +2473,17 @@ struct TodayView: View {
     private var intervalsActivitiesSection: some View {
         #if os(iOS)
         IntervalsICUActivitiesSection(limit: 2)
+        #else
+        EmptyView()
+        #endif
+    }
+
+    /// Fork: the next upcoming planned workout from intervals.icu's calendar. iOS-only; renders
+    /// nothing on macOS. Self-hides when nothing is planned.
+    @ViewBuilder
+    private var plannedTrainingSection: some View {
+        #if os(iOS)
+        IntervalsICUNextPlannedCard()
         #else
         EmptyView()
         #endif
