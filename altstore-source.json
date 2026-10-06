@@ -33,13 +33,22 @@
         }
       },
       "version": "12.0.0",
-      "buildVersion": "440",
+      "buildVersion": "441",
       "versionDate": "2026-10-06",
-      "versionDescription": "Fixed the Next Session (Planned Training) Today card so it always shows a stable state instead of sometimes rendering nothing while its data loads. Added a separate \"Check for upstream updates\" button in Settings for ryanbr/noop's own releases, alongside this fork's own updater.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork5/NOOP-v12.0.0-fork5-ios.ipa",
-      "size": 22436782,
+      "versionDescription": "Stress keeps reading through real activity/exercise instead of cutting out, like WHOOP. Stress Timeline chart is now scrubbable (hold + drag) with a precise value/time readout. About now shows the real build number, not just the marketing version. Temporary diagnostic added to the Planned Training card. Fixed intervals.icu wellness push reading the wrong device id, so it never found sleep data to send for some installs.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork6/NOOP-v12.0.0-fork6-ios.ipa",
+      "size": 22456145,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.0.0",
+          "buildVersion": "441",
+          "date": "2026-10-06",
+          "localizedDescription": "Stress keeps reading through real activity/exercise instead of cutting out, like WHOOP. Stress Timeline chart is now scrubbable (hold + drag) with a precise value/time readout. About now shows the real build number, not just the marketing version. Temporary diagnostic added to the Planned Training card. Fixed intervals.icu wellness push reading the wrong device id, so it never found sleep data to send for some installs.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork6/NOOP-v12.0.0-fork6-ios.ipa",
+          "size": 22456145,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "12.0.0",
           "buildVersion": "440",
