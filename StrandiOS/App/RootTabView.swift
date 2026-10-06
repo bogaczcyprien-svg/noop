@@ -497,6 +497,11 @@ struct RootTabView: View {
                     // Import cycling (and other) sessions ridden without the strap, straight from
                     // intervals.icu's public API — no HealthKit entitlement needed (#sideload-limit).
                     MoreRow("intervals.icu", "figure.outdoor.cycle", .intervalsICU)
+                    // Fork addition: the full planned-training agenda. Reachable here independently of
+                    // the Today preview card, which self-hides (silently) when nothing is found — so
+                    // if the card never shows up, this is where the REAL state (empty vs a load error)
+                    // is actually visible.
+                    MoreRow("Entraînement planifié", "calendar", .plannedTraining)
                     // Local, once-per-day morning notification with last night's phases. Off by default.
                     MoreRow("Résumé de nuit", "bell.badge.fill", .sleepRecap)
                     // VO2max-derived race time estimates. Fork addition.
@@ -612,7 +617,7 @@ struct RootTabView: View {
 private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
-    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
+    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, plannedTraining, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -641,6 +646,7 @@ private enum MoreDestination: Hashable {
         case .shortcutsExport: ShortcutExportSettingsView()
         case .selfHostedPush: SelfHostedPushSettingsView()
         case .intervalsICU: IntervalsICUSettingsView()
+        case .plannedTraining: IntervalsICUPlannedScreen()
         case .sleepRecap: SleepRecapSettingsView()
         case .raceTimePredictor: RaceTimePredictorView()
         case .fastingWindow: FastingWindowView()
