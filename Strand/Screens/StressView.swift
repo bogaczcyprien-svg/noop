@@ -4,13 +4,16 @@ import StrandDesign
 import StrandAnalytics
 import WhoopStore
 
-/// The shared explanation for an activity-masked gap on the Stress screen and hosted Today cards.
-/// Whole-phrase singular/plural variants keep the sentence natural in every catalog locale.
+/// The shared explanation for activity-flagged hours on the Stress screen and hosted Today cards.
+/// FORK CHANGE: these hours are no longer excluded from the line — `DaytimeStress` now scores
+/// through real activity too, like WHOOP's own Stress monitor does, so the caption says so rather
+/// than claiming a gap that no longer exists. Whole-phrase singular/plural variants keep the
+/// sentence natural in every catalog locale.
 func stressActivityMaskedHoursCaption(_ count: Int) -> String? {
     guard count > 0 else { return nil }
     return count == 1
-        ? String(localized: "1 hour excluded — you were moving.")
-        : String(localized: "\(count) hours excluded — you were moving.")
+        ? String(localized: "1 hour includes exercise — may read high from exertion, not stress.")
+        : String(localized: "\(count) hours include exercise — may read high from exertion, not stress.")
 }
 
 /// Same shape, for hours excluded because they overlapped a detected sleep session (a sleep-in

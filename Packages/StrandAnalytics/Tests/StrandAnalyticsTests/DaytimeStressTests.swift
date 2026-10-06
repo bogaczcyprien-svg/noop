@@ -260,28 +260,28 @@ final class DaytimeStressTests: XCTestCase {
         XCTAssertFalse(withEmptyGravity.hours.contains { $0.maskedForActivity })
     }
 
-    func testAmbulatoryHourIsMaskedNotScored() {
-        // Four hours; the 11:00 hour has an elevated HR AND is ambulatory. Without motion it scores
-        // as the day's most "stressed" hour — the exact false positive the gate exists to remove.
+    func testAmbulatoryHourIsFlaggedButStillScored() {
+        // Four hours; the 11:00 hour has an elevated HR AND is ambulatory. FORK BEHAVIOUR: it must
+        // still be scored on the curve — real exercise reads as elevated stress, matching WHOOP's own
+        // Stress monitor, rather than leaving a gap — but it must still be FLAGGED so the UI/reference
+        // can tell it apart from an ordinary tense hour.
         var hr: [HRSample] = []
         for h in [8, 9, 10] { hr += hourHR(h, bpm: 60) }
         hr += hourHR(11, bpm: 110)   // the walk
-
-        let unGated = DaytimeStress.analyze(hr: hr, rr: [])
-        XCTAssertNotNil(unGated.scored.first { $0.hour == 11 }?.level,
-            "precondition: without gravity the ambulatory hour is scored as stress")
 
         var gravity: [GravitySample] = []
         for h in [8, 9, 10] { gravity += hourGravity(h, activeFraction: 0.0) }
         gravity += hourGravity(11, activeFraction: 1.0)
 
         let gated = DaytimeStress.analyze(hr: hr, rr: [], gravity: gravity)
-        let masked = gated.hours.first { $0.hour == 11 }
-        XCTAssertNotNil(masked)
-        XCTAssertNil(masked?.level, "an ambulatory hour must not be scored")
-        XCTAssertTrue(masked?.maskedForActivity ?? false,
-            "the hour must report WHY it is unscored — masked, not noData")
-        XCTAssertEqual(masked?.meanHR, 110, "the reading itself is still reported, only the score is withheld")
+        let flagged = gated.hours.first { $0.hour == 11 }
+        XCTAssertNotNil(flagged)
+        XCTAssertNotNil(flagged?.level, "an ambulatory hour must still be scored, not left as a gap")
+        XCTAssertGreaterThanOrEqual(flagged?.level ?? 0, DaytimeStress.highBandFloor,
+            "110 bpm against a ~60 bpm calm day should read as elevated, same as WHOOP would show it")
+        XCTAssertTrue(flagged?.maskedForActivity ?? false,
+            "the hour must still report that it included activity, for the UI caption/calm reference")
+        XCTAssertEqual(flagged?.meanHR, 110)
         XCTAssertEqual(gated.activityMaskedHours, 1)
     }
 
@@ -313,8 +313,9 @@ final class DaytimeStressTests: XCTestCase {
     }
 
     func testPostActivityShadowMasksOnlyWhileHRStaysElevated() {
-        // The hour AFTER exertion is masked while its HR is still above the calm reference by
-        // postActivityShadowBPM, and scored normally once it has recovered.
+        // The hour AFTER exertion stays FLAGGED while its HR is still above the calm reference by
+        // postActivityShadowBPM, and the flag clears once it has recovered. (The flag no longer
+        // withholds the score either way — see testAmbulatoryHourIsFlaggedButStillScored.)
         func day(followingBPM: Int) -> DaytimeStress.Result {
             var hr: [HRSample] = []
             var gravity: [GravitySample] = []
@@ -328,14 +329,14 @@ final class DaytimeStressTests: XCTestCase {
             gravity += hourGravity(12, activeFraction: 0.0)
             return DaytimeStress.analyze(hr: hr, rr: [], gravity: gravity)
         }
-        // Still elevated well above the ~60 bpm calm reference → masked.
+        // Still elevated well above the ~60 bpm calm reference → flagged.
         let hot = day(followingBPM: 100)
         XCTAssertTrue(hot.hours.first { $0.hour == 12 }?.maskedForActivity ?? false,
-            "an unrecovered post-exercise hour must be masked, not read as stress")
-        // Back at the calm reference → the shadow self-limits and the hour is scored.
+            "an unrecovered post-exercise hour must stay flagged")
+        // Back at the calm reference → the shadow self-limits and the flag clears.
         let recovered = day(followingBPM: 60)
         XCTAssertFalse(recovered.hours.first { $0.hour == 12 }?.maskedForActivity ?? true,
-            "once HR is back at the calm reference the shadow must not keep masking")
+            "once HR is back at the calm reference the shadow must not keep flagging")
     }
 
     func testMaskedHoursAreExcludedFromTheCalmReference() {

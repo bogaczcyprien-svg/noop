@@ -59,19 +59,24 @@ public enum DaytimeStress {
     // MARK: - Motion gate
     //
     // Cardiac signals alone cannot separate psychological stress from EXERTION: a brisk walk and a
-    // tense meeting both raise HR and suppress HRV. Without a motion channel an ambulatory hour is
-    // scored as "stress". When the caller supplies the day's gravity (wrist accelerometer), an hour
-    // that was substantially ambulatory is MASKED (`level == nil`, `HourPoint.maskedForActivity ==
-    // true`) rather than scored, and it is excluded from the calm reference and the coverage totals.
-    // No gravity → no masking → byte-identical prior behaviour, so the gate only applies when motion
-    // is actually observable. Orthogonal to `ScoringMode` below: masking decides WHICH hours score,
-    // the mode decides WHAT reference they score against.
+    // tense meeting both raise HR and suppress HRV. FORK CHANGE, at the user's explicit request to
+    // match WHOOP's own Stress monitor: this no longer withholds the score for an ambulatory hour.
+    // Real exercise now reads as (correctly) elevated stress on the same continuous curve, rather than
+    // leaving a gap — "you don't cut it, WHOOP keeps it running through my workouts." When the caller
+    // supplies the day's gravity (wrist accelerometer), an hour that was substantially ambulatory is
+    // still FLAGGED (`HourPoint.maskedForActivity == true`, for the UI to annotate) and still excluded
+    // from the calm REFERENCE (so a workout's elevated HR cannot drag up what counts as "calm" for the
+    // rest of the day) and from the coverage totals — but `level` is no longer nulled out for it.
+    // No gravity → no flagging → byte-identical prior behaviour, so the gate only applies when motion
+    // is actually observable. Orthogonal to `ScoringMode` below: this decides what counts toward the
+    // calm reference, the mode decides WHERE that reference comes from.
 
     /// An hour whose gravity-derived activity clears `stressMotionThreshold` for at least this
-    /// fraction of its records is EXERTION, not stress — masked, not scored. 0.30 means "at least
-    /// 30 % of the hour was at or above that bar"; below it, a stray reach or one trip to the kitchen
-    /// does not mask a desk hour. An hourly grain is coarse — this is the gate that later allows finer
-    /// epochs, at which point the fraction can tighten. Range (0, 1].
+    /// fraction of its records is EXERTION, not stress — flagged (`maskedForActivity`) and excluded
+    /// from the calm reference, but still SCORED (see the MARK: Motion gate comment above). 0.30 means
+    /// "at least 30 % of the hour was at or above that bar"; below it, a stray reach or one trip to the
+    /// kitchen does not flag a desk hour. An hourly grain is coarse — this is the gate that later
+    /// allows finer epochs, at which point the fraction can tighten. Range (0, 1].
     public static let activityMaskFraction: Double = 0.30
     /// FORK TUNING, not upstreamed: the per-record intensity bar the motion gate masks on.
     /// Deliberately set ABOVE `WorkoutDetector.motionThreshold` (0.20 L2-g, the codebase's calibrated
@@ -192,10 +197,11 @@ public enum DaytimeStress {
         public let meanHR: Double?
         /// RMSSD over the hour's clean R-R (ms), or nil (too few clean beats).
         public let rmssd: Double?
-        /// True when this hour was left unscored because it was AMBULATORY (exertion), not because it
-        /// lacked HR — so `level == nil` here means "masked as activity", not "no data". Lets the UI
-        /// separate "you were moving" from "no reading" and keeps active hours out of the calm
-        /// reference and the coverage totals. See the motion-gate constants above.
+        /// True when this hour was AMBULATORY (exertion). It is still SCORED (`level` is populated,
+        /// see the MARK: Motion gate comment above) — this flag exists so the UI can annotate "this
+        /// reading includes real activity, may run high from exertion" and so active hours are kept
+        /// out of the calm reference and the coverage totals, not to hide the number. See the
+        /// motion-gate constants above.
         public let maskedForActivity: Bool
         /// True when this hour was left unscored because it OVERLAPS the caller-supplied sleep
         /// span(s) — i.e. still genuinely asleep despite falling in the 06:00–22:00 clock window
@@ -234,10 +240,10 @@ public enum DaytimeStress {
         public let dayMean: Double?
         /// Peak scored hour (highest `level`), or nil.
         public let peak: HourPoint?
-        /// Count of waking hours left unscored because they were AMBULATORY (the motion gate fired),
-        /// i.e. `hours.filter { $0.maskedForActivity }.count`. Lets a caller report honest coverage
-        /// ("N hours excluded — you were moving") instead of a silently short timeline. 0 when no
-        /// gravity was supplied or nothing was masked; 0 for `.empty`.
+        /// Count of waking hours that were AMBULATORY (the motion gate fired), i.e.
+        /// `hours.filter { $0.maskedForActivity }.count`. These hours ARE scored — this is coverage
+        /// metadata for the UI ("N hours include activity, may run high from exertion"), not a count
+        /// of hidden readings. 0 when no gravity was supplied or nothing was flagged; 0 for `.empty`.
         public let activityMaskedHours: Int
         /// Count of waking hours left unscored because they overlap a caller-supplied sleep span —
         /// `hours.filter { $0.maskedForSleep }.count`. 0 when no sleep spans were supplied (every
@@ -359,8 +365,10 @@ public enum DaytimeStress {
     ///   - hr: the day's `[HRSample]` (any order; bucketed by ts here).
     ///   - rr: the day's `[RRInterval]`.
     ///   - gravity: the day's `[GravitySample]` (wrist accelerometer), for the motion gate. Defaults
-    ///     empty: with no gravity NOTHING is masked and the read is byte-identical to before. When
-    ///     present, ambulatory hours are masked out of the score (see the motion-gate constants).
+    ///     empty: with no gravity NOTHING is flagged and the read is byte-identical to before. When
+    ///     present, ambulatory hours are still SCORED (see the motion-gate constants and MARK comment
+    ///     above — a fork change so real exercise reads as elevated stress instead of a gap) but are
+    ///     flagged and excluded from the calm reference.
     ///   - sleepSpans: `(start, end)` unix-second ranges the caller knows were sleep (the primary
     ///     session, typically). Defaults empty: with none supplied, NOTHING is masked for sleep and
     ///     the read is byte-identical to before. When present, an hour overlapping any span is
@@ -609,22 +617,26 @@ public enum DaytimeStress {
             let hourOfDay = floorDiv(a.bucket, bucketSeconds) % 24
             // The wall-clock bucket start (undo the local shift applied above).
             let wallStart = a.bucket - tzOffsetSeconds
-            // Motion gate: an AMBULATORY hour — or the post-exercise shadow hour whose HR has not yet
-            // recovered to the calm reference — is EXERTION, so its elevated HR is masked out of the
-            // score instead of read as stress. The shadow is gated on `refHR` so it self-limits to
-            // genuine cardiac recovery (a following hour already back at baseline scores normally).
-            // Only meaningful when the hour actually HAD a reading to withhold — a no-HR hour is plain
+            // Motion flag: an AMBULATORY hour — or the post-exercise shadow hour whose HR has not yet
+            // recovered to the calm reference — is EXERTION. `maskedForActivity` still reports this
+            // (the calm REFERENCE above still excludes these hours, and the UI still marks them), but
+            // — at the user's explicit request, matching WHOOP's own Stress monitor — it no longer
+            // withholds the score itself: real exercise reads as (correctly) high stress on the same
+            // continuous curve rather than leaving a gap. The shadow is gated on `refHR` so it still
+            // self-limits to genuine cardiac recovery for the FLAG, even though it no longer blocks
+            // scoring. Only meaningful when the hour actually HAD a reading — a no-HR hour is plain
             // `.noData`, not "masked".
             let shadow = ambulatory(a.bucket - bucketSeconds)
                 && a.meanHR != nil && refHR != nil && a.meanHR! > refHR! + postActivityShadowBPM
             let masked = a.meanHR != nil && (ambulatory(a.bucket) || shadow)
             // Sleep gate: still genuinely asleep despite the clock crossing 06:00 (see
-            // `overlapsSleep`'s doc comment). Kept SEPARATE from `masked`/`maskedForActivity` so the
-            // UI can tell a reader "you were asleep" apart from "you were moving".
+            // `overlapsSleep`'s doc comment). This ONE still withholds the score — sleep gets its own,
+            // separately-scored reading via `analyzeSleepWindow`, merged in by the caller, so a nil
+            // here is "read it from the sleep window instead", not "stress wasn't measured".
             let sleepMasked = a.meanHR != nil && overlapsSleep(a.bucket)
-            // Score only when at least one signal is present AND HR cleared the count gate AND the
-            // hour was not motion- or sleep-masked (HR is the always-available anchor; RMSSD enriches it).
-            let level: Double? = (a.meanHR != nil && !masked && !sleepMasked)
+            // Score whenever HR cleared the count gate and the hour was not asleep (HR is the
+            // always-available anchor; RMSSD enriches it). Activity no longer withholds the score.
+            let level: Double? = (a.meanHR != nil && !sleepMasked)
                 ? squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: sdHR,
                                   rmssd: a.rmssd, meanRMSSD: refRMSSD, sdRMSSD: sdRMSSD))
                 : nil
@@ -664,9 +676,15 @@ public enum DaytimeStress {
                          highStressMinutes: 0, hrOnlyFallback: hrOnlyFallback, timeline: timeline)
         }
 
-        // 5) Sustained-high flag: walk back from the latest SCORED hour while each is HIGH.
+        // 5) Sustained-high flag: walk back from the latest NON-ACTIVITY scored hour while each is
+        //    HIGH, skipping over (not breaking on) activity-flagged hours — exertion is not the
+        //    psychological stress this flag exists to catch, and the Breathe-session suggestion it
+        //    drives should not fire purely because of a long workout. Before the fork change that made
+        //    activity hours scored (see the Motion gate MARK above), those hours were simply absent
+        //    from `scored`, so this reproduces that exact prior behaviour rather than a new one.
+        let sustainedCandidates = scored.filter { !$0.0.maskedForActivity }
         var run = 0
-        for (_, lvl) in scored.reversed() {
+        for (_, lvl) in sustainedCandidates.reversed() {
             if lvl >= highBandFloor { run += 1 } else { break }
         }
         let sustained = run >= sustainedHours
