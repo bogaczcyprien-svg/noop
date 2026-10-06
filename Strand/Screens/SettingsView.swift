@@ -2462,10 +2462,10 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                     HStack(spacing: NoopMetrics.space2 + 2) {
                         Button {
-                            // Compare the ACTUAL installed bundle version against GitHub's latest, not the
-                            // hand-maintained AppChangelog.currentVersion (which drifts stale and told v7
-                            // users they were behind, #697-adjacent). Mirrors Android's BuildConfig check.
-                            updateChecker.check(currentVersion: bundleVersionString)
+                            // Compared on the installed BUILD number, not marketing version — see
+                            // UpdateChecker's doc comment for why (this fork's marketing version stays
+                            // the same across several fork builds).
+                            updateChecker.check(currentBuild: UpdateWatch.installedBuild)
                         } label: {
                             if updateChecker.state == .checking {
                                 HStack(spacing: NoopMetrics.space1 + 2) {
@@ -2508,17 +2508,38 @@ struct SettingsView: View {
                     }
                     .tint(StrandPalette.accent)
 
-                    // Update available: show what's new, with a download straight to the release.
-                    if case .available(let v, let url, let notes) = updateChecker.state {
+                    // Update available: show what's new, with a one-tap install straight through
+                    // SideStore when possible, a plain browser download otherwise.
+                    if case .available(let v, let url, let ipaURL, let notes) = updateChecker.state {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("Version \(v) is available")
                                     .font(StrandFont.subhead)
                                     .foregroundStyle(StrandPalette.textPrimary)
                                 Spacer()
+                                #if os(iOS)
+                                // sidestore://install hands the .ipa straight to SideStore, which
+                                // downloads and installs it directly — no detour through SideStore's
+                                // own Sources list, which is the flaky part. Falls back to a plain
+                                // browser download when the manifest carried no .ipa URL, or on macOS
+                                // (SideStore is iOS-only).
+                                if let ipaURL {
+                                    NoopButton("Install", systemImage: "square.and.arrow.down.on.square.fill",
+                                              kind: .primary) {
+                                        if let sideStoreURL = URL(string: "sidestore://install?url=\(ipaURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ipaURL.absoluteString)") {
+                                            openURL(sideStoreURL)
+                                        }
+                                    }
+                                } else {
+                                    NoopButton("Download", systemImage: "arrow.down.circle.fill", kind: .primary) {
+                                        openURL(url)
+                                    }
+                                }
+                                #else
                                 NoopButton("Download", systemImage: "arrow.down.circle.fill", kind: .primary) {
                                     openURL(url)
                                 }
+                                #endif
                             }
                             if !notes.isEmpty {
                                 ScrollView {

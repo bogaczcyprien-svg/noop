@@ -561,7 +561,7 @@ private struct iOSRootView: View {
             // during first run, before the Terms gate the user has not accepted yet. While the default was
             // off, nothing made that visible.
             if onboarded && acceptedTerms == Terms.currentVersion {
-                UpdateWatch.runIfDue(currentVersion: UpdateWatch.installedVersion, sideloadHint: true)
+                UpdateWatch.runIfDue(currentBuild: UpdateWatch.installedBuild, sideloadHint: true)
             }
         }
         .onChange(of: acceptedTerms) { _, _ in showWhatsNewIfDue() }

@@ -60,7 +60,7 @@ struct ContentView: View {
             // a default-on check must not reach the network during first run, before the Terms gate has
             // been accepted. (No sideload sentence here - macOS has no seven-day re-sign and no AltStore.)
             if onboarded && acceptedTerms == Terms.currentVersion {
-                UpdateWatch.runIfDue(currentVersion: UpdateWatch.installedVersion, sideloadHint: false)
+                UpdateWatch.runIfDue(currentBuild: UpdateWatch.installedBuild, sideloadHint: false)
             }
         }
         .onChangeCompat(of: acceptedTerms) { _ in showWhatsNewIfDue() }

@@ -123,6 +123,14 @@ enum UpdateWatch {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? AppChangelog.currentVersion
     }
 
+    /// The installed BUILD number (`CFBundleVersion`) — what freshness is actually compared on now
+    /// (see `UpdateChecker`'s doc comment for why marketing version alone cannot tell two fork builds
+    /// apart). Empty string (never newer than anything, via `VersionCheck.segments`) if the Info.plist
+    /// key is somehow missing, rather than crashing or guessing.
+    static var installedBuild: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
+    }
+
     /// Re-entrancy guard. `runIfDue` is called from `.onAppear`, which is not guaranteed to fire once,
     /// and the day's slot is stamped INSIDE the task — so two appearances in quick succession could both
     /// pass the due check before either had written anything, and fire two requests for one answer.
@@ -138,12 +146,12 @@ enum UpdateWatch {
     /// (the default) must produce no line, no request and no trace. The manual button remains the loud
     /// path: it reports "couldn't check", because there a human is waiting on an answer.
     @MainActor
-    static func runIfDue(currentVersion: String, sideloadHint: Bool, now: Date = Date()) {
+    static func runIfDue(currentBuild: String, sideloadHint: Bool, now: Date = Date()) {
         let d = UserDefaults.standard
         // Runs before every guard below, including the toggle: a stale announcement must not outlive the
         // feature that posted it (see `shouldPruneAnnouncement`).
         if UpdateAvailability.shouldPruneAnnouncement(
-            lastPostedVersion: d.string(forKey: Keys.lastPostedVersion), current: currentVersion) {
+            lastPostedVersion: d.string(forKey: Keys.lastPostedVersion), current: currentBuild) {
             for item in UpdateStore.shared.items where item.kind == .newVersion {
                 UpdateStore.shared.remove(item.id)
             }
@@ -161,16 +169,18 @@ enum UpdateWatch {
             // as GitHub is unreachable, which is the one shape a background check must never take.
             d.set(now.timeIntervalSince1970, forKey: Keys.lastCheckedAt)
             guard let release = await UpdateChecker.fetchLatest() else { return }
-            guard UpdateAvailability.shouldPost(latest: release.version,
-                                                current: currentVersion,
+            // Compared on BUILD (the monotonic figure), displayed/remembered by it too — see
+            // UpdateChecker's doc comment for why marketing version alone can't tell fork builds apart.
+            guard UpdateAvailability.shouldPost(latest: release.build,
+                                                current: currentBuild,
                                                 lastPostedVersion: d.string(forKey: Keys.lastPostedVersion))
             else { return }
-            d.set(release.version, forKey: Keys.lastPostedVersion)
+            d.set(release.build, forKey: Keys.lastPostedVersion)
             // Localized HERE, at the platform edge, so the row reads in the user's language like the
             // What's New row beside it. `composeMessage` only assembles what it is handed.
-            let body = String(localized: "You're on \(currentVersion). Open Settings and use Check for updates to see what's new and download \(release.version).")
+            let body = String(localized: "You're on build \(currentBuild). Open Settings and use Check for updates to see what's new and install \(release.version).")
             let sideload = sideloadHint
-                ? String(localized: "AltStore or SideStore can install it for you automatically if you added NOOP's source; a direct .ipa still has to be signed on your device.")
+                ? String(localized: "Open Settings → Check for updates and tap Install to let SideStore install it directly.")
                 : nil
             UpdateStore.shared.post(UpdateItem(
                 kind: .newVersion,
