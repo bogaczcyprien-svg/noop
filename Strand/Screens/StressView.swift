@@ -503,7 +503,7 @@ struct StressView: View {
     private func daytimeSection(_ day: DaytimeStress.Result) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                SectionHeader(isViewingToday ? String(localized: "Today's Timeline") : String(localized: "Timeline"),
+                SectionHeader(isViewingToday ? "Today's Timeline" : "Timeline",
                               overline: "Intraday", trailing: timelineTrailing(day))
 
                 NoopCard(tint: StressRamp.calm) {
