@@ -511,22 +511,12 @@ struct StressView: View {
 
                 NoopCard(tint: StressRamp.calm) {
                     VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-                        HStack {
-                            Text("Autonomic load through the day").strandOverline()
-                            Spacer()
-                            // The peak of what is DRAWN, not of the whole hours (#2144). A sliding window
-                            // can exceed both hourly neighbours when the busy stretch straddles a boundary,
-                            // so `day.peak` would caption the line with a number below its visible maximum.
-                            // Everything that COUNTS hours still reads `hours`; a maximum is not a count.
-                            let drawnPeak = day.timeline.filter { $0.level != nil }
-                                .max { ($0.level ?? 0) < ($1.level ?? 0) }
-                            if let peak = drawnPeak, let lvl = peak.level {
-                                Text("peak \(StressTrace.formatLevel(lvl)) · \(hourLabel(peak.hour))")
-                                    .font(StrandFont.captionNumber)
-                                    .foregroundStyle(StressRamp.color(lvl))
-                            }
-                        }
-
+                        // The chart leads the card — tap/hold it for a precise value + time readout
+                        // (see DaytimeLoadLine's scrub overlay). Everything that EXPLAINS the chart
+                        // (the "what is this" overline, the peak, the hour ruler, the caption) now
+                        // sits below it as one block, so the interactive surface isn't sandwiched
+                        // between two bands of text.
+                        //
                         // README screen-9: the day autonomic-load LINE, drawn with the same
                         // 3-stop blue→green→amber WHOOP gradient as the gauge. Full-24h axis
                         // (#WHOOP-parity): `dayStart` set positions the waking line by real
@@ -563,6 +553,26 @@ struct StressView: View {
                                 Spacer()
                                 Text(hourLabel(hi)).font(StrandFont.footnote)
                                     .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                        }
+
+                        Divider().overlay(StrandPalette.hairline)
+
+                        // Explanation block: what this chart is, its peak, and the caption — grouped
+                        // together at the bottom instead of split above/below the chart.
+                        HStack {
+                            Text("Autonomic load through the day").strandOverline()
+                            Spacer()
+                            // The peak of what is DRAWN, not of the whole hours (#2144). A sliding window
+                            // can exceed both hourly neighbours when the busy stretch straddles a boundary,
+                            // so `day.peak` would caption the line with a number below its visible maximum.
+                            // Everything that COUNTS hours still reads `hours`; a maximum is not a count.
+                            let drawnPeak = day.timeline.filter { $0.level != nil }
+                                .max { ($0.level ?? 0) < ($1.level ?? 0) }
+                            if let peak = drawnPeak, let lvl = peak.level {
+                                Text("peak \(StressTrace.formatLevel(lvl)) · \(hourLabel(peak.hour))")
+                                    .font(StrandFont.captionNumber)
+                                    .foregroundStyle(StressRamp.color(lvl))
                             }
                         }
 
@@ -1532,6 +1542,19 @@ struct DaytimeLoadLine: View {
 
     private let chartHeight: CGFloat = 78
 
+    // MARK: - Scrub (tap/hold + drag for a precise readout)
+    //
+    // Reuses the SAME hover toolkit `OverviewHRChart` already ships (`CrosshairRule` / `HighlightDot` /
+    // `PositionedTooltip` / `ChartHoverMath`) and the SAME touch pattern (#979: hold-then-drag on iOS so
+    // the gesture never steals the parent ScrollView's scroll; a plain pointer hover on macOS/trackpad)
+    // rather than inventing a second one, so the affordance feels identical across the app. Only
+    // meaningful with `dayStart` set — the real time-of-day chart (the Stress screen's own "Timeline"),
+    // not the compact index-packed Today/widget line, which has no per-point precision to add.
+    @State private var hoverX: CGFloat? = nil
+    #if os(iOS)
+    @State private var scrubEngaged = false
+    #endif
+
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
@@ -1544,6 +1567,7 @@ struct DaytimeLoadLine: View {
             // Contiguous runs of scored hours. Built in a method, not here: this is a
             // `@ViewBuilder` closure and cannot hold statements.
             let runs = scoredRuns(width: w, height: h)
+            let flat = scoredFlat(width: w, height: h)
 
             ZStack {
                 if let dayStart {
@@ -1601,12 +1625,84 @@ struct DaytimeLoadLine: View {
                             .position(x: only.0, y: only.1)
                     }
                 }
+
+                // Scrub readout: precise value + time under the finger/pointer. Only on the real
+                // time-of-day chart (`dayStart` set) — the compact index-packed Today/widget line has
+                // no per-point precision worth exposing.
+                if dayStart != nil, let hx = hoverX,
+                   let idx = ChartHoverMath.nearestIndex(toX: hx, xs: flat.map(\.x)) {
+                    let pt = flat[idx]
+                    let lvl = pt.point.level ?? 0
+                    let color = StressRamp.color(lvl)
+                    CrosshairRule(x: pt.x, height: h)
+                    HighlightDot(color: color).position(x: pt.x, y: pt.y)
+                    PositionedTooltip(
+                        anchor: CGPoint(x: pt.x, y: pt.y),
+                        container: CGSize(width: w, height: h),
+                        tooltip: ChartTooltip(
+                            value: StressTrace.formatLevel(lvl),
+                            label: scrubLabel(pt.point),
+                            accent: color
+                        )
+                    )
+                }
             }
+            .animation(StrandMotion.fade, value: hoverX)
+            .contentShape(Rectangle())
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                guard dayStart != nil else { return }
+                var tx = Transaction(); tx.disablesAnimations = true
+                withTransaction(tx) {
+                    switch phase {
+                    case .active(let location): hoverX = location.x
+                    case .ended: hoverX = nil
+                    }
+                }
+            }
+            #if os(iOS)
+            // #979-style touch scrub, reused verbatim: hold to claim the touch (so the parent
+            // ScrollView keeps ordinary scroll), then drag to move the crosshair. `.subviews` masks
+            // the gesture entirely when there's nothing to scrub (no `dayStart`).
+            .gesture(touchScrubGesture, including: dayStart != nil ? .all : .subviews)
+            #endif
         }
         .frame(height: chartHeight)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
+    }
+
+    #if os(iOS)
+    private var touchScrubGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.25, maximumDistance: 8)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if !scrubEngaged {
+                    scrubEngaged = true
+                    StrandHaptic.selection.play()
+                }
+                if let drag {
+                    var tx = Transaction(); tx.disablesAnimations = true
+                    withTransaction(tx) { hoverX = drag.location.x }
+                }
+            }
+            .onEnded { _ in
+                scrubEngaged = false
+                var tx = Transaction(); tx.disablesAnimations = true
+                withTransaction(tx) { hoverX = nil }
+            }
+    }
+    #endif
+
+    /// Time + context for the scrub tooltip's secondary line. `startTs` is a genuine UTC instant (see
+    /// `scoreGrid`'s `wallStart`), so formatting it through the device's own calendar/timezone is
+    /// correct — the same assumption `timeFraction` already relies on to place it on this axis.
+    private func scrubLabel(_ p: DaytimeStress.HourPoint) -> String {
+        let time = Date(timeIntervalSince1970: Double(p.startTs)).formatted(.dateTime.hour().minute())
+        if p.maskedForSleep { return String(localized: "\(time) · asleep") }
+        if p.maskedForActivity { return String(localized: "\(time) · active") }
+        return time
     }
 
     /// CONTIGUOUS RUNS of scored hours, in chart coordinates.
@@ -1621,25 +1717,42 @@ struct DaytimeLoadLine: View {
     /// either side for the night, and a sleep span / activity marker drawn in the same system lines up
     /// with it. `dayStart` nil keeps the original by-index spacing (every pre-existing caller).
     private func scoredRuns(width w: CGFloat, height h: CGFloat) -> [[(CGFloat, CGFloat)]] {
-        let n = max(hours.count, 1)
         var out: [[(CGFloat, CGFloat)]] = []
         var run: [(CGFloat, CGFloat)] = []
         for (i, p) in hours.enumerated() {
-            guard let level = p.level else {
+            guard let pos = scoredPosition(i, p, width: w, height: h) else {
                 if !run.isEmpty { out.append(run); run = [] }
                 continue
             }
-            let px: CGFloat
-            if let dayStart {
-                px = w * timeFraction(Date(timeIntervalSince1970: Double(p.startTs)), dayStart: dayStart)
-            } else {
-                px = n <= 1 ? w / 2 : w * CGFloat(i) / CGFloat(n - 1)
-            }
-            let py = h - h * CGFloat(min(max(level / 3.0, 0), 1))
-            run.append((px, py))
+            run.append(pos)
         }
         if !run.isEmpty { out.append(run) }
         return out
+    }
+
+    /// Flat (non-run-grouped) scored points, each carrying the `HourPoint` it came from, for the
+    /// scrub lookup — built from the exact same `scoredPosition` the drawn line uses, so the crosshair
+    /// can never land somewhere the line itself doesn't pass through.
+    private func scoredFlat(width w: CGFloat, height h: CGFloat) -> [(x: CGFloat, y: CGFloat, point: DaytimeStress.HourPoint)] {
+        hours.enumerated().compactMap { i, p in
+            scoredPosition(i, p, width: w, height: h).map { (x: $0.0, y: $0.1, point: p) }
+        }
+    }
+
+    /// Chart position for hour index `i`'s point, or nil if it has no score. The one place the x/y
+    /// math lives, so `scoredRuns` and `scoredFlat` can never disagree about where a point sits.
+    private func scoredPosition(_ i: Int, _ p: DaytimeStress.HourPoint,
+                                 width w: CGFloat, height h: CGFloat) -> (CGFloat, CGFloat)? {
+        guard let level = p.level else { return nil }
+        let n = max(hours.count, 1)
+        let px: CGFloat
+        if let dayStart {
+            px = w * timeFraction(Date(timeIntervalSince1970: Double(p.startTs)), dayStart: dayStart)
+        } else {
+            px = n <= 1 ? w / 2 : w * CGFloat(i) / CGFloat(n - 1)
+        }
+        let py = h - h * CGFloat(min(max(level / 3.0, 0), 1))
+        return (px, py)
     }
 
     /// `date`'s position within [dayStart, dayStart + 24h), clamped to 0...1.
