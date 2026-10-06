@@ -33,13 +33,22 @@
         }
       },
       "version": "12.0.0",
-      "buildVersion": "438",
+      "buildVersion": "439",
       "versionDate": "2026-10-06",
-      "versionDescription": "Stress screen redesign (day navigation, continuous sleep reading, Outside Activity/Sleep context cards, vs-typical-weekday comparison) + a real fix for hours still asleep being scored as daytime stress. SpO2 candidate now shows its sample count and its unverified disclaimer actually appears. Settings > Check for updates now has a one-tap Install button via SideStore. New Planned Training section with a Today preview of your next intervals.icu session.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork3/NOOP-v12.0.0-fork3-ios.ipa",
-      "size": 22422817,
+      "versionDescription": "Added a Plus > \"Entrainement planifie\" entry, reachable independently of the Today preview card, so the real state (nothing planned vs. a load error) is always visible even when the card itself shows nothing.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork4/NOOP-v12.0.0-fork4-ios.ipa",
+      "size": 22424182,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.0.0",
+          "buildVersion": "439",
+          "date": "2026-10-06",
+          "localizedDescription": "Added a Plus > \"Entrainement planifie\" entry, reachable independently of the Today preview card, so the real state (nothing planned vs. a load error) is always visible even when the card itself shows nothing.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork4/NOOP-v12.0.0-fork4-ios.ipa",
+          "size": 22424182,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "12.0.0",
           "buildVersion": "438",
