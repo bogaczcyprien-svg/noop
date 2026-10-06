@@ -2324,7 +2324,13 @@ struct SettingsView: View {
                     Text("NOOP")
                         .font(StrandFont.title2)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    StatePill("v\(bundleVersionString)", tone: .neutral, showsDot: false)
+                    // The BUILD number too, not just marketing version: on this fork the marketing
+                    // version (project.yml's MARKETING_VERSION) stays the SAME across several fork
+                    // releases (fork1..fork5 are all "12.0.0"), so "v12.0.0" alone cannot tell the
+                    // user whether a sideload actually went through — see UpdateChecker's doc comment
+                    // for the same reasoning. Showing the build makes that unambiguous at a glance.
+                    StatePill("v\(bundleVersionString) (\(UpdateWatch.installedBuild))",
+                              tone: .neutral, showsDot: false)
                     Spacer()
                     NoopButton("What's new", systemImage: "sparkles", kind: .secondary) {
                         showWhatsNew = true

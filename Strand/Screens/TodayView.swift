@@ -2479,7 +2479,8 @@ struct TodayView: View {
     }
 
     /// Fork: the next upcoming planned workout from intervals.icu's calendar. iOS-only; renders
-    /// nothing on macOS. Self-hides when nothing is planned.
+    /// nothing on macOS. Always a stable shell (loading / has-a-session / "nothing planned") — see
+    /// `IntervalsICUNextPlannedCard`'s own doc comment.
     @ViewBuilder
     private var plannedTrainingSection: some View {
         #if os(iOS)

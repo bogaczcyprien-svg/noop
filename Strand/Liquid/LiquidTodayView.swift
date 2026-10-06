@@ -836,8 +836,8 @@ struct LiquidTodayView: View {
 
     /// Fork: the next upcoming planned workout from intervals.icu's calendar — name, when, what it
     /// involves — tapping through to the full agenda. iOS-only; renders nothing on macOS. The card
-    /// itself self-hides (EmptyView) when nothing is planned, so an athlete between training blocks
-    /// doesn't get an empty slot on Today.
+    /// always renders a stable shell (loading / has-a-session / "nothing planned") — never a bare
+    /// `EmptyView()` — see `IntervalsICUNextPlannedCard`'s own doc comment for why.
     @ViewBuilder
     private var plannedTrainingSection: some View {
         #if os(iOS)
