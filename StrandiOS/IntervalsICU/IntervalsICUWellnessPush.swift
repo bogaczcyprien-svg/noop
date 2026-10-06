@@ -34,12 +34,28 @@ public enum IntervalsICUWellnessPush {
         let cal = Calendar(identifier: .gregorian)
         let today = Date()
         guard let from = cal.date(byAdding: .day, value: -2, to: today) else { return .nothingToPush }
-        let days = try await store.dailyMetrics(
-            deviceId: Repository.whoopSource,
-            from: PushDayFormat.formatter.string(from: from),
-            to: PushDayFormat.formatter.string(from: today)
-        )
-        guard let latest = days.sorted(by: { $0.day < $1.day })
+        let fromStr = PushDayFormat.formatter.string(from: from)
+        let toStr = PushDayFormat.formatter.string(from: today)
+
+        // UNION the active strap's id with the canonical "my-whoop" id, active-first — the same
+        // resolution `Repository.importedReadIds`/`unionDailyMetrics` give every other reader of
+        // DailyMetric (Today's own Recovery/Sleep display among them). A single hardcoded
+        // `Repository.whoopSource` read here found NOTHING for an install whose active strap carries
+        // a different registry id (e.g. a WHOOP 5.0/MG paired after the canonical id was already in
+        // use, or re-added), even though the SAME nights show real sleep data on Today — this runner
+        // has no `Repository` instance (it opens its own standalone `WhoopStore`), so it resolves the
+        // active id the same way `SkinTempBackfillWalker` does, straight off the registry.
+        let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
+        let activeId = (try? registry.activeDeviceId()) ?? Repository.whoopSource
+        let readIds = activeId == Repository.whoopSource ? [activeId] : [activeId, Repository.whoopSource]
+
+        var byDay: [String: DailyMetric] = [:]
+        for id in readIds {
+            for m in (try? await store.dailyMetrics(deviceId: id, from: fromStr, to: toStr)) ?? [] {
+                byDay[m.day] = byDay[m.day].map { Repository.coalesceDay($0, m) } ?? m
+            }
+        }
+        guard let latest = byDay.values.sorted(by: { $0.day < $1.day })
             .last(where: { $0.totalSleepMin != nil }) else { return .nothingToPush }
 
         let sleepSecs = fields.contains(.sleep) ? latest.totalSleepMin.map { Int(($0 * 60).rounded()) } : nil
