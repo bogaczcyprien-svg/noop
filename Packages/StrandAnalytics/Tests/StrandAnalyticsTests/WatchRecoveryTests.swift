@@ -146,9 +146,10 @@ final class WatchRecoveryTests: XCTestCase {
         XCTAssertEqual(withRHR.recovery!, hrvOnly.recovery!, accuracy: 1e-12)
         // The same literal the Kotlin twin pins, so the oracle guards BOTH directions: a Swift-side
         // drift would break here rather than silently diverging from Android.
-        // Fork: re-pinned for logisticK=2.0 (was 57.932425214874954 at the upstream k=1.6); this
-        // fork does not carry the change to the Android twin, so the two sides now diverge.
-        XCTAssertEqual(withRHR.recovery!, 59.8687660112452, accuracy: 1e-12)
+        // Fork: re-pinned for logisticK=1.7 (was 59.8687660112452 at k=2.0, 57.932425214874954 at
+        // the upstream 1.6); this fork does not carry the change to the Android twin, so the two
+        // sides now diverge.
+        XCTAssertEqual(withRHR.recovery!, 58.419052293540744, accuracy: 1e-12)
     }
 
     // An RHR history that is entirely out of physiological range accepts no night at all, so its

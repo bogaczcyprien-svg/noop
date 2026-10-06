@@ -12,8 +12,8 @@ final class RecoveryScorerTests: XCTestCase {
     }
 
     func testRecoveryAtBaselineNearPopulationMean() {
-        // HRV at baseline, RHR at baseline, no resp, sleepPerf at center → Z≈0 → ~60%.
-        // Fork: expected value re-pinned for logisticK=2.0 (was 57.93 at the upstream k=1.6).
+        // HRV at baseline, RHR at baseline, no resp, sleepPerf at center → Z≈0 → ~58%.
+        // Fork: expected value re-pinned for logisticK=1.7 (was 59.87 at k=2.0, 57.93 at upstream 1.6).
         let r = RecoveryScorer.recovery(
             hrv: 50, rhr: 55, resp: nil,
             hrvBaseline: baseline(mean: 50, sigma: 6),
@@ -21,7 +21,7 @@ final class RecoveryScorerTests: XCTestCase {
             respBaseline: nil,
             sleepPerf: RecoveryScorer.sleepPerfCenter)
         XCTAssertNotNil(r)
-        XCTAssertEqual(r!, 59.87, accuracy: 0.5)
+        XCTAssertEqual(r!, 58.42, accuracy: 0.5)
     }
 
     func testRecoveryHigherWhenHRVAboveAndRHRBelow() {
@@ -336,12 +336,13 @@ final class RecoveryScorerTests: XCTestCase {
         // A present, usable baseline scores exactly as before. Expected literal from the
         // standalone Swift oracle whose source is kept in the Kotlin twin's comment
         // (RecoveryRequiredHrvBaselineTest.kt) — the same literal both sides pin.
-        // Fork: re-pinned for logisticK=2.0 (was 57.932425214874954 at the upstream k=1.6);
-        // this fork does not carry the change to the Android twin, so the two sides now diverge.
+        // Fork: re-pinned for logisticK=1.7 (was 59.8687660112452 at k=2.0, 57.932425214874954 at
+        // the upstream 1.6); this fork does not carry the change to the Android twin, so the two
+        // sides now diverge.
         let scored = RecoveryScorer.recovery(
             hrv: 50, rhr: 60, resp: nil,
             hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
             sleepPerf: 0.85)
-        XCTAssertEqual(scored!, 59.8687660112452, accuracy: 1e-12)
+        XCTAssertEqual(scored!, 58.419052293540744, accuracy: 1e-12)
     }
 }
