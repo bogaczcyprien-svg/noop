@@ -265,8 +265,12 @@ final class DaytimeStressTests: XCTestCase {
         // still be scored on the curve — real exercise reads as elevated stress, matching WHOOP's own
         // Stress monitor, rather than leaving a gap — but it must still be FLAGGED so the UI/reference
         // can tell it apart from an ordinary tense hour.
+        // A LITTLE natural spread across the calm hours (58/60/62, not three identical 60s) — with a
+        // zero-spread reference the z-score term is guarded off entirely (`rawScore`'s `sdHR > 0.0001`
+        // gate) and 110 bpm would squash to the neutral 1.5 baseline despite being dramatically
+        // elevated, which is a reference-construction artifact of the test, not a real product case.
         var hr: [HRSample] = []
-        for h in [8, 9, 10] { hr += hourHR(h, bpm: 60) }
+        for (h, bpm) in zip([8, 9, 10], [58, 60, 62]) { hr += hourHR(h, bpm: bpm) }
         hr += hourHR(11, bpm: 110)   // the walk
 
         var gravity: [GravitySample] = []
