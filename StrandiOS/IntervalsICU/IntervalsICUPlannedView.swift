@@ -291,8 +291,19 @@ struct IntervalsICUPlannedScreen: View {
 /// "preview + See all" shape `IntervalsICUActivitiesSection` already uses for recent activities.
 /// Fork addition.
 struct IntervalsICUNextPlannedCard: View {
-    @State private var next: IntervalsICUEvent?
-    @State private var loaded = false
+    /// Distinguishes every way this card can end up with nothing to show — a user report of "the
+    /// card just doesn't appear" with the full `IntervalsICUPlannedSection` screen fetching fine from
+    /// the SAME call gave no way to tell "no API key" from "fetch failed" from "fetched zero events"
+    /// from "the view itself never mounted". The diagnostic line below makes that visible on-device
+    /// instead of guessing blind over chat.
+    private enum LoadState: Equatable {
+        case loading
+        case noApiKey
+        case fetchFailed
+        case empty(fetchedCount: Int)
+        case has(IntervalsICUEvent)
+    }
+    @State private var state: LoadState = .loading
 
     /// ALWAYS renders a stable shell (loading / has-a-session / nothing-planned), never a bare
     /// `EmptyView()` with no sibling content. A card that can momentarily have zero size while its
@@ -302,7 +313,7 @@ struct IntervalsICUNextPlannedCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Planned Training", overline: "intervals.icu")
-            if let next {
+            if case .has(let next) = state {
                 NavigationLink {
                     IntervalsICUPlannedScreen()
                 } label: {
@@ -311,15 +322,42 @@ struct IntervalsICUNextPlannedCard: View {
                 .buttonStyle(.plain)
             } else {
                 StrandCard(padding: 18) {
-                    Text(loaded
-                         ? String(localized: "No planned workouts in the next 3 weeks.")
-                         : String(localized: "Loading…"))
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(emptyStateText)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        // TEMPORARY diagnostic line (#today-planned-training-missing report): remove
+                        // once the "card renders nothing for some users despite the full screen
+                        // fetching fine" report is confirmed resolved.
+                        Text(diagnosticLine)
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary.opacity(0.6))
+                    }
                 }
             }
         }
         .task { await load() }
+    }
+
+    private var emptyStateText: String {
+        switch state {
+        case .loading: return String(localized: "Loading…")
+        case .noApiKey: return String(localized: "No intervals.icu API key configured.")
+        case .fetchFailed: return String(localized: "Couldn't reach intervals.icu.")
+        case .empty: return String(localized: "No planned workouts in the next 3 weeks.")
+        case .has: return ""
+        }
+    }
+
+    /// TEMPORARY, see `LoadState`'s doc comment.
+    private var diagnosticLine: String {
+        switch state {
+        case .loading: return "debug: task running"
+        case .noApiKey: return "debug: apiKey() returned nil/empty"
+        case .fetchFailed: return "debug: client.events() threw"
+        case .empty(let count): return "debug: fetched \(count) event(s), 0 after sort/filter"
+        case .has: return ""
+        }
     }
 
     private func cardBody(_ event: IntervalsICUEvent) -> some View {
@@ -419,8 +457,10 @@ struct IntervalsICUNextPlannedCard: View {
     }
 
     private func load() async {
-        defer { loaded = true }
-        guard let apiKey = await IntervalsICUSettings.shared.apiKey(), !apiKey.isEmpty else { return }
+        guard let apiKey = await IntervalsICUSettings.shared.apiKey(), !apiKey.isEmpty else {
+            state = .noApiKey
+            return
+        }
         let athleteId = await IntervalsICUSettings.shared.athleteId
         let client = IntervalsICUClient(athleteId: athleteId, apiKey: apiKey)
         let cal = Calendar.current
@@ -430,8 +470,15 @@ struct IntervalsICUNextPlannedCard: View {
             oldest: PushDayFormat.formatter.string(from: today),
             newest: PushDayFormat.formatter.string(from: to),
             category: "WORKOUT"
-        ) else { return }
-        next = events.sorted { ($0.start_date_local ?? "") < ($1.start_date_local ?? "") }.first
+        ) else {
+            state = .fetchFailed
+            return
+        }
+        if let first = events.sorted(by: { ($0.start_date_local ?? "") < ($1.start_date_local ?? "") }).first {
+            state = .has(first)
+        } else {
+            state = .empty(fetchedCount: events.count)
+        }
     }
 }
 #endif
