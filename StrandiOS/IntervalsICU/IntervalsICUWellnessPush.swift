@@ -19,6 +19,9 @@ public enum IntervalsICUWellnessPush {
         case nothingToPush
     }
 
+    /// `@MainActor` so it can read `ProfileStore` (weight) directly — the caller (`IntervalsICURunner`)
+    /// is already MainActor, so this costs no extra hop.
+    @MainActor
     public static func pushLatestNight(store: WhoopStore) async throws -> Outcome {
         guard await IntervalsICUSettings.shared.pushEnabled else { return .disabled }
         guard let apiKey = await IntervalsICUSettings.shared.apiKey(), !apiKey.isEmpty else {
@@ -26,6 +29,7 @@ public enum IntervalsICUWellnessPush {
         }
         let athleteId = await IntervalsICUSettings.shared.athleteId
         let client = IntervalsICUClient(athleteId: athleteId, apiKey: apiKey)
+        let fields = IntervalsICUSettings.shared.pushFields
 
         let cal = Calendar(identifier: .gregorian)
         let today = Date()
@@ -38,14 +42,16 @@ public enum IntervalsICUWellnessPush {
         guard let latest = days.sorted(by: { $0.day < $1.day })
             .last(where: { $0.totalSleepMin != nil }) else { return .nothingToPush }
 
-        let sleepSecs = latest.totalSleepMin.map { Int(($0 * 60).rounded()) }
-        let sleepScore = latest.efficiency.map { Int(($0 * 100).rounded()) }
+        let sleepSecs = fields.contains(.sleep) ? latest.totalSleepMin.map { Int(($0 * 60).rounded()) } : nil
+        let sleepScore = fields.contains(.sleep) ? latest.efficiency.map { Int(($0 * 100).rounded()) } : nil
         try await client.putWellness(
             date: latest.day,
-            hrv: latest.avgHrv,
-            restingHR: latest.restingHr,
+            hrv: fields.contains(.hrv) ? latest.avgHrv : nil,
+            restingHR: fields.contains(.restingHR) ? latest.restingHr : nil,
             sleepSecs: sleepSecs,
-            sleepScore: sleepScore
+            sleepScore: sleepScore,
+            weightKg: fields.contains(.weight) ? ProfileStore().weightKg : nil,
+            steps: fields.contains(.steps) ? latest.steps : nil
         )
         return .pushed(day: latest.day)
     }

@@ -45,12 +45,22 @@ struct IntervalsICUSettingsView: View {
                 .tint(StrandPalette.accent)
                 .disabled(!settings.hasApiKey)
 
-                Text("Désactivé par défaut. Une fois activé, chaque matin NOOP envoie le résumé déjà calculé de votre nuit (HRV, FC de repos, durée de sommeil) vers votre fiche de bien-être intervals.icu du jour — rien n'est relu depuis intervals.icu pour cet envoi.")
+                Text("Désactivé par défaut. Une fois activé, chaque matin NOOP envoie le résumé déjà calculé de votre nuit vers votre fiche de bien-être intervals.icu du jour — rien n'est relu depuis intervals.icu pour cet envoi.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if settings.pushEnabled {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Données envoyées")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        ForEach(fieldOptions, id: \.field) { option in
+                            fieldToggle(option.field, label: option.label)
+                        }
+                    }
+                    .padding(.top, 4)
+
                     Text("Dernier envoi : \(runner.lastPushResult ?? "pas encore tenté depuis l'activation")")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -58,6 +68,23 @@ struct IntervalsICUSettingsView: View {
                 }
             }
         }
+    }
+
+    private var fieldOptions: [(field: IntervalsICUSettings.WellnessField, label: String)] {
+        [(.hrv, "HRV"), (.restingHR, "FC de repos"), (.sleep, "Sommeil (durée + score)"),
+         (.weight, "Poids"), (.steps, "Pas")]
+    }
+
+    private func fieldToggle(_ field: IntervalsICUSettings.WellnessField, label: String) -> some View {
+        Toggle(isOn: Binding(
+            get: { settings.pushFields.contains(field) },
+            set: { settings.setPushField(field, enabled: $0) }
+        )) {
+            Text(label).font(StrandFont.caption).foregroundStyle(StrandPalette.textPrimary)
+        }
+        .toggleStyle(.switch)
+        .tint(StrandPalette.accent)
+        .controlSize(.mini)
     }
 
     private var configCard: some View {

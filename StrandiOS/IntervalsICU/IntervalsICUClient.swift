@@ -94,7 +94,8 @@ public struct IntervalsICUClient {
     /// Fork addition, the reverse direction of `activities(oldest:newest:)`: NOOP never reads this
     /// back, matching the one-way-export convention the self-hosted push client already follows.
     public func putWellness(date: String, hrv: Double?, restingHR: Int?,
-                            sleepSecs: Int?, sleepScore: Int?) async throws {
+                            sleepSecs: Int?, sleepScore: Int?,
+                            weightKg: Double? = nil, steps: Int? = nil) async throws {
         guard let url = URL(string: "https://intervals.icu/api/v1/athlete/\(athleteId)/wellness/\(date)")
         else { throw IntervalsICUError.invalidURL }
 
@@ -103,6 +104,8 @@ public struct IntervalsICUClient {
         if let restingHR { body["restingHR"] = restingHR }
         if let sleepSecs { body["sleepSecs"] = sleepSecs }
         if let sleepScore { body["sleepScore"] = sleepScore }
+        if let weightKg { body["weight"] = weightKg }
+        if let steps { body["steps"] = steps }
 
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
