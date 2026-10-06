@@ -45,10 +45,20 @@ struct StressView: View {
     /// Trend window for the chart (W/M/3M/6M/1Y/ALL).
     @State private var range: ExploreRange = .month
 
-    /// Today's intraday stress read (hourly timeline + sustained-high flag), computed
-    /// from the day's banked HR + R-R via the SAME 0–3 proxy the daily score uses. Nil
-    /// until the async read completes; `.empty` when the day has no usable intraday HR.
+    /// The day the intraday timeline + context cards are showing. Defaults to today; the
+    /// day-navigation arrows page this backward/forward (never past today). Fork addition,
+    /// matching WHOOP's per-day Stress Monitor paging — NOOP's intraday read used to be
+    /// today-only, so a user who missed checking in the moment had no way to look back.
+    @State private var selectedDay: Date = Calendar.current.startOfDay(for: Date())
+    /// The intraday stress read (hourly timeline + sustained-high flag) for `selectedDay`,
+    /// computed from that day's banked HR + R-R via the SAME 0–3 proxy the daily score uses.
+    /// Nil until the async read completes; `.empty` when the day has no usable intraday HR.
     @State private var daytime: DaytimeStress.Result?
+    /// `selectedDay`'s own workouts (for the timeline's activity markers) and the "typical
+    /// weekday" comparison's own async state. See `loadWeekdayBaseline` for the latter.
+    @State private var dayWorkouts: [WorkoutRow] = []
+    @State private var daySleepSpan: (start: Date, end: Date)?
+    @State private var weekdayBaseline: WeekdayBaseline?
     /// Whether TODAY's intraday timeline is scored against the PERSONAL cross-day daytime baseline
     /// (`.baselineRelative`, once enough worn history exists) instead of the day's own calm hours
     /// (`.dayRelative`). Drives only the explanatory copy — the 0–3 scale + bands are identical either way.
@@ -93,24 +103,51 @@ struct StressView: View {
         .onAppear { rebuildModelIfNeeded() }
         .onChangeCompat(of: repo.days) { _ in rebuildModelIfNeeded() }
         .task(id: repo.refreshSeq) { await load() }
+        .task(id: selectedDay) { await loadDaytime() }
+    }
+
+    /// True once `selectedDay` is today — the forward arrow disables here, and callers that
+    /// want "now" rather than "end of the paged day" check this first.
+    private var isViewingToday: Bool {
+        Calendar.current.isDate(selectedDay, inSameDayAs: Date())
     }
 
     private func load() async {
         storedSeries = await repo.series(key: "stress", source: "my-whoop")
         loaded = true
         rebuildModelIfNeeded()
+        // `.task(id: selectedDay)` already covers day-paging, but it can fire before `model` exists
+        // on first appear (both tasks start together), which would leave `weekdayBaseline` stuck nil
+        // until the next page — this re-run, now that `model` is guaranteed built, is what catches
+        // that first-load race rather than requiring a page to populate it.
         await loadDaytime()
     }
 
-    /// Read TODAY's banked HR + R-R and build the intraday stress timeline. Local-day
-    /// window [midnight, now]; the helper buckets it into waking hours and reuses the
-    /// daily score's math, so this is the same proxy at a finer grain — never a new score.
+    /// Read `selectedDay`'s banked HR + R-R and build the intraday stress timeline. Local-day
+    /// window [midnight, now-or-midnight-the-next-day]; the helper buckets it into waking hours
+    /// and reuses the daily score's math, so this is the same proxy at a finer grain — never a
+    /// new score. Also fetches that day's workouts (timeline activity markers) and sleep span
+    /// (timeline shading) and kicks off the weekday-baseline comparison.
     private func loadDaytime() async {
         let cal = Calendar.current
-        let startOfDay = cal.startOfDay(for: Date())
+        let startOfDay = cal.startOfDay(for: selectedDay)
         let from = Int(startOfDay.timeIntervalSince1970)
-        let to = Int(Date().timeIntervalSince1970)
-        let tz = TimeZone.current.secondsFromGMT(for: Date())
+        let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
+        let to = isViewingToday ? Int(Date().timeIntervalSince1970) : Int(endOfDay.timeIntervalSince1970)
+        let tz = TimeZone.current.secondsFromGMT(for: startOfDay)
+
+        async let workoutsTask = repo.workoutRows(days: max(1, daysAgo(selectedDay) + 2))
+        async let sleepTask = repo.sleepSessions(from: from - 12 * 3600, to: to, limit: 4)
+        let (allWorkouts, sleeps) = await (workoutsTask, sleepTask)
+        dayWorkouts = allWorkouts.filter { $0.startTs < to && $0.endTs > from }
+        // The primary (longest) session overlapping the day, for the shaded sleep band on the
+        // chart — mirrors how the rest of the app picks "the night that belongs to this day".
+        if let primary = sleeps.max(by: { ($0.endTs - $0.startTs) < ($1.endTs - $1.startTs) }) {
+            daySleepSpan = (Date(timeIntervalSince1970: Double(primary.startTs)),
+                            Date(timeIntervalSince1970: Double(primary.endTs)))
+        } else {
+            daySleepSpan = nil
+        }
 
         let hr = await repo.hrSamples(from: from, to: to, limit: 200_000)
         // Too few HR samples: empty the timeline AND clear the advanced readouts in lockstep. Without this
@@ -182,6 +219,125 @@ struct StressView: View {
         }
         stressIndex = advanced.index
         freqHRV = advanced.freq
+
+        // The "vs a typical <weekday>" comparison (#WHOOP-parity): a separate, slower read, so it
+        // never blocks the timeline/advanced-readouts above from appearing first. See
+        // `loadWeekdayBaseline`'s doc comment for what it computes and why it is bounded.
+        weekdayBaseline = nil
+        weekdayBaseline = await loadWeekdayBaseline(for: selectedDay)
+    }
+
+    /// Days between `day` and today (0 for today, 1 for yesterday, …) — used to size the
+    /// `workoutRows` lookback so paging back in history still finds that day's workouts without
+    /// fetching the whole multi-year default every time.
+    private func daysAgo(_ day: Date) -> Int {
+        let cal = Calendar.current
+        let a = cal.startOfDay(for: day), b = cal.startOfDay(for: Date())
+        return max(0, cal.dateComponents([.day], from: a, to: b).day ?? 0)
+    }
+
+    /// Recovers the LOCAL calendar day a `fullTrend` date names, by round-tripping it through the
+    /// SAME UTC "yyyy-MM-dd" formatter that built it (lossless — it only ever reads the key back
+    /// out) and then reading those year/month/day components into the LOCAL calendar directly,
+    /// never through a UTC *instant* a local calendar would reinterpret. `Calendar.startOfDay(for:
+    /// utcMidnightInstant)` would get this wrong by a full day for any negative-UTC-offset user.
+    private func localDayStart(fromUTCDayKeyDate utcDate: Date) -> Date {
+        let cal = Calendar.current
+        let parts = Self.dayKeyFormatter.string(from: utcDate).split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return cal.startOfDay(for: utcDate) }
+        var comps = DateComponents()
+        comps.year = parts[0]; comps.month = parts[1]; comps.day = parts[2]
+        return cal.date(from: comps) ?? cal.startOfDay(for: utcDate)
+    }
+
+    /// "vs a typical <weekday>" (#WHOOP-parity): `selectedDay` compared against the AVERAGE of its
+    /// own last few same-weekday occurrences, not a generic 30-day pool — a Friday after a long
+    /// week reads differently from a Friday after a short one, and averaging every weekday together
+    /// would wash that out. Two lenses, each built from data NOOP already trusts rather than a new
+    /// physiological model:
+    ///   - Sleep: averages `StressModel.fullTrend`'s already-computed nightly scores (cheap — no
+    ///     extra store read, since that score is already sleep-session-scoped; see
+    ///     `primarySessionRestingHR`'s doc comment in AnalyticsEngine).
+    ///   - Non-activity: re-runs the SAME `DaytimeStress.analyze` pass (totals only, no timeline)
+    ///     over each matched day's own HR/R-R/gravity. Bounded to `weekdayLookback` days and run
+    ///     sequentially (not a `TaskGroup`) — this is a once-per-navigation read, not a hot path,
+    ///     and sequential keeps it one store-read-shaped query at a time rather than bursting
+    ///     `weekdayLookback` of them at the actor together.
+    private static let weekdayLookback = 4
+
+    private func loadWeekdayBaseline(for day: Date) async -> WeekdayBaseline? {
+        guard let model else { return nil }
+        let cal = Calendar.current
+        let weekday = cal.component(.weekday, from: day)
+        // `fullTrend`'s dates come from `StressModel.dayParser` (UTC-midnight per day key) —
+        // comparing against `cal.startOfDay(for: day)` (LOCAL midnight) would silently misalign
+        // near the boundary for any non-UTC timezone, so `day` is round-tripped through the SAME
+        // UTC day-key formatter before the comparison, not through the local calendar.
+        let dayUTCMidnight = Self.dayKeyFormatter.date(from: Self.dayKeyFormatter.string(from: day)) ?? day
+        let pastSameWeekday = model.fullTrend
+            .filter { cal.component(.weekday, from: $0.date) == weekday && $0.date < dayUTCMidnight }
+            .suffix(Self.weekdayLookback)
+        guard !pastSameWeekday.isEmpty else { return nil }
+
+        let sleepAvg = pastSameWeekday.map(\.value).reduce(0, +) / Double(pastSameWeekday.count)
+
+        var splits: [BandSplit] = []
+        for point in pastSameWeekday {
+            if let totals = await dayNonActivityTotals(for: point.date) {
+                splits.append(BandSplit(totals: totals))
+            }
+        }
+        let nonActivityAvg: BandSplit? = splits.isEmpty ? nil : BandSplit(
+            low: splits.map(\.low).reduce(0, +) / Double(splits.count),
+            mid: splits.map(\.mid).reduce(0, +) / Double(splits.count),
+            high: splits.map(\.high).reduce(0, +) / Double(splits.count)
+        )
+
+        return WeekdayBaseline(
+            weekdayLabel: Self.weekdaySymbol(cal, weekday),
+            sleepScoreAvg: sleepAvg, sleepSampleDays: pastSameWeekday.count,
+            nonActivitySplit: nonActivityAvg, nonActivitySampleDays: splits.count
+        )
+    }
+
+    /// Re-derives one past day's Calm/Moderate/High split — the totals-only half of what
+    /// `loadDaytime` does for `selectedDay`, without the sliding timeline (nothing here draws a
+    /// line, so there is no reason to pay for one). `day` comes from `fullTrend`, whose dates are
+    /// UTC-midnight-per-day-key (see `loadWeekdayBaseline`'s comment) — `localDayStart` recovers
+    /// the LOCAL calendar day that key actually names instead of asking a local calendar for the
+    /// start of a UTC instant, which drifts a full day off `selectedDay`'s own window for any
+    /// negative-UTC-offset timezone.
+    private func dayNonActivityTotals(for day: Date) async -> StressTotals? {
+        let cal = Calendar.current
+        let startOfDay = localDayStart(fromUTCDayKeyDate: day)
+        let from = Int(startOfDay.timeIntervalSince1970)
+        let to = Int((cal.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay).timeIntervalSince1970)
+        let tz = TimeZone.current.secondsFromGMT(for: startOfDay)
+
+        let hr = await repo.hrSamples(from: from, to: to, limit: 200_000)
+        guard hr.count >= DaytimeStress.minHourHRSamples else { return nil }
+        let rr = await repo.rrIntervals(from: from, to: to, limit: 200_000)
+        let gravity = await repo.gravitySamplesUnion(from: from, to: to, limit: 200_000)
+        let mode = await DaytimeStressMode.selected(
+            repo: repo, startOfToday: startOfDay, calendar: cal,
+            personalBaseline: PuffinExperiment.stressPersonalBaselineEnabled
+        )
+        let result = await runUnescalated(priority: .utility) {
+            DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, tzOffsetSeconds: tz, mode: mode,
+                                  includeTimeline: false)
+        }
+        guard !result.scored.isEmpty else { return nil }
+        return StressTotals(hours: result.hours)
+    }
+
+    /// Localized weekday name ("Friday" / "vendredi"), from a `Calendar.Component.weekday` value
+    /// (1 = Sunday … 7 = Saturday) via `DateFormatter.weekdaySymbols`, which is already indexed the
+    /// same way and already localized — no hand-rolled name table to keep in sync with the catalog.
+    private static func weekdaySymbol(_ cal: Calendar, _ weekday: Int) -> String {
+        let symbols = DateFormatter().weekdaySymbols ?? []
+        let idx = weekday - 1
+        guard symbols.indices.contains(idx) else { return "" }
+        return symbols[idx]
     }
 
     /// Recompute the cached `StressModel` only when (repo.days, storedSeries)
@@ -200,16 +356,21 @@ struct StressView: View {
     private func content(_ model: StressModel) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
 
+            // 0. DAY NAVIGATOR (#WHOOP-parity) — pages the hero + intraday timeline + the two
+            //    context cards below between past days. Never past today.
+            dayNavigatorHeader
+                .staggeredAppear(index: 0)
+
             // 1. HERO — the liquid stress-level vessel + band + one plain-English line, all in one card.
             heroCard(model)
-                .staggeredAppear(index: 0)
+                .staggeredAppear(index: 1)
 
             // 1b. ADVANCED HRV readouts (additive, on-demand). A separate, clearly-labelled card
             //     that appears only when at least one engine returned a value. It sits BELOW the
             //     hero and never alters the hero, the markers or the timeline.
             if hasAdvancedReadouts {
                 advancedReadoutsCard()
-                    .staggeredAppear(index: 1)
+                    .staggeredAppear(index: 2)
             }
 
             // 2. Today's numbers — uniform tiles in one grid.
@@ -217,28 +378,29 @@ struct StressView: View {
                 SectionHeader("Today", overline: "Markers", trailing: String(localized: "vs 30-day baseline"))
                 tileGrid(model)
             }
-            .staggeredAppear(index: 1)
+            .staggeredAppear(index: 2)
 
-            // 3. Today's intraday timeline — when in the day stress ran high, + a
-            //    passive Breathe suggestion when the recent hours stay elevated.
+            // 3. Intraday timeline (the paged day) + the "Outside activity" / "Sleep" context
+            //    cards — when in the day stress ran high, + a passive Breathe suggestion when the
+            //    recent hours stay elevated.
             // #2535: THREE states, not two. `daytime` is nil only while the read is still running, and this
             // used to render nothing then, so a fold that takes seconds looked exactly like a day with no
             // data. An empty `scored` after the read is a fact about the day and still stays silent.
             if daytime == nil {
                 daytimeLoading()
-                    .staggeredAppear(index: 2)
+                    .staggeredAppear(index: 3)
             } else if let daytime, !daytime.scored.isEmpty {
                 daytimeSection(daytime)
-                    .staggeredAppear(index: 2)
+                    .staggeredAppear(index: 3)
             }
 
             // 4. Trend over the chosen window.
             trendSection(model)
-                .staggeredAppear(index: 3)
+                .staggeredAppear(index: 4)
 
             // 5. Transparency — how the number is built.
             methodologyCard(model)
-                .staggeredAppear(index: 4)
+                .staggeredAppear(index: 5)
         }
         // The sustained-stress suggestion opens the existing Breathe trainer in a sheet —
         // in-app and passive (no alert / notification), inheriting the app environment.
@@ -282,70 +444,80 @@ struct StressView: View {
 
     @ViewBuilder
     private func daytimeSection(_ day: DaytimeStress.Result) -> some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Today's Timeline", overline: "Intraday",
-                          trailing: timelineTrailing(day))
+        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                SectionHeader(isViewingToday ? String(localized: "Today's Timeline") : String(localized: "Timeline"),
+                              overline: "Intraday", trailing: timelineTrailing(day))
 
-            NoopCard(tint: StressRamp.calm) {
-                VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-                    HStack {
-                        Text("Autonomic load through the day").strandOverline()
-                        Spacer()
-                        // The peak of what is DRAWN, not of the whole hours (#2144). A sliding window
-                        // can exceed both hourly neighbours when the busy stretch straddles a boundary,
-                        // so `day.peak` would caption the line with a number below its visible maximum.
-                        // Everything that COUNTS hours still reads `hours`; a maximum is not a count.
-                        let drawnPeak = day.timeline.filter { $0.level != nil }
-                            .max { ($0.level ?? 0) < ($1.level ?? 0) }
-                        if let peak = drawnPeak, let lvl = peak.level {
-                            Text("peak \(StressTrace.formatLevel(lvl)) · \(hourLabel(peak.hour))")
-                                .font(StrandFont.captionNumber)
-                                .foregroundStyle(StressRamp.color(lvl))
-                        }
-                    }
-
-                    // README screen-9: the day autonomic-load LINE, drawn with the same
-                    // 3-stop blue→green→amber WHOOP gradient as the gauge.
-                    // The SLIDING series, not the bare hours (#2144). Everything that COUNTS hours
-                    // keeps reading `hours`: the totals bar's shares still have to sum to the day.
-                    // Only the line and its ruler follow the finer read.
-                    DaytimeLoadLine(hours: day.timeline)
-
-                    // Hour ruler under the line (first / midday / last covered hour).
-                    if let lo = day.timeline.first?.hour, let hi = day.timeline.last?.hour {
+                NoopCard(tint: StressRamp.calm) {
+                    VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                         HStack {
-                            Text(hourLabel(lo)).font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.textTertiary)
+                            Text("Autonomic load through the day").strandOverline()
                             Spacer()
-                            Text(hourLabel((lo + hi) / 2)).font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.textTertiary)
-                            Spacer()
-                            Text(hourLabel(hi)).font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.textTertiary)
+                            // The peak of what is DRAWN, not of the whole hours (#2144). A sliding window
+                            // can exceed both hourly neighbours when the busy stretch straddles a boundary,
+                            // so `day.peak` would caption the line with a number below its visible maximum.
+                            // Everything that COUNTS hours still reads `hours`; a maximum is not a count.
+                            let drawnPeak = day.timeline.filter { $0.level != nil }
+                                .max { ($0.level ?? 0) < ($1.level ?? 0) }
+                            if let peak = drawnPeak, let lvl = peak.level {
+                                Text("peak \(StressTrace.formatLevel(lvl)) · \(hourLabel(peak.hour))")
+                                    .font(StrandFont.captionNumber)
+                                    .foregroundStyle(StressRamp.color(lvl))
+                            }
                         }
-                    }
 
-                    Divider().overlay(StrandPalette.hairline)
+                        // README screen-9: the day autonomic-load LINE, drawn with the same
+                        // 3-stop blue→green→amber WHOOP gradient as the gauge. Full-24h axis
+                        // (#WHOOP-parity): `dayStart` set positions the waking line by real
+                        // time-of-day and draws the night's sleep shading + any workout markers in
+                        // the same system, instead of the bare index-packed layout.
+                        // The SLIDING series, not the bare hours (#2144). Everything that COUNTS hours
+                        // keeps reading `hours`: the totals bar's shares still have to sum to the day.
+                        // Only the line and its ruler follow the finer read.
+                        DaytimeLoadLine(
+                            hours: day.timeline,
+                            dayStart: Calendar.current.startOfDay(for: selectedDay),
+                            sleepSpan: daySleepSpan,
+                            activityMarkers: dayWorkouts.map {
+                                (Date(timeIntervalSince1970: Double($0.startTs)),
+                                 Date(timeIntervalSince1970: Double($0.endTs)))
+                            }
+                        )
 
-                    // README screen-9: the Calm / Moderate / High totals bar — one stacked
-                    // bar split by how many waking hours sat in each band, with durations.
-                    StressTotalsBar(totals: StressTotals(hours: day.hours))
+                        // Hour ruler under the line (first / midday / last covered hour).
+                        if let lo = day.timeline.first?.hour, let hi = day.timeline.last?.hour {
+                            HStack {
+                                Text(hourLabel(lo)).font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                Spacer()
+                                Text(hourLabel((lo + hi) / 2)).font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                Spacer()
+                                Text(hourLabel(hi)).font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                        }
 
-                    Text(daytimeTimelineCaption)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let maskedCaption = stressActivityMaskedHoursCaption(day.activityMaskedHours) {
-                        Text(maskedCaption)
+                        Text(daytimeTimelineCaption)
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+
+                // Sustained-high suggestion — only when the recent run stays in the HIGH band.
+                if day.sustainedHigh { sustainedBreatheCard(day) }
             }
 
-            // Sustained-high suggestion — only when the recent run stays in the HIGH band.
-            if day.sustainedHigh { sustainedBreatheCard(day) }
+            // "Hors activité" (#WHOOP-parity): the SAME Calm/Moderate/High split, now its own
+            // clearly-labelled card — split out of the chart card above — plus a "vs a typical
+            // <weekday>" comparison when enough history exists.
+            nonActivityContextCard(day)
+
+            // "Sommeil" (#WHOOP-parity): the night's own vitals-based score (same `StressModel`
+            // math the hero uses, resolved for `selectedDay` specifically), not a new signal.
+            sleepContextCard()
         }
     }
 
@@ -391,6 +563,105 @@ struct StressView: View {
         .softCardTransition()
     }
 
+    // MARK: 3b · "Hors activité" context card (#WHOOP-parity)
+
+    /// The chart card's own Calm/Moderate/High split, pulled out into its own labelled card (WHOOP
+    /// calls this "stress outside of exercise and sleep") plus a same-weekday comparison bar when
+    /// `weekdayBaseline` has one. Nothing here is a new signal: `day.hours` is the identical
+    /// activity-masked split the chart above already draws from.
+    private func nonActivityContextCard(_ day: DaytimeStress.Result) -> some View {
+        let totals = StressTotals(hours: day.hours)
+        return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Outside Activity", overline: "Context")
+            NoopCard(tint: StressRamp.calm) {
+                VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
+                    HStack {
+                        Image(systemName: "figure.stand")
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        Text("Outside activity").strandOverline()
+                    }
+                    Text("Stress felt outside of exercise and sleep.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+
+                    StressTotalsBar(totals: totals)
+
+                    if let baseline = weekdayBaseline, let typical = baseline.nonActivitySplit {
+                        Divider().overlay(StrandPalette.hairline)
+                        Text("vs a typical \(baseline.weekdayLabel) (\(baseline.nonActivitySampleDays)d avg)")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        ComparisonBandBar(today: BandSplit(totals: totals), typical: typical)
+                    }
+
+                    if let maskedCaption = stressActivityMaskedHoursCaption(day.activityMaskedHours) {
+                        Text(maskedCaption)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: 3c · "Sommeil" context card (#WHOOP-parity)
+
+    /// The night's OWN vitals-based score for `selectedDay` — literally `StressModel`'s existing
+    /// math (RHR up / HRV down vs. a 30-day baseline), which is already sleep-session-scoped (see
+    /// `primarySessionRestingHR`'s doc comment), resolved via `StressModel.detail(forDayKey:)`
+    /// instead of invented as a new per-epoch sleep signal. Hidden entirely when that day has no
+    /// derivable score — nothing to show honestly beats a fabricated one.
+    @ViewBuilder
+    private func sleepContextCard() -> some View {
+        let key = Self.localDayKeyFormatter.string(from: selectedDay)
+        if let detail = StressModel.detail(forDayKey: key, days: repo.days, stored: storedSeries) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                SectionHeader("Sleep", overline: "Context")
+                NoopCard(tint: StressRamp.calm) {
+                    VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
+                        HStack {
+                            Image(systemName: "moon.fill")
+                                .foregroundStyle(StrandPalette.textTertiary)
+                            Text("Sleep").strandOverline()
+                            Spacer()
+                            StatePill("\(detail.band.title)", tone: detail.band.tone, showsDot: true)
+                        }
+                        Text("Stress felt during sleep.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+
+                        HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space2) {
+                            Text(StressTrace.formatLevel(detail.score))
+                                .font(StrandFont.rounded(28, weight: .bold))
+                                .foregroundStyle(StressRamp.color(detail.score))
+                            Text("of 3")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        Text(detail.explanation)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let baseline = weekdayBaseline, let typicalScore = baseline.sleepScoreAvg {
+                            Divider().overlay(StrandPalette.hairline)
+                            HStack {
+                                Text("vs a typical \(baseline.weekdayLabel) (\(baseline.sleepSampleDays)d avg)")
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                Spacer()
+                                Text(StressTrace.formatLevel(typicalScore))
+                                    .font(StrandFont.captionNumber)
+                                    .foregroundStyle(StressRamp.color(typicalScore))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Hour-of-day label following the device's locale + 12-/24-hour preference ("2 PM" / "14 Uhr"),
     /// instead of a hard-coded English "am/pm" (which read "3 pm" for 24-hour locales like German).
     private func hourLabel(_ hour: Int) -> String {
@@ -399,39 +670,145 @@ struct StressView: View {
         return date.formatted(.dateTime.hour())
     }
 
+    // MARK: 0 · Day navigator (#WHOOP-parity)
+
+    /// Previous/next-day paging for the hero + intraday timeline + the two context cards. The
+    /// forward arrow disables on today rather than wrapping into the future, which NOOP has no
+    /// data for and should never imply it does.
+    private var dayNavigatorHeader: some View {
+        HStack {
+            Button {
+                changeDay(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(String(localized: "Previous day"))
+
+            Spacer()
+            Text(selectedDay, format: .dateTime.weekday(.wide).day().month(.abbreviated))
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer()
+
+            Button {
+                changeDay(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isViewingToday ? StrandPalette.textTertiary : StrandPalette.textSecondary)
+                    .frame(width: 32, height: 32)
+            }
+            .disabled(isViewingToday)
+            .accessibilityLabel(String(localized: "Next day"))
+        }
+    }
+
+    private func changeDay(by delta: Int) {
+        let cal = Calendar.current
+        guard let moved = cal.date(byAdding: .day, value: delta, to: selectedDay) else { return }
+        let clamped = min(cal.startOfDay(for: moved), cal.startOfDay(for: Date()))
+        selectedDay = clamped
+    }
+
     // MARK: 1 · Hero — the liquid stress-level vessel.
     //
     // The 0–3 stress score reads as the signature liquid gauge: a LiquidVessel that fills to score/3
     // and is tinted by the live band (calm blue → steady green → tense amber), with the count-up value +
     // "of 3" over it (the Today HeroScoreCell / Live BPM-gauge idiom). The band pill sits top-trailing and
     // one plain-English line explains the number below. Frosted card, liquid finish.
+    //
+    // Day-paged (#WHOOP-parity): while `selectedDay` is today this is the same LIVE score it always
+    // was; paged to a past day it resolves THAT day's own score via `StressModel.detail(forDayKey:)`
+    // rather than silently continuing to show today's number under a different day's label — the
+    // "two readouts of one fact must not disagree" rule applies to a date header + a value beneath it
+    // exactly as much as to two cards. A day with no derivable signal says so, not a guess.
+
+    /// UTC-fixed — ONLY for round-tripping a `StressModel.fullTrend` date (itself built on a
+    /// UTC-midnight-per-day-key basis) back to the key it came from, consistently with itself.
+    /// Never for turning `selectedDay` (a genuinely LOCAL midnight) into a key — see
+    /// `localDayKeyFormatter` for that; using this one there shifts the calendar day by the
+    /// device's UTC offset for any non-UTC timezone.
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Device-timezone — for turning `selectedDay` (LOCAL midnight) into the "yyyy-MM-dd"
+    /// `DailyMetric.day` key it actually names, so `StressModel.detail(forDayKey:)` looks up the
+    /// day the navigator is actually showing rather than the UTC-shifted neighbour of it.
+    private static let localDayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private enum HeroDisplay {
+        case live(score: Double, band: StressBand, explanation: String)
+        case past(score: Double, band: StressBand, explanation: String)
+        case noData
+    }
+
+    private func heroDisplay(_ model: StressModel) -> HeroDisplay {
+        guard !isViewingToday else { return .live(score: model.score, band: model.band, explanation: model.explanation) }
+        let key = Self.localDayKeyFormatter.string(from: selectedDay)
+        guard let detail = StressModel.detail(forDayKey: key, days: repo.days, stored: storedSeries) else {
+            return .noData
+        }
+        return .past(score: detail.score, band: detail.band, explanation: detail.explanation)
+    }
 
     private func heroCard(_ model: StressModel) -> some View {
-        NoopCard(tint: StressRamp.calm) {
+        let display = heroDisplay(model)
+        return NoopCard(tint: StressRamp.calm) {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 HStack {
                     Text("Stress monitor").strandOverline()
                     Spacer()
-                    StatePill("\(model.band.title)", tone: model.band.tone, showsDot: true)
+                    if case .live = display {
+                        StatePill("LIVE", tone: .accent, showsDot: true)
+                    }
+                    switch display {
+                    case .live(_, let band, _), .past(_, let band, _):
+                        StatePill("\(band.title)", tone: band.tone, showsDot: true)
+                    case .noData:
+                        EmptyView()
+                    }
                 }
 
-                HStack(alignment: .center, spacing: NoopMetrics.space5) {
-                    // The stress-level vessel: fills to score/3, tinted to the live band, the value
-                    // counting up over it. Taps splash the gauge (the numeral is hit-transparent).
-                    StressHeroGauge(score: model.score, tint: StressRamp.color(model.score))
+                switch display {
+                case .live(let score, let band, let explanation), .past(let score, let band, let explanation):
+                    HStack(alignment: .center, spacing: NoopMetrics.space5) {
+                        // The stress-level vessel: fills to score/3, tinted to the live band, the value
+                        // counting up over it. Taps splash the gauge (the numeral is hit-transparent).
+                        StressHeroGauge(score: score, tint: StressRamp.color(score))
 
-                    VStack(alignment: .leading, spacing: NoopMetrics.space1) {
-                        Text(model.band.title)
-                            .font(StrandFont.overline)
-                            .tracking(StrandFont.overlineTracking)
-                            .foregroundStyle(StressRamp.color(model.score))
-                        // One plain-English line beside the gauge.
-                        Text(model.explanation)
-                            .font(StrandFont.subhead)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                            Text(band.title)
+                                .font(StrandFont.overline)
+                                .tracking(StrandFont.overlineTracking)
+                                .foregroundStyle(StressRamp.color(score))
+                            // One plain-English line beside the gauge.
+                            Text(explanation)
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
+                case .noData:
+                    Text("No resting HR or HRV for this day, so there's nothing to score it against.")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
+                        .multilineTextAlignment(.center)
                 }
             }
         }
@@ -932,6 +1309,55 @@ struct StressModel {
             self.calmTimeCaption = String(localized: "low-stress days · \(recent.count)d")
         }
     }
+
+    /// One arbitrary day's sleep-vitals stress detail — the "Sommeil" card's content when paging to
+    /// a day other than the hero's own (`init?` above only ever resolves the LATEST signal-bearing
+    /// day). Same baseline window (up to 30 days ending the day before), same `StressMath` calls;
+    /// kept as its own standalone lookup rather than refactoring `init?` to share it, so the hero's
+    /// already-shipped path is untouched by this addition.
+    struct DayDetail {
+        let score: Double
+        let band: StressBand
+        let rhrDelta: Double?
+        let hrvDelta: Double?
+        let explanation: String
+        let usingStored: Bool
+    }
+
+    static func detail(forDayKey dayKey: String, days: [DailyMetric],
+                       stored: [(day: String, value: Double)]) -> DayDetail? {
+        let storedByDay: [String: Double] = Dictionary(
+            stored.map { ($0.day, min(max($0.value, 0), 3)) }, uniquingKeysWith: { _, b in b }
+        )
+        guard let idx = days.firstIndex(where: { $0.day == dayKey }) else { return nil }
+        let day = days[idx]
+        let baseline = idx > 0 ? Array(days[0..<idx].suffix(30)) : []
+        let rhrBase = baseline.compactMap { $0.restingHr }.map(Double.init)
+        let hrvBase = baseline.compactMap { $0.avgHrv }
+        let meanRHR = StressMath.mean(rhrBase), sdRHR = StressMath.std(rhrBase, mean: StressMath.mean(rhrBase))
+        let meanHRV = StressMath.mean(hrvBase), sdHRV = StressMath.std(hrvBase, mean: StressMath.mean(hrvBase))
+        let rhrT = day.restingHr.map(Double.init)
+        let hrvT = day.avgHrv
+
+        let derivedAvailable = (rhrT != nil && meanRHR != nil) || (hrvT != nil && meanHRV != nil)
+        let storedDay = storedByDay[day.day]
+        guard storedDay != nil || derivedAvailable else { return nil }
+        let derived: Double? = derivedAvailable
+            ? StressMath.squash(StressMath.rawScore(
+                rhrToday: rhrT, meanRHR: meanRHR, sdRHR: sdRHR,
+                hrvToday: hrvT, meanHRV: meanHRV, sdHRV: sdHRV))
+            : nil
+        let s = storedDay ?? derived ?? 1.5
+        let band = StressBand(score: s)
+        let rhrDelta = (rhrT != nil && meanRHR != nil) ? (rhrT! - meanRHR!) : nil
+        let hrvDelta = (hrvT != nil && meanHRV != nil) ? (hrvT! - meanHRV!) : nil
+        return DayDetail(
+            score: s, band: band, rhrDelta: rhrDelta, hrvDelta: hrvDelta,
+            explanation: StressMath.explanation(band: band, rhrDelta: rhrDelta, hrvDelta: hrvDelta,
+                                                usingStored: storedDay != nil),
+            usingStored: storedDay != nil
+        )
+    }
 }
 
 // MARK: - Stress math (pure, testable helpers)
@@ -1014,6 +1440,18 @@ enum StressMath {
 
 struct DaytimeLoadLine: View {
     let hours: [DaytimeStress.HourPoint]
+    /// When set, positions points by actual time-of-day across a full 24h axis (`dayStart` to
+    /// `dayStart` + 24h) instead of evenly across the array index — the only way a sleep span and
+    /// workout markers can share one coordinate system with the line (#WHOOP-parity). nil (the
+    /// default) keeps the original index-packed layout every existing caller (Today, the widget)
+    /// already relies on, byte-identical, since neither wants the night drawn at all.
+    var dayStart: Date? = nil
+    /// Shaded band + moon glyph for the night, in the SAME `dayStart`-relative coordinate system.
+    /// Ignored when `dayStart` is nil.
+    var sleepSpan: (start: Date, end: Date)? = nil
+    /// Small tick marks for logged workouts overlapping the day, positioned the same way. Ignored
+    /// when `dayStart` is nil.
+    var activityMarkers: [(start: Date, end: Date)] = []
 
     private let chartHeight: CGFloat = 78
 
@@ -1031,6 +1469,14 @@ struct DaytimeLoadLine: View {
             let runs = scoredRuns(width: w, height: h)
 
             ZStack {
+                if let dayStart {
+                    if let sleepSpan {
+                        sleepShading(sleepSpan, dayStart: dayStart, width: w, height: h)
+                    }
+                    ForEach(Array(activityMarkers.enumerated()), id: \.offset) { _, span in
+                        activityMarker(span, dayStart: dayStart, width: w, height: h)
+                    }
+                }
                 // Baseline (1.5 of 3) reference line.
                 Path { p in
                     let yb = y(1.5)
@@ -1092,6 +1538,11 @@ struct DaytimeLoadLine: View {
     /// was left, which draws a reading straight across an hour that has none — the one thing the caption
     /// promises it will not do. Splitting into runs lets each be stroked and filled separately, so a
     /// hole in the day stays a hole. The Kotlin twin has always broken the line here.
+    ///
+    /// Two x-placements: `dayStart` set positions each point by its ACTUAL time-of-day fraction across
+    /// 24h (`timeFraction`), so the waking line sits in the middle of the axis with real empty space on
+    /// either side for the night, and a sleep span / activity marker drawn in the same system lines up
+    /// with it. `dayStart` nil keeps the original by-index spacing (every pre-existing caller).
     private func scoredRuns(width w: CGFloat, height h: CGFloat) -> [[(CGFloat, CGFloat)]] {
         let n = max(hours.count, 1)
         var out: [[(CGFloat, CGFloat)]] = []
@@ -1101,12 +1552,52 @@ struct DaytimeLoadLine: View {
                 if !run.isEmpty { out.append(run); run = [] }
                 continue
             }
-            let px = n <= 1 ? w / 2 : w * CGFloat(i) / CGFloat(n - 1)
+            let px: CGFloat
+            if let dayStart {
+                px = w * timeFraction(Date(timeIntervalSince1970: Double(p.startTs)), dayStart: dayStart)
+            } else {
+                px = n <= 1 ? w / 2 : w * CGFloat(i) / CGFloat(n - 1)
+            }
             let py = h - h * CGFloat(min(max(level / 3.0, 0), 1))
             run.append((px, py))
         }
         if !run.isEmpty { out.append(run) }
         return out
+    }
+
+    /// `date`'s position within [dayStart, dayStart + 24h), clamped to 0...1.
+    private func timeFraction(_ date: Date, dayStart: Date) -> CGFloat {
+        let span = date.timeIntervalSince(dayStart) / 86_400
+        return CGFloat(min(max(span, 0), 1))
+    }
+
+    @ViewBuilder
+    private func sleepShading(_ span: (start: Date, end: Date), dayStart: Date,
+                              width w: CGFloat, height h: CGFloat) -> some View {
+        let x0 = w * timeFraction(span.start, dayStart: dayStart)
+        let x1 = w * timeFraction(span.end, dayStart: dayStart)
+        if x1 > x0 {
+            ZStack(alignment: .topLeading) {
+                Rectangle()
+                    .fill(StrandPalette.hairline.opacity(0.35))
+                    .frame(width: x1 - x0, height: h)
+                    .position(x: (x0 + x1) / 2, y: h / 2)
+                Image(systemName: "moon.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .position(x: x0 + 10, y: 10)
+            }
+        }
+    }
+
+    private func activityMarker(_ span: (start: Date, end: Date), dayStart: Date,
+                                width w: CGFloat, height h: CGFloat) -> some View {
+        let x0 = w * timeFraction(span.start, dayStart: dayStart)
+        let x1 = max(x0 + 2, w * timeFraction(span.end, dayStart: dayStart))
+        return Rectangle()
+            .fill(StrandPalette.accent.opacity(0.28))
+            .frame(width: max(2, x1 - x0), height: 3)
+            .position(x: (x0 + x1) / 2, y: 3)
     }
 
     /// The 0-3 level a chart y-position represents: the inverse of the `y` mapping above, so a lone
@@ -1194,6 +1685,87 @@ struct StressTotals {
         case .high:   return highHours
         }
     }
+}
+
+// MARK: - Weekday baseline ("vs a typical <weekday>", #WHOOP-parity)
+
+/// 0...1 band shares, comparable across days regardless of how many hours each one scored —
+/// `StressTotals.fraction` already normalizes this way, this just gives the three a home that
+/// isn't tied to one specific day's raw hour counts (needed to AVERAGE several days together).
+struct BandSplit: Equatable {
+    let low: Double
+    let mid: Double
+    let high: Double
+
+    init(low: Double, mid: Double, high: Double) {
+        self.low = low; self.mid = mid; self.high = high
+    }
+
+    init(totals: StressTotals) {
+        self.low = totals.fraction(.low)
+        self.mid = totals.fraction(.medium)
+        self.high = totals.fraction(.high)
+    }
+}
+
+/// `selectedDay` compared against its own last few same-weekday occurrences. See
+/// `StressView.loadWeekdayBaseline`'s doc comment for how each half is built and why nothing here
+/// is a new physiological score — both lenses reuse data the rest of the screen already computes.
+struct WeekdayBaseline {
+    let weekdayLabel: String
+    /// Average of `StressModel.fullTrend`'s nightly 0–3 scores over the matched days.
+    let sleepScoreAvg: Double?
+    let sleepSampleDays: Int
+    /// Average Calm/Moderate/High band shares over the matched days' own daytime timelines.
+    let nonActivitySplit: BandSplit?
+    let nonActivitySampleDays: Int
+}
+
+/// Two stacked proportional bars — `selectedDay`'s own Calm/Moderate/High split above a typical
+/// same-weekday's — so the two are compared at a glance the way `WeekdayBaseline` computed them to
+/// be. NOOP's own bar language (flat rounded segments, `StressRamp` colors), not WHOOP's pixel
+/// style — the user asked to keep NOOP's look and only borrow WHOOP's content/structure here.
+struct ComparisonBandBar: View {
+    let today: BandSplit
+    let typical: BandSplit
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            row(today, label: String(localized: "Today"))
+            row(typical, label: String(localized: "Typical"))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(
+            localized: "Today: \(pct(today.low))% calm, \(pct(today.mid))% moderate, \(pct(today.high))% high. Typical: \(pct(typical.low))% calm, \(pct(typical.mid))% moderate, \(pct(typical.high))% high."
+        ))
+    }
+
+    private func row(_ split: BandSplit, label: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: 52, alignment: .leading)
+            GeometryReader { geo in
+                let w = geo.size.width
+                HStack(spacing: 0) {
+                    segment(StressRamp.calm, frac: split.low, width: w)
+                    segment(StressRamp.steady, frac: split.mid, width: w)
+                    segment(StressRamp.tense, frac: split.high, width: w)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
+            .frame(height: 8)
+        }
+    }
+
+    @ViewBuilder
+    private func segment(_ color: Color, frac: Double, width: CGFloat) -> some View {
+        let w = width * CGFloat(min(max(frac, 0), 1))
+        if w > 0 { Rectangle().fill(color).frame(width: w) }
+    }
+
+    private func pct(_ frac: Double) -> Int { Int((frac * 100).rounded()) }
 }
 
 // MARK: - Stress totals bar (README screen-9, liquid finish)
