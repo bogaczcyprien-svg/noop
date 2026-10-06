@@ -68,6 +68,10 @@ struct StressView: View {
     /// weekday" comparison's own async state. See `loadWeekdayBaseline` for the latter.
     @State private var dayWorkouts: [WorkoutRow] = []
     @State private var daySleepSpan: (start: Date, end: Date)?
+    /// Continuous read through `daySleepSpan`, scored against the night's OWN reference — see
+    /// `DaytimeStress.analyzeSleepWindow`'s doc comment. Merged with `daytime.timeline` for the
+    /// chart so the line never simply stops at the shaded sleep band.
+    @State private var sleepTimeline: [DaytimeStress.HourPoint] = []
     @State private var weekdayBaseline: WeekdayBaseline?
     /// Whether TODAY's intraday timeline is scored against the PERSONAL cross-day daytime baseline
     /// (`.baselineRelative`, once enough worn history exists) instead of the day's own calm hours
@@ -120,6 +124,15 @@ struct StressView: View {
     /// want "now" rather than "end of the paged day" check this first.
     private var isViewingToday: Bool {
         Calendar.current.isDate(selectedDay, inSameDayAs: Date())
+    }
+
+    /// `sleepTimeline` restricted to `selectedDay`'s own [midnight, midnight+24h) — see the chart
+    /// call site's comment for why a pre-midnight portion is dropped here rather than bunched.
+    private var clippedSleepTimeline: [DaytimeStress.HourPoint] {
+        let start = Calendar.current.startOfDay(for: selectedDay)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        let lo = Int(start.timeIntervalSince1970), hi = Int(end.timeIntervalSince1970)
+        return sleepTimeline.filter { $0.startTs >= lo && $0.startTs < hi }
     }
 
     private func load() async {
@@ -216,6 +229,27 @@ struct StressView: View {
             DaytimeStress.analyze(hr: hr, rr: rr, gravity: gravity, sleepSpans: sleepSpans,
                                   tzOffsetSeconds: tz, mode: mode,
                                   includeTimeline: true)
+        }
+
+        // Continuous coverage through the night too (#WHOOP-parity, at the user's explicit
+        // request: "je veux que ça soit tout le temps"). Sleep is EXCLUDED from the daytime read
+        // above on purpose (see `sleepSpans`'s comment) because scoring it against a waking
+        // reference misreads ordinary sleep-stage HR/HRV swings as stress — so it needs its OWN
+        // read, against its OWN night-only reference, not a widened daytime window. A dedicated
+        // HR/R-R fetch scoped exactly to the sleep span (which usually starts the evening BEFORE
+        // local midnight, outside `hr`/`rr` above) rather than reusing the day's own arrays.
+        if let span = daySleepSpan {
+            let sleepFrom = Int(span.start.timeIntervalSince1970)
+            let sleepTo = Int(span.end.timeIntervalSince1970)
+            let sleepHR = await repo.hrSamples(from: sleepFrom, to: sleepTo, limit: 200_000)
+            let sleepRR = await repo.rrIntervals(from: sleepFrom, to: sleepTo, limit: 200_000)
+            sleepTimeline = await runUnescalated(priority: .userInitiated) {
+                DaytimeStress.analyzeSleepWindow(hr: sleepHR, rr: sleepRR,
+                                                 sleepSpan: (sleepFrom, sleepTo),
+                                                 tzOffsetSeconds: tz)
+            }
+        } else {
+            sleepTimeline = []
         }
 
         // ADDITIVE advanced readouts, computed on-demand from the SAME `rr` (no extra fetch, no
@@ -498,8 +532,15 @@ struct StressView: View {
                         // The SLIDING series, not the bare hours (#2144). Everything that COUNTS hours
                         // keeps reading `hours`: the totals bar's shares still have to sum to the day.
                         // Only the line and its ruler follow the finer read.
+                        // `sleepTimeline` merged in (#WHOOP-parity, explicit request: "je veux que ça
+                        // soit tout le temps") so the line runs continuously through the shaded sleep
+                        // band instead of stopping at it — each half scored against its OWN reference
+                        // (see `analyzeSleepWindow`'s doc comment), just drawn as one curve. Clipped to
+                        // THIS day's own [midnight, midnight+24h): a session starting the evening
+                        // before (the usual case) also carries pre-midnight points, which belong on
+                        // YESTERDAY's chart at its own right edge, not bunched onto today's left edge.
                         DaytimeLoadLine(
-                            hours: day.timeline,
+                            hours: (day.timeline + clippedSleepTimeline).sorted { $0.startTs < $1.startTs },
                             dayStart: Calendar.current.startOfDay(for: selectedDay),
                             sleepSpan: daySleepSpan,
                             activityMarkers: dayWorkouts.map {
@@ -1068,6 +1109,10 @@ struct StressView: View {
                 Text("We compare today's resting heart rate and HRV to your own 30-day baseline. A higher-than-usual resting HR and a lower-than-usual HRV both push the score up, classic signs the body is activated. The combined shift is mapped onto a 0-3 scale: 0 is calm, 1.5 sits at your baseline, 3 is highly activated.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("The intraday line keeps running through sleep, but scored against that night's OWN calmest stretch rather than the day's — sleep's normal HR/HRV swings (deep sleep vs. REM, the natural rise near waking) are not what the waking reference is built to read, so each half gets a reference that actually fits it.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 Divider().overlay(StrandPalette.hairline)
                 HStack(spacing: 0) {

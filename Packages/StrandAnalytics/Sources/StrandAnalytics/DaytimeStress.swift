@@ -672,6 +672,70 @@ public enum DaytimeStress {
                       timeline: timeline)
     }
 
+    // MARK: - Sleep-window read (continuous through the night, #WHOOP-parity)
+
+    /// Continuous autonomic-activity read THROUGH one sleep span, using the SAME 0–3 formula as
+    /// the waking proxy (`rawScore`/`squash`) but scored against the NIGHT'S OWN quartile-based
+    /// calm reference (built from this span's own hours) rather than the day's waking one.
+    ///
+    /// Deliberately NOT a shared reference with `analyze`: the waking proxy's calm reference is
+    /// built from AWAKE-but-calm hours, and sleep physiology (the natural HR/HRV swing between
+    /// deep sleep and REM, the cortisol-driven rise approaching wake) is not what that reference
+    /// models — scoring the night against it would misread ordinary sleep-stage variation as
+    /// stress, the exact failure `analyze`'s sleep-masking guards against on the other side. This
+    /// function instead gives sleep its OWN internally-consistent reference (quietest stretch of
+    /// THIS night = calm, by the same quartile method `analyze` already uses for daytime), so a
+    /// night that was genuinely restless shows elevated readings relative to ITS OWN quiet
+    /// stretches, not relative to being awake.
+    ///
+    /// No activity gate: the wrist barely moves during real sleep, so the motion gate `analyze`
+    /// needs for waking hours has nothing to mask here. No caching (unlike `analyze`): a sleep
+    /// span is a handful of hourly buckets, not a full day's worth, and is read once per night
+    /// rather than on every view re-evaluation.
+    ///
+    /// Returns hour buckets in time order, each possibly unscored (`level == nil`) when that hour
+    /// had too little HR — never fabricated. Empty when the span is empty or carries no usable HR.
+    public static func analyzeSleepWindow(hr: [HRSample], rr: [RRInterval],
+                                          sleepSpan: (start: Int, end: Int),
+                                          tzOffsetSeconds: Int = 0) -> [HourPoint] {
+        guard sleepSpan.end > sleepSpan.start else { return [] }
+        let hrInSpan = hr.filter { $0.ts >= sleepSpan.start && $0.ts < sleepSpan.end }
+        guard !hrInSpan.isEmpty else { return [] }
+        let rrInSpan = rr.filter { $0.ts >= sleepSpan.start && $0.ts < sleepSpan.end }
+
+        var hrByBucket: [Int: [Double]] = [:]
+        for s in hrInSpan { hrByBucket[bucketOf(s.ts + tzOffsetSeconds, phase: 0), default: []].append(Double(s.bpm)) }
+        var rrByBucket: [Int: [Double]] = [:]
+        for s in rrInSpan { rrByBucket[bucketOf(s.ts + tzOffsetSeconds, phase: 0), default: []].append(Double(s.rrMs)) }
+
+        struct Agg { let bucket: Int; let meanHR: Double?; let rmssd: Double? }
+        let aggs: [Agg] = hrByBucket.keys.sorted().map { b in
+            let hrs = hrByBucket[b] ?? []
+            let mHR = hrs.count >= minHourHRSamples ? mean(hrs) : nil
+            let rrRes = HRVAnalyzer.analyze(rawRR: rrByBucket[b] ?? [])
+            return Agg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd)
+        }
+        guard !aggs.isEmpty else { return [] }
+
+        let hrMeans = aggs.compactMap(\.meanHR)
+        let rmssdVals = aggs.compactMap(\.rmssd)
+        let refHR = calmReference(hrMeans, calmIsLow: true)
+        let refRMSSD = calmReference(rmssdVals, calmIsLow: false)
+        let sdHR = std(hrMeans, mean: mean(hrMeans))
+        let sdRMSSD = std(rmssdVals, mean: mean(rmssdVals))
+
+        return aggs.map { a in
+            let hourOfDay = floorDiv(a.bucket, bucketSeconds) % 24
+            let wallStart = a.bucket - tzOffsetSeconds
+            let level: Double? = a.meanHR != nil
+                ? squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: sdHR,
+                                  rmssd: a.rmssd, meanRMSSD: refRMSSD, sdRMSSD: sdRMSSD))
+                : nil
+            return HourPoint(hour: hourOfDay, startTs: wallStart, level: level,
+                             meanHR: a.meanHR, rmssd: a.rmssd)
+        }
+    }
+
     // MARK: - Helpers
 
     /// Floor-division that is correct for negative numerators (so a local time just before
