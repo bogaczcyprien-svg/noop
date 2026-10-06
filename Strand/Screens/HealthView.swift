@@ -1345,6 +1345,7 @@ private struct VitalsSection: View {
     // Oura owner's ceiling@100 `0x6F` mean (device-conditional, see IntelligenceEngine) — loaded when
     // the experimental toggle is ON. Empty when the toggle is OFF or no candidate data exists.
     @State private var spo2CandidateByDay: [String: Double] = [:]
+    @State private var spo2CandidateSamplesByDay: [String: Double] = [:]
     @State private var hrvOverCountByDay: [String: Double] = [:]   // #1118
 
     var body: some View {
@@ -1352,6 +1353,7 @@ private struct VitalsSection: View {
             sourceRows: repo.vitalMetricRows,
             temperatureUnit: temperatureUnit,
             spo2CandidateByDay: spo2CandidateByDay,
+            spo2CandidateSamplesByDay: spo2CandidateSamplesByDay,
             hrvOverCountByDay: hrvOverCountByDay,
             skinTempPreferred: SkinTempDisplay.Kind(rawValue: skinTempDisplayRaw) ?? .absolute   // #1846
         )
@@ -1392,10 +1394,16 @@ private struct VitalsSection: View {
             // the owner has no in-band reading for its device.
             guard PuffinExperiment.spo2CandidateDisplayEnabled else {
                 spo2CandidateByDay = [:]
+                spo2CandidateSamplesByDay = [:]
                 return
             }
             let pts = await repo.exploreSeries(key: "spo2_candidate", source: "my-whoop", days: 14)
             spo2CandidateByDay = Dictionary(pts.map { ($0.day, $0.value) }, uniquingKeysWith: { a, _ in a })
+            // Sample count alongside the mean, same source/days window so the two can never describe
+            // different nights. Absent on a night scored before this field existed — the caveat then
+            // just omits the count rather than showing a stale or guessed one.
+            let samplePts = await repo.exploreSeries(key: "spo2_candidate_samples", source: "my-whoop", days: 14)
+            spo2CandidateSamplesByDay = Dictionary(samplePts.map { ($0.day, $0.value) }, uniquingKeysWith: { a, _ in a })
         }
     }
 }

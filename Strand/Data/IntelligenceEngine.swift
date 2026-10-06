@@ -233,6 +233,14 @@ final class IntelligenceEngine: ObservableObject {
         /// "spo2_candidate" under the "-noop" device ID in pass 2 — same key for both devices, since the
         /// series is always read scoped to one device's own computed ID.
         let spo2Candidate: Int?
+        /// How many in-band readings `spo2Candidate` rests on. Travels alongside the mean for the
+        /// SAME reason `nightlySpo2CandidateMean`'s own doc comment gives for returning it at all: "a
+        /// mean over 11 readings and a mean over 1100 are not the same evidence." Previously computed
+        /// and then discarded before reaching storage — this closes that gap so the Blood Oxygen tile
+        /// can show how much a given night's candidate actually rests on, instead of a bare number
+        /// indistinguishable from one backed by a single stray in-band byte. nil in lockstep with
+        /// `spo2Candidate`.
+        let spo2CandidateSamples: Int?
         /// #1118: whether this night's in-sleep R-R is OVER-COUNTED (`crossSecondOverCount` /
         /// `sameSecondOverCount`) — the WHOOP-4.0 two-optical-channel artifact that inflates R-R and
         /// contaminates the displayed HRV. nil when the night has no in-sleep R-R (no HRV to caveat).
@@ -1789,6 +1797,7 @@ final class IntelligenceEngine: ObservableObject {
                 // the guard test `testHistoricalV18OpticalFieldsAreNotNamedPhysiologically` enforces that
                 // boundary for the WHOOP path.
                 var spo2CandidateMean: Int? = nil
+                var spo2CandidateSampleCount: Int? = nil
                 if spo2CandidateDisplayOn {
                     // Through the catalog, NOT `regDevices…?.brand == "Oura"`. Kotlin resolves this with
                     // `DeviceBrandCatalog.isOura(owner)` — id-PREFIX to `sourceKind` — and the Swift twin is
@@ -1801,6 +1810,7 @@ final class IntelligenceEngine: ObservableObject {
                     if ownerIsOura {
                         if let cand = AnalyticsEngine.nightlySpo2CeilingMean(res.sleepSessions, spo2: spo2) {
                             spo2CandidateMean = cand.mean
+                            spo2CandidateSampleCount = cand.samples
                         }
                     } else {
                         let auxSamples = (try? await store.v18AuxSamples(
@@ -1808,6 +1818,7 @@ final class IntelligenceEngine: ObservableObject {
                         if !auxSamples.isEmpty {
                             if let cand = AnalyticsEngine.nightlySpo2CandidateMean(res.sleepSessions, aux: auxSamples) {
                                 spo2CandidateMean = cand.mean
+                                spo2CandidateSampleCount = cand.samples
                             }
                         }
                     }
@@ -1825,6 +1836,7 @@ final class IntelligenceEngine: ObservableObject {
                                    sleepTrace: sleepTrace, stepsTrace: stepsTrace, hrvTrace: hrvTrace,
                                    hrvDiag: Self.mergedDayDiag(hrvDiag, strainDiagLines),
                                    spo2Candidate: spo2CandidateMean,
+                                   spo2CandidateSamples: spo2CandidateSampleCount,
                                    hrvOverCounted: hrvOverCounted,
                                    primarySessionRHR: primarySessionRHR,
                                    primarySessionRHRCoverage: primarySessionRHRCoverage)
@@ -1912,6 +1924,8 @@ final class IntelligenceEngine: ObservableObject {
         var resolvedScoreOwnerByDay: [String: String] = [:]
         // #103: SpO₂ candidate @82 nightly mean per day, carried from pass 1 for metricSeries persistence.
         var spo2CandidateByDay: [String: Int] = [:]
+        // Its sample count, same lifetime — see `DayScan.spo2CandidateSamples`'s doc comment.
+        var spo2CandidateSamplesByDay: [String: Int] = [:]
         // #1118: per-day HRV over-count flag, carried from pass 1 for metricSeries persistence. nil (absent)
         // for a night with no in-sleep R-R; otherwise true/false, so a re-score always overwrites the row.
         var hrvOverCountByDay: [String: Bool] = [:]
@@ -1935,6 +1949,9 @@ final class IntelligenceEngine: ObservableObject {
             // nil when the toggle is OFF or the night had no in-band @82 readings.
             if let cand = scan.spo2Candidate {
                 spo2CandidateByDay[res.daily.day] = cand
+            }
+            if let samples = scan.spo2CandidateSamples {
+                spo2CandidateSamplesByDay[res.daily.day] = samples
             }
             // #1118: carry the HRV over-count flag into pass 2 for metricSeries persistence.
             if let oc = scan.hrvOverCounted {
@@ -2314,6 +2331,12 @@ final class IntelligenceEngine: ObservableObject {
             // split cross-device evidence and stays behind the experimental display toggle.
             if let cand = spo2CandidateByDay[daily.day] {
                 restPoints.append(MetricPoint(day: daily.day, key: "spo2_candidate", value: Double(cand)))
+            }
+            // Sample count alongside the mean — "a mean over 11 readings and a mean over 1100 are not
+            // the same evidence" (nightlySpo2CandidateMean's own doc comment). Separate key/series,
+            // same convention as every other paired metric+coverage figure in this file.
+            if let samples = spo2CandidateSamplesByDay[daily.day] {
+                restPoints.append(MetricPoint(day: daily.day, key: "spo2_candidate_samples", value: Double(samples)))
             }
             // #1118: persist the HRV over-count flag (1/0) so the HRV card can mark an over-counted 4.0
             // night's reading "unverified" until the two-channel de-dup lands. 0 written on a clean night

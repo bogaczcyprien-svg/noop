@@ -133,6 +133,7 @@ enum BodyVitalSigns {
                          temperatureUnit: TemperatureUnit,
                          now: Date = Date(),
                          spo2CandidateByDay: [String: Double] = [:],
+                         spo2CandidateSamplesByDay: [String: Double] = [:],
                          hrvOverCountByDay: [String: Double] = [:],
                          // #1846: the Settings lead-with choice, so this tile agrees with Today and the
                          // detail screen. A setting that reaches two of three surfaces is worse than none.
@@ -207,6 +208,21 @@ enum BodyVitalSigns {
         // a calibrated blood-oxygen percentage.
         let spo2Row = latest(spo2Points) ?? latest(spo2CandidatePoints)
         let spo2IsCandidate = spo2Row != nil && latest(spo2Points) == nil
+        // "a mean over 11 readings and a mean over 1100 are not the same evidence"
+        // (AnalyticsEngine.nightlySpo2CandidateMean's own doc comment) — carried through so the caveat
+        // below can say how much THIS resolved night's candidate actually rests on, not just that it
+        // is unverified in general.
+        let spo2CandidateSampleCount: Int? = spo2IsCandidate
+            ? spo2Row.flatMap { row in spo2CandidateSamplesByDay[row.day].map { Int($0) } }
+            : nil
+        // Previously set on `missingCaption`, which only renders when NO value resolved — exactly the
+        // one case `spo2IsCandidate` cannot be true in (a candidate is only "the resolved value" once
+        // one WAS found), so the disclaimer could never actually reach the screen. `caveat` is the
+        // field meant for "value present but known-unreliable" (same mechanism `hrvCaveat` uses below).
+        let spo2CandidateCaveat: String? = spo2IsCandidate
+            ? spo2CandidateSampleCount.map { String(localized: "strap estimate (unverified) · \($0) readings") }
+                ?? String(localized: "strap estimate (unverified)")
+            : nil
         let spo2rawRow = latest(spo2rawPoints)
         let rhrRow = latest(rhrPoints)
         let hrvRow = latest(hrvPoints)
@@ -351,7 +367,8 @@ enum BodyVitalSigns {
                        : (spo2rawRow != nil
                           ? String(localized: "Raw counts only — needs an import")
                           : String(localized: "No SpO₂ import or Health value"))),
-                sparkline: spo2IsCandidate ? trail(spo2CandidatePoints) : trail(spo2Points)
+                sparkline: spo2IsCandidate ? trail(spo2CandidatePoints) : trail(spo2Points),
+                caveat: spo2CandidateCaveat
             ),
             BodyVitalReading(
                 key: "spo2raw",
