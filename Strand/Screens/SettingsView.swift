@@ -235,6 +235,9 @@ struct SettingsView: View {
 
     /// User-initiated GitHub release check behind the About "Check for updates" button.
     @StateObject private var updateChecker = UpdateChecker()
+    /// Separate, informational-only check against ryanbr/noop's own releases — kept alongside
+    /// `updateChecker` at the user's explicit request, not a replacement for it.
+    @StateObject private var upstreamUpdateChecker = UpstreamUpdateChecker()
     /// #1659. Default comes from `UpdateAvailability.defaultEnabled` so the toggle and the launch check
     /// cannot disagree about what "unset" means.
     @AppStorage(UpdateWatch.Keys.enabled) private var autoCheckUpdates = UpdateAvailability.defaultEnabled
@@ -2566,6 +2569,82 @@ struct SettingsView: View {
                     }
 
                     Text("Checks the project's home (GitHub) for the latest version when you tap. Nothing else is sent.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+
+                // Check for upstream updates — separate from the fork checker above. This reads
+                // ryanbr/noop's own releases, so the user can see when there's a new upstream version
+                // worth merging into the fork (e.g. a future v13). Informational only: no install
+                // button, since upstream's .ipa isn't signed for this fork's SideStore source and would
+                // overwrite every fork customization rather than carry them forward.
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    HStack(spacing: NoopMetrics.space2 + 2) {
+                        Button {
+                            upstreamUpdateChecker.check(currentVersion: UpdateWatch.installedVersion)
+                        } label: {
+                            if upstreamUpdateChecker.state == .checking {
+                                HStack(spacing: NoopMetrics.space1 + 2) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Checking…")
+                                }
+                            } else {
+                                Label("Check for upstream updates", systemImage: "arrow.triangle.branch")
+                            }
+                        }
+                        .buttonStyle(NoopButtonStyle(.secondary))
+                        .disabled(upstreamUpdateChecker.state == .checking)
+
+                        if case .upToDate(let v) = upstreamUpdateChecker.state {
+                            Text("Upstream is on \(v), already merged.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        } else if case .failed = upstreamUpdateChecker.state {
+                            Text("Couldn't check. Try again.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.statusWarning)
+                        }
+                        Spacer()
+                    }
+
+                    if case .available(let v, let url, let notes) = upstreamUpdateChecker.state {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Upstream version \(v) is out")
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Spacer()
+                                NoopButton("View on GitHub", systemImage: "arrow.up.right", kind: .secondary) {
+                                    openURL(url)
+                                }
+                            }
+                            if !notes.isEmpty {
+                                ScrollView {
+                                    Text(notes)
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textSecondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                #if os(iOS)
+                                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                                #endif
+                                .frame(maxHeight: 150)
+                            }
+                            Text("This fork merges upstream releases by hand when it picks them up — this isn't automatic.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(StrandPalette.surfaceInset,
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(StrandPalette.accent.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+
+                    Text("Checks ryanbr/noop's own releases — separate from this fork's own updates above. Informational only; nothing is installed from here.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 }

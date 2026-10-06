@@ -108,3 +108,54 @@ final class UpdateChecker: ObservableObject {
         return s
     }
 }
+
+/// "Check for upstream updates": the ORIGINAL check this file used to do before it was redirected to
+/// the fork's own manifest — reads `ryanbr/noop`'s public GitHub Releases, separately from (and in
+/// ADDITION to) `UpdateChecker` above. At the user's explicit request to keep both: the fork checker
+/// tells them when a NEW FORK BUILD is ready to one-tap install; this one tells them when UPSTREAM
+/// has published a new release worth merging into the fork — informational only, no install action,
+/// since installing upstream's own .ipa directly would replace every fork customization (intervals.icu,
+/// the Stress/SpO2/Planned Training work, …) rather than carry them forward. Compared on MARKETING
+/// version (not build), because that is genuinely what tracks upstream releases — the fork's build
+/// number keeps incrementing across its OWN releases independently of whether upstream has moved.
+@MainActor
+final class UpstreamUpdateChecker: ObservableObject {
+    enum State: Equatable {
+        case idle
+        case checking
+        case upToDate(version: String)
+        case available(version: String, url: URL, notes: String)
+        case failed
+    }
+
+    @Published var state: State = .idle
+
+    private static let endpoint = URL(string: "https://api.github.com/repos/ryanbr/noop/releases/latest")!
+
+    func check(currentVersion: String) {
+        guard state != .checking else { return }
+        state = .checking
+        Task {
+            do {
+                var req = URLRequest(url: Self.endpoint, timeoutInterval: 12)
+                req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                guard (resp as? HTTPURLResponse)?.statusCode == 200,
+                      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tag = json["tag_name"] as? String,
+                      let urlString = json["html_url"] as? String,
+                      let url = URL(string: urlString) else {
+                    state = .failed
+                    return
+                }
+                let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                let notes = UpdateChecker.cleanNotes(json["body"] as? String ?? "")
+                state = VersionCheck.isNewer(latest, than: currentVersion)
+                    ? .available(version: latest, url: url, notes: notes)
+                    : .upToDate(version: latest)
+            } catch {
+                state = .failed
+            }
+        }
+    }
+}
