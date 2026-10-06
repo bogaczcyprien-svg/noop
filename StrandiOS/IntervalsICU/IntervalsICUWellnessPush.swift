@@ -37,17 +37,25 @@ public enum IntervalsICUWellnessPush {
         let fromStr = PushDayFormat.formatter.string(from: from)
         let toStr = PushDayFormat.formatter.string(from: today)
 
-        // UNION the active strap's id with the canonical "my-whoop" id, active-first — the same
-        // resolution `Repository.importedReadIds`/`unionDailyMetrics` give every other reader of
-        // DailyMetric (Today's own Recovery/Sleep display among them). A single hardcoded
-        // `Repository.whoopSource` read here found NOTHING for an install whose active strap carries
-        // a different registry id (e.g. a WHOOP 5.0/MG paired after the canonical id was already in
-        // use, or re-added), even though the SAME nights show real sleep data on Today — this runner
-        // has no `Repository` instance (it opens its own standalone `WhoopStore`), so it resolves the
-        // active id the same way `SkinTempBackfillWalker` does, straight off the registry.
+        // UNION all four id namespaces Today's own dashboard reads, active-strap-first within each
+        // half: the active strap's IMPORTED id, the canonical "my-whoop" IMPORTED id, the active
+        // strap's COMPUTED ("-noop") id, and the canonical "my-whoop-noop" COMPUTED id.
+        //
+        // A first fix here unioned only the two IMPORTED ids and still found nothing — because for a
+        // live, BLE-only strap with no CSV/HealthKit import, `totalSleepMin` is written ONLY under the
+        // COMPUTED ("-noop") id by `IntelligenceEngine.analyzeRecent`'s nightly scoring pass, never
+        // under the plain imported id. `Repository.mergeDaily(imported:computed:)` is what blends BOTH
+        // halves for Today's own Recovery/Sleep display (imported wins when present, computed fills
+        // the rest) — this runner has no `Repository` instance (it opens its own standalone
+        // `WhoopStore`), so it replicates that same four-id union directly, resolving the active id
+        // off the registry the same way `SkinTempBackfillWalker` does. Imported ids listed first so
+        // they win per `coalesceDay`, matching `mergeDaily`'s stated precedence.
         let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
         let activeId = (try? registry.activeDeviceId()) ?? Repository.whoopSource
-        let readIds = activeId == Repository.whoopSource ? [activeId] : [activeId, Repository.whoopSource]
+        let canonicalId = Repository.whoopSource
+        let importedIds = activeId == canonicalId ? [activeId] : [activeId, canonicalId]
+        let computedIds = importedIds.map { $0 + "-noop" }
+        let readIds = importedIds + computedIds
 
         var byDay: [String: DailyMetric] = [:]
         for id in readIds {
