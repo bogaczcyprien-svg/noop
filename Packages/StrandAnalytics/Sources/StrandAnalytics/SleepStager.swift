@@ -190,14 +190,24 @@ public enum SleepStager {
     public static let onsetHRSleepMult: Double = 1.00
     /// Skip HR refinement (trust gravity) when fewer than this many HR samples.
     public static let hrRefineMinSamples: Int = 30
-    /// Consecutive epochs required to declare onset AND (symmetrically) to confirm the final wake.
-    /// 20 epochs = 10 minutes, matching the sustained-stillness window common actigraphy sleep-onset
-    /// conventions use, so a brief stillness while awake (reading, scrolling) in bed no longer marks
-    /// the displayed bedtime, and — mirrored at the other end by `onsetAndFinalWake` — a brief stir
-    /// near the morning no longer extends the displayed wake-up past when sleep actually ended. The
-    /// fork's own deviation from upstream's more responsive 3-epoch (90s) default; not upstreamed, not
-    /// validated against a PSG reference, just a personal preference tuning.
+    /// Consecutive epochs required to confirm the FINAL WAKE (the backward scan in
+    /// `onsetAndFinalWake`). 20 epochs = 10 minutes, matching the sustained-stillness window common
+    /// actigraphy sleep-onset conventions use, so a brief stir near the morning no longer extends the
+    /// displayed wake-up past when sleep actually ended. The fork's own deviation from upstream's more
+    /// responsive 3-epoch (90s) default; not upstreamed, not validated against a PSG reference, just a
+    /// personal preference tuning.
     public static let onsetPersistEpochs: Int = 20
+    /// Consecutive epochs required to declare ONSET (the forward scan). Used to share
+    /// `onsetPersistEpochs` with final wake; split out as its own, LONGER knob at the user's request
+    /// after a third report that onset still reads early even with `onsetHRSleepMult` at its floor
+    /// (1.00 — HR can't be required to clear a lower bar than the window's own median). 30 epochs = 15
+    /// minutes (was 10, shared): a longer sustained still+low-HR stretch is a different lever than the
+    /// HR margin — it demands the quiet state hold longer before being trusted, rather than demanding
+    /// a lower HR within the same 10 minutes. Final wake is untouched (`onsetPersistEpochs` stays 20);
+    /// this fork request was about onset reading early, never about wake. Not upstreamed, not
+    /// validated against a PSG reference — a personal preference tuning, same spirit as
+    /// `onsetHRSleepMult`'s own doc comment.
+    public static let onsetPersistEpochsForOnset: Int = 30
 
     // MARK: - Off-wrist backstop (#500)
 
@@ -1659,10 +1669,12 @@ public enum SleepStager {
 
     // MARK: - Stage 1–3: staging over a 30 s epoch grid
 
-    /// First persistent-sleep epoch (onset) and last sleep epoch (final wake). Both boundaries require
-    /// `onsetPersistEpochs` of sustained same-direction signal to confirm — a brief stillness-while-awake
-    /// can no longer backdate onset, and (fork addition) a brief stir-while-still-settling can no longer
-    /// postpone the final wake either. Symmetric by construction: the forward scan finds the leftmost
+    /// First persistent-sleep epoch (onset) and last sleep epoch (final wake). Onset requires
+    /// `onsetPersistEpochsForOnset` of sustained same-direction signal to confirm, final wake requires
+    /// `onsetPersistEpochs` — split into two constants (was one shared value) so onset could be tuned
+    /// stricter without also delaying wake detection. A brief stillness-while-awake can no longer
+    /// backdate onset, and (fork addition) a brief stir-while-still-settling can no longer postpone the
+    /// final wake either. Symmetric BY SHAPE, not by value: the forward scan finds the leftmost
     /// sustained TRUE run (onset); the backward scan finds the rightmost sustained FALSE run and reports
     /// the epoch just before it starts (final wake) — the simple last-true-epoch is the fallback when no
     /// such sustained wake tail exists (e.g. the window is cropped mid-sleep with little trailing data).
@@ -1697,7 +1709,7 @@ public enum SleepStager {
         var run = 0
         for i in 0..<n {
             run = onsetEligible(i) ? run + 1 : 0
-            if run >= onsetPersistEpochs { onset = i - onsetPersistEpochs + 1; break }
+            if run >= onsetPersistEpochsForOnset { onset = i - onsetPersistEpochsForOnset + 1; break }
         }
 
         var simpleLast: Int? = nil

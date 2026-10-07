@@ -840,7 +840,24 @@ struct StressView: View {
     }
 
     private func heroDisplay(_ model: StressModel) -> HeroDisplay {
-        guard !isViewingToday else { return .live(score: model.score, band: model.band, explanation: model.explanation) }
+        guard !isViewingToday else {
+            // Prefer the most recent SCORED intraday hour over the once-a-day RHR/HRV-vs-baseline
+            // proxy (`model.score`), at the user's explicit request: "LIVE" read as stress from
+            // HOURS ago (or, right after a rollover before today's own resting HR/HRV exist yet,
+            // from YESTERDAY carried forward) even while genuinely still and low-HR right now. The
+            // intraday curve is the one signal that actually tracks the current moment; `model.score`
+            // is a single once-per-day figure that cannot move until tomorrow's vitals land.
+            // Known gap: between the 22:00 daytime cutoff and detected sleep onset there is no
+            // intraday point yet either (neither engine scores that stretch), so this still falls
+            // back to the daily proxy late at night before falling asleep — not fully fixed, but the
+            // common daytime case (the one actually reported) now reflects the current hour.
+            if let latest = daytime?.timeline.last(where: { $0.level != nil }), let level = latest.level {
+                let band = StressBand(score: level)
+                let explanation = StressMath.explanation(band: band, rhrDelta: nil, hrvDelta: nil, usingStored: false)
+                return .live(score: level, band: band, explanation: explanation)
+            }
+            return .live(score: model.score, band: model.band, explanation: model.explanation)
+        }
         let key = Self.localDayKeyFormatter.string(from: selectedDay)
         guard let detail = StressModel.detail(forDayKey: key, days: repo.days, stored: storedSeries) else {
             return .noData

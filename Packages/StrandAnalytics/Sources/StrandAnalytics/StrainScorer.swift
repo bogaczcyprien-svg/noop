@@ -142,16 +142,19 @@ public enum StrainScorer {
 
     /// Edwards zone cut-offs as (%HRR threshold, weight), highest-first.
     ///
-    /// Fork tuning: raised +5 points off the textbook Edwards cut-offs (50/60/70/80/90) at this
-    /// user's own request, after a day with no formal exercise but ~1h of ordinary daytime HR just
-    /// over the stock 50% floor scored a visible Effort (#1545's "cost of being alive" problem, but
-    /// for Edwards rather than Banister — see `banisterSedentaryHRR`'s doc comment for the same shape
-    /// on the other method). Raising the floor means a day whose HR only brushes past it now scores
-    /// zero there instead of a full zone-1 minute, while a real workout — which spends real time well
-    /// above 60–70% HRR — loses comparatively little. A personal-preference trade, not upstreamed or
-    /// re-validated against WHOOP's own cut-offs.
+    /// Fork tuning, raised TWICE now off the textbook Edwards cut-offs (50/60/70/80/90) at this
+    /// user's own request. First pass: +5 points across the board (55/65/75/85/95), after a day with
+    /// no formal exercise but ~1h of ordinary daytime HR just over the stock 50% floor scored a
+    /// visible Effort (#1545's "cost of being alive" problem, but for Edwards rather than Banister —
+    /// see `banisterSedentaryHRR`'s doc comment for the same shape on the other method). Still not
+    /// enough: a fully resting day (still, low HR) kept reading Effort ≈7/100 instead of near-zero,
+    /// which is a few seconds crossing the zone-1 floor — Edwards' weight is binary per-sample, so even
+    /// a brief excursion counts in full. Zone 1 ONLY raised again (55 → 60); zones 2-5 left at their
+    /// first-pass values since a real workout already clears those comfortably and the complaint was
+    /// specifically about the REST case, not about real effort being under-counted. A personal
+    /// preference trade, not upstreamed or re-validated against WHOOP's own cut-offs.
     static let edwardsZones: [(threshold: Double, weight: Int)] = [
-        (95.0, 5), (85.0, 4), (75.0, 3), (65.0, 2), (55.0, 1),
+        (95.0, 5), (85.0, 4), (75.0, 3), (65.0, 2), (60.0, 1),
     ]
 
     /// TRIMP accumulation method.
