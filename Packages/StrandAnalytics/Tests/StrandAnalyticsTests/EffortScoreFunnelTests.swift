@@ -47,12 +47,14 @@ final class EffortScoreFunnelTests: XCTestCase {
     /// Sample series whose bpm values straddle every Edwards threshold from BOTH sides, one minute apart
     /// so each reading is credited exactly one minute.
     ///
-    /// Built against this fork's own +5-point zone cut-offs (55/65/75/85/95 — see `edwardsZones`'s doc
-    /// comment), not the textbook 50/60/70/80/90 the Kotlin twin still uses: the two are no longer
-    /// byte-identical here, same as the rest of this fork-only tuning. The expected bucket counts below
-    /// are unchanged from before the tuning, since the straddle is still one minute to either side of
-    /// each (now-shifted) threshold.
-    private static let zoneProbe: [Int] = [60, 60, 60, 125, 126, 137, 138, 149, 150, 161, 162, 173, 174]
+    /// Built against this fork's own cut-offs (60/65/75/85/95 — see `edwardsZones`'s doc comment: zone 1
+    /// raised a second time, 55 -> 60, zones 2-5 unchanged), not the textbook 50/60/70/80/90 the Kotlin
+    /// twin still uses: the two are no longer byte-identical here, same as the rest of this fork-only
+    /// tuning. Only the first straddle pair moved (125/126 -> 131/132, tracking zone 1's new 60%
+    /// boundary); the other four pairs are untouched since their thresholds didn't move. The expected
+    /// bucket counts below are unchanged from before EITHER tuning pass, since the straddle is still one
+    /// minute to either side of each (now-shifted) threshold.
+    private static let zoneProbe: [Int] = [60, 60, 60, 131, 132, 137, 138, 149, 150, 161, 162, 173, 174]
 
     private func probeSamples() -> [HRSample] {
         Self.zoneProbe.enumerated().map { HRSample(ts: 1_700_000_000 + $0.offset * 60, bpm: $0.element) }

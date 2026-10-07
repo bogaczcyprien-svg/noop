@@ -114,13 +114,16 @@ final class StrainBanisterDenominatorTests: XCTestCase {
     /// Compared as a RATIO against a steady moderate session of the same length, because the two methods
     /// have different natural magnitudes and comparing raw scores across them would prove nothing.
     func testIntermittentWorkFaresBetterUnderBanister() {
-        // 60 min. Lifting: 30 s at 85% HRR, then 150 s at 40% — repeated. Walking: a flat 58%.
+        // 60 min. Lifting: 30 s at 85% HRR, then 150 s at 40% — repeated. Walking: a flat 62% (was
+        // 58%, comfortably zone 1 under the textbook/first-pass 55% floor; this fork's zone-1 floor
+        // is now 60%, see `edwardsZones`'s doc comment, so 62% is the value that keeps the walk
+        // squarely in zone 1 — mid-band, not a boundary-straddle).
         let rest = 60.0, max = 190.0, reserve = max - rest
         func bpm(_ pctHRR: Double) -> Int { Int((rest + reserve * pctHRR / 100.0).rounded()) }
         var lifting: [HRSample] = [], walking: [HRSample] = []
         for t in 0 ..< 3600 {
             lifting.append(HRSample(ts: t, bpm: (t % 180) < 30 ? bpm(85) : bpm(40)))
-            walking.append(HRSample(ts: t, bpm: bpm(58)))
+            walking.append(HRSample(ts: t, bpm: bpm(62)))
         }
 
         let liftEd = StrainScorer.strain(lifting, maxHR: max, restingHR: rest, method: .edwards)!
