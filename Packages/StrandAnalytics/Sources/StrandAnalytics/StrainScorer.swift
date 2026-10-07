@@ -18,7 +18,8 @@ import WhoopProtocol
 //   2. Per-sample intensity as %HRR = (HR − RHR) / HRR × 100, clamped 0..100.
 //   3. TRIMP accumulated over the window:
 //        a. Edwards 5-zone summation (default): sample contributes its zone weight
-//           (1..5 at 50/60/70/80/90 %HRR cut-offs) × duration.
+//           (1..5 at zone cut-offs — see `edwardsZones`'s own doc comment for the exact values
+//           and why they are NOT Edwards' literal 50/60/70/80/90) × duration.
 //        b. Banister exponential: sample contributes duration × x × 0.64 × e^(b·x).
 //   4. Logarithmic compression onto [0, 100]:
 //        strain = 100 × ln(TRIMP + 1) / ln(D)
@@ -142,17 +143,39 @@ public enum StrainScorer {
 
     /// Edwards zone cut-offs as (%HRR threshold, weight), highest-first.
     ///
-    /// Fork tuning, raised TWICE now off the textbook Edwards cut-offs (50/60/70/80/90) at this
-    /// user's own request. First pass: +5 points across the board (55/65/75/85/95), after a day with
-    /// no formal exercise but ~1h of ordinary daytime HR just over the stock 50% floor scored a
-    /// visible Effort (#1545's "cost of being alive" problem, but for Edwards rather than Banister —
-    /// see `banisterSedentaryHRR`'s doc comment for the same shape on the other method). Still not
-    /// enough: a fully resting day (still, low HR) kept reading Effort ≈7/100 instead of near-zero,
-    /// which is a few seconds crossing the zone-1 floor — Edwards' weight is binary per-sample, so even
-    /// a brief excursion counts in full. Zone 1 ONLY raised again (55 → 60); zones 2-5 left at their
-    /// first-pass values since a real workout already clears those comfortably and the complaint was
-    /// specifically about the REST case, not about real effort being under-counted. A personal
-    /// preference trade, not upstreamed or re-validated against WHOOP's own cut-offs.
+    /// IMPORTANT CORRECTION (checked against the literature after a user request to verify this
+    /// against the published method): Edwards' actual 1993 zones are 50/60/70/80/90 % of **HRmax**,
+    /// NOT %HRR — her own 10%-wide bands, admittedly "arbitrary... void of any metabolic or
+    /// physiological performance threshold" by her own description, were never Karvonen/%HRR to begin
+    /// with. This codebase has ALWAYS run the Edwards zone-and-weight STRUCTURE (5 zones, weights
+    /// 1-5, 10-point-wide bands) against %HRR instead, because the rest of this scorer's pipeline
+    /// (and the daily Charge/Rest math it sits beside) is %HRR-based throughout — this is a
+    /// deliberate adaptation of Edwards' zone SHAPE onto a different intensity axis, not her literal
+    /// method, and was already true before any of this fork's own tuning.
+    ///
+    /// That distinction matters for what "going back to the real science" would actually do here:
+    /// %HRR and %HRmax read very differently at the SAME true effort, because %HRR already nets out
+    /// resting HR (0% HRR == resting, by construction) while %HRmax does not (resting sits around
+    /// 30-40% of HRmax for most adults). Edwards' literal 50% HRmax floor converts to roughly
+    /// 25-30% HRR for a typical resting HR/HRmax pair — LOWER than even the textbook 50% HRR this
+    /// fork started from, let alone the 60% it is tuned to now. Reverting to Edwards' literal
+    /// percentages would make ordinary resting HR cross into zone 1 MORE easily, the opposite of
+    /// this fork's explicit goal (Effort staying near zero at rest). So the fix for "verify this
+    /// against the science" is this corrected comment, not a reverted number: the %HRR AXIS was
+    /// already a considered departure from Edwards, and the %HRR-side tuning below (fork-only,
+    /// raised TWICE: textbook-adjacent 50/60/70/80/90 → 55/65/75/85/95 → zone 1 alone to 60) is the
+    /// right lever for the actual complaint, not a bug to undo.
+    ///
+    /// First pass (+5 across the board) followed a day with no formal exercise but ~1h of ordinary
+    /// daytime HR just over the stock 50% HRR floor scoring a visible Effort (#1545's "cost of being
+    /// alive" problem, but for Edwards rather than Banister — see `banisterSedentaryHRR`'s doc
+    /// comment for the same shape on the other method). Still not enough: a fully resting day (still,
+    /// low HR) kept reading Effort ≈7/100 instead of near-zero, a few seconds crossing the zone-1
+    /// floor — Edwards' weight is binary per-sample, so even a brief excursion counts in full. Zone 1
+    /// ONLY raised again (55 → 60 %HRR); zones 2-5 left at their first-pass values since a real
+    /// workout already clears those comfortably and the complaint was specifically about the REST
+    /// case. A personal preference trade, not upstreamed or re-validated against WHOOP's own
+    /// (undisclosed, proprietary) cut-offs.
     static let edwardsZones: [(threshold: Double, weight: Int)] = [
         (95.0, 5), (85.0, 4), (75.0, 3), (65.0, 2), (60.0, 1),
     ]
