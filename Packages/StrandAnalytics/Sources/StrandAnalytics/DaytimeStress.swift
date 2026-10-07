@@ -103,6 +103,21 @@ public enum DaytimeStress {
     /// away. Range ≥ 0.
     public static let postActivityShadowBPM: Double = 8.0
 
+    /// The sigma an ACTIVITY-flagged (or post-activity shadow) hour's HR term divides by, bpm.
+    /// Deliberately NOT `sdHR` (the spread ACROSS THE DAY'S OWN CALM HOURS, which is naturally tiny —
+    /// a stable day might vary 2-3 bpm hour to hour): dividing an ordinary 20-30 bpm walking rise by
+    /// that tiny spread produced a z-score that saturated `squash` to the 3.0 ceiling almost
+    /// immediately, a real user report ("stress is always pegged to max the moment I'm just
+    /// walking") directly contradicting the continuous-through-activity change's own intent (elevated
+    /// but PROPORTIONAL to effort, the way WHOOP reads it). First pass reused the validated
+    /// `baselineRelativeHighMarginBPM` (15 bpm) as this sigma — still too steep: a user follow-up
+    /// confirmed an ordinary walk should rise "a little", not into the moderate band. 60 bpm is a
+    /// fork judgement call, not re-validated against a reference: it is roughly the gap between a
+    /// resting HR and a genuinely hard effort for most adults, so an ordinary walk's 20-40 bpm rise
+    /// reads as a gentle bump (z well under 1) and only a sustained hard effort approaches the
+    /// ceiling. Not upstreamed.
+    public static let activityHRSigmaBPM: Double = 60.0
+
     /// VALIDATED (26-day Oura-reference correlation, HR-only): a personal daytime-HR elevation
     /// of ~15 bpm over a POOLED/ROLLING baseline — the 10th-percentile daytime HR pooled across
     /// days, ~65 bpm in the reference set — is where elevated HR starts reading as
@@ -607,10 +622,6 @@ public enum DaytimeStress {
         // hour differently — which is the whole reason the sliding read reuses the references
         // computed above rather than deriving its own.
         //
-        // The sigma an ACTIVITY-flagged hour's HR term uses — see `scoreGrid`'s own comment at the
-        // call site for why this, and not the day-local `sdHR`, is what keeps a casual walk from
-        // instantly saturating to the 3.0 ceiling.
-        let activityHRSigma = marginToSigma(marginBPM: baselineRelativeHighMarginBPM, atBand: highBandFloor)
         func scoreGrid(_ gridAggs: [HourAgg], _ activeFrac: [Int: Double]) -> [HourPoint] {
             func ambulatory(_ bucket: Int) -> Bool {
                 (activeFrac[bucket] ?? 0) >= activityMaskFraction
@@ -641,22 +652,14 @@ public enum DaytimeStress {
             let sleepMasked = a.meanHR != nil && overlapsSleep(a.bucket)
             // Score whenever HR cleared the count gate and the hour was not asleep (HR is the
             // always-available anchor; RMSSD enriches it). Activity no longer withholds the score
-            // (see the MARK: Motion gate comment above) — but it DOES use a different sigma for the
-            // HR term. `sdHR` is the spread ACROSS THE DAY'S OWN CALM HOURS, which is naturally tiny
-            // (a stable desk day might vary 2-3 bpm hour to hour); dividing a walk's ordinary 20-30
-            // bpm rise by that tiny spread produces a huge z that saturates `squash` to the 3.0
-            // ceiling almost immediately — "always pegged to max the moment I'm just walking", a real
-            // user report, not the "elevated but proportional to effort" WHOOP-style read the
-            // continuous-through-activity change was supposed to give. `activityHRSigma` is the SAME
-            // validated ~15 bpm margin `.baselineRelative` mode already trusts elsewhere in this file
-            // (`baselineRelativeHighMarginBPM`, via `marginToSigma`) instead of the day-local spread,
-            // so a mild walk reads moderately elevated and only a genuinely hard effort approaches the
-            // ceiling. RMSSD is dropped for these hours (nil) rather than scaled: exertion suppresses
-            // RMSSD by design, so including it here would double-count exertion as "stress" from a
-            // second angle rather than correct the first.
+            // (see the MARK: Motion gate comment above) — but it DOES use `activityHRSigmaBPM`
+            // instead of the day-local `sdHR` for the HR term (see that constant's own doc comment
+            // for why). RMSSD is dropped for these hours (nil) rather than scaled: exertion
+            // suppresses RMSSD by design, so including it here would double-count exertion as
+            // "stress" from a second angle rather than correct the first.
             let level: Double? = (a.meanHR != nil && !sleepMasked)
                 ? (masked
-                    ? squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: activityHRSigma,
+                    ? squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: activityHRSigmaBPM,
                                       rmssd: nil, meanRMSSD: nil, sdRMSSD: 0))
                     : squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: sdHR,
                                       rmssd: a.rmssd, meanRMSSD: refRMSSD, sdRMSSD: sdRMSSD)))

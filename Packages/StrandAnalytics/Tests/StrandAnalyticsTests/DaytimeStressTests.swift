@@ -281,7 +281,10 @@ final class DaytimeStressTests: XCTestCase {
         let flagged = gated.hours.first { $0.hour == 11 }
         XCTAssertNotNil(flagged)
         XCTAssertNotNil(flagged?.level, "an ambulatory hour must still be scored, not left as a gap")
-        XCTAssertGreaterThanOrEqual(flagged?.level ?? 0, DaytimeStress.highBandFloor,
+        // > baseline (1.5), not >= highBandFloor: `activityHRSigmaBPM` (60 bpm) deliberately makes an
+        // ORDINARY activity elevation read as a gentle rise, not an instant jump to the high band —
+        // see that constant's doc comment. This only asserts "elevated, not flat/baseline/dropped".
+        XCTAssertGreaterThan(flagged?.level ?? 0, 1.5,
             "110 bpm against a ~60 bpm calm day should read as elevated, same as WHOOP would show it")
         XCTAssertTrue(flagged?.maskedForActivity ?? false,
             "the hour must still report that it included activity, for the UI caption/calm reference")

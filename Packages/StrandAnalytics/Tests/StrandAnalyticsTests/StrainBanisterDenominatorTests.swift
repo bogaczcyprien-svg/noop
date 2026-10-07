@@ -114,16 +114,19 @@ final class StrainBanisterDenominatorTests: XCTestCase {
     /// Compared as a RATIO against a steady moderate session of the same length, because the two methods
     /// have different natural magnitudes and comparing raw scores across them would prove nothing.
     func testIntermittentWorkFaresBetterUnderBanister() {
-        // 60 min. Lifting: 30 s at 85% HRR, then 150 s at 40% — repeated. Walking: a flat 62% (was
-        // 58%, comfortably zone 1 under the textbook/first-pass 55% floor; this fork's zone-1 floor
-        // is now 60%, see `edwardsZones`'s doc comment, so 62% is the value that keeps the walk
-        // squarely in zone 1 — mid-band, not a boundary-straddle).
+        // 60 min. Lifting: 30 s at 85% HRR, then 150 s at 40% — repeated. Walking: a flat 70% HRR
+        // (zone 3, weight 3 — moved up from zone 1 after `edwardsTRIMPWeight` dampened zone 1's own
+        // per-minute weight to 0.2: a full hour of damped zone-1 time no longer out-scores lifting's
+        // real zone-4 bursts, which would have flipped this test's premise for a reason unrelated to
+        // what it is actually testing. Zone 3 is untouched by that dampening, so the comparison this
+        // test makes — Edwards favouring a steady MODERATE session over an intermittent hard one —
+        // stays intact.
         let rest = 60.0, max = 190.0, reserve = max - rest
         func bpm(_ pctHRR: Double) -> Int { Int((rest + reserve * pctHRR / 100.0).rounded()) }
         var lifting: [HRSample] = [], walking: [HRSample] = []
         for t in 0 ..< 3600 {
             lifting.append(HRSample(ts: t, bpm: (t % 180) < 30 ? bpm(85) : bpm(40)))
-            walking.append(HRSample(ts: t, bpm: bpm(62)))
+            walking.append(HRSample(ts: t, bpm: bpm(70)))
         }
 
         let liftEd = StrainScorer.strain(lifting, maxHR: max, restingHR: rest, method: .edwards)!
