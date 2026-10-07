@@ -307,16 +307,20 @@ public enum StrainScorer {
 
     /// TRIMP weight PER MINUTE credited to each Edwards zone index (0 = below zone 1, 1...5 = zones
     /// 1-5) — separate from `zoneWeight`'s plain Int (which still indexes `zoneMinutes`'s diagnostic
-    /// breakdown unchanged). Zone 1 ONLY is dampened, 1 -> 0.2, at the user's explicit request: a
-    /// brief few-second crossing just over the zone-1 floor (an ordinary stress response, a brief
-    /// stir) was still contributing a FULL zone-1 minute's weight even though it lasted seconds, and
-    /// the log compression turned that into a visible Effort (~7/100) on a day with no real exercise.
-    /// 0.2 means a genuinely SUSTAINED zone-1 stay (real light activity, minutes long — an easy walk)
-    /// still accumulates and shows up over time, just much more gradually than before; a brief brush
-    /// against the floor now barely moves the number. Zones 2-5 are UNCHANGED (still 2/3/4/5): a real
-    /// workout already spends meaningful time well above the zone-1 band and is barely affected.
+    /// breakdown unchanged). Zone 1 ONLY is dampened, at the user's explicit request — TWICE now.
+    /// First pass: 1 -> 0.2, after a brief few-second crossing just over the zone-1 floor (an
+    /// ordinary stress response, a brief stir) was still contributing a full zone-1 minute's weight
+    /// even though it lasted seconds. Still not enough at the DAY level: an office day accumulates
+    /// many small zone-1 moments over many hours (stairs, a brief stress bump, walking to a meeting),
+    /// and even at 0.2 those add up to a visible Effort over a full day with real exercise. 0.01
+    /// means an ordinary office day with, say, half an hour of CUMULATIVE zone-1 time across the
+    /// whole day lands around Effort 2 (the explicit target — "2 or 3 max for an ordinary office
+    /// day, but I'll sometimes touch zone 1"), while a genuinely sustained zone-1 session (an actual
+    /// easy walk held for most of an hour) still visibly moves the number, just far more slowly than
+    /// before. Zones 2-5 are UNCHANGED (still 2/3/4/5): a real workout spends meaningful time well
+    /// above the zone-1 band and is barely affected by either pass.
     /// Fork-only tuning, not upstreamed, not validated against WHOOP's own (undisclosed) weighting.
-    static let edwardsTRIMPWeight: [Double] = [0, 0.2, 2, 3, 4, 5]
+    static let edwardsTRIMPWeight: [Double] = [0, 0.01, 2, 3, 4, 5]
 
     static func edwardsTRIMP(_ hr: [HRSample], restingHR: Double, hrReserve: Double,
                              durations: [Double]) -> Double {

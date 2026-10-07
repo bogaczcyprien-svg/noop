@@ -542,18 +542,24 @@ struct StressView: View {
                             }
                         )
 
-                        // Hour ruler under the line (first / midday / last covered hour).
-                        if let lo = day.timeline.first?.hour, let hi = day.timeline.last?.hour {
-                            HStack {
-                                Text(hourLabel(lo)).font(StrandFont.footnote)
-                                    .foregroundStyle(StrandPalette.textTertiary)
-                                Spacer()
-                                Text(hourLabel((lo + hi) / 2)).font(StrandFont.footnote)
-                                    .foregroundStyle(StrandPalette.textTertiary)
-                                Spacer()
-                                Text(hourLabel(hi)).font(StrandFont.footnote)
-                                    .foregroundStyle(StrandPalette.textTertiary)
-                            }
+                        // Hour ruler under the line — FIXED midnight / noon / midnight ticks, not the
+                        // first/last COVERED hour (#WHOOP-parity, explicit request: match WHOOP's
+                        // always-full-day chart frame). `DaytimeLoadLine` already draws on a full 24h
+                        // coordinate space whenever `dayStart` is set (as it is at this call site) —
+                        // real coverage fills in whatever part of that frame it reaches, and gaps stay
+                        // honest gaps, but the AXIS itself no longer shrinks to only what happened to
+                        // get scored, which previously made the chart look like it started mid-morning.
+                        // Left/right use 0 and 23, not 0 and 0 (midnight twice reads as a typo even
+                        // though it is technically correct — the frame spans [this midnight, next)).
+                        HStack {
+                            Text(hourLabel(0)).font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                            Spacer()
+                            Text(hourLabel(12)).font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                            Spacer()
+                            Text(hourLabel(23)).font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
                         }
 
                         Divider().overlay(StrandPalette.hairline)
