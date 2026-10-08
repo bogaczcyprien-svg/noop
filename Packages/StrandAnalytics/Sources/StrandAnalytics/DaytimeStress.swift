@@ -109,14 +109,13 @@ public enum DaytimeStress {
     /// that tiny spread produced a z-score that saturated `squash` to the 3.0 ceiling almost
     /// immediately, a real user report ("stress is always pegged to max the moment I'm just
     /// walking") directly contradicting the continuous-through-activity change's own intent (elevated
-    /// but PROPORTIONAL to effort, the way WHOOP reads it). First pass reused the validated
-    /// `baselineRelativeHighMarginBPM` (15 bpm) as this sigma — still too steep: a user follow-up
-    /// confirmed an ordinary walk should rise "a little", not into the moderate band. 60 bpm is a
-    /// fork judgement call, not re-validated against a reference: it is roughly the gap between a
-    /// resting HR and a genuinely hard effort for most adults, so an ordinary walk's 20-40 bpm rise
-    /// reads as a gentle bump (z well under 1) and only a sustained hard effort approaches the
-    /// ceiling. Not upstreamed.
-    public static let activityHRSigmaBPM: Double = 60.0
+    /// but PROPORTIONAL to effort, the way WHOOP reads it). Raised THREE times now: first pass reused
+    /// the validated `baselineRelativeHighMarginBPM` (15 bpm) — too steep. Second pass: 60 bpm. Third,
+    /// at the explicit request to push the ceiling further out: 90 bpm. A fork judgement call, not
+    /// re-validated against a reference, each pass further than the last: 90 bpm means even a brisk
+    /// effort (40-50 bpm over calm) still reads moderate rather than maxed, and only a genuinely hard,
+    /// sustained effort (well over 60-70 bpm above calm) approaches the 3.0 ceiling. Not upstreamed.
+    public static let activityHRSigmaBPM: Double = 90.0
 
     /// VALIDATED (26-day Oura-reference correlation, HR-only): a personal daytime-HR elevation
     /// of ~15 bpm over a POOLED/ROLLING baseline — the 10th-percentile daytime HR pooled across
