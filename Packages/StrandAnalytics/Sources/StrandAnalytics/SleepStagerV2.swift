@@ -545,6 +545,45 @@ public enum SleepStagerV2 {
         return nil
     }
 
+    /// The SAME sustained-non-wake rule as `sustainedSleepOnset`, applied to a session's final, already
+    /// MERGED `[StageSegment]` (what actually gets persisted/displayed) instead of the raw per-epoch label
+    /// array — so it works regardless of which recipe staged the session, and reads real timestamps
+    /// directly rather than re-deriving epoch indices. `sustainedSeconds` defaults to the SAME 5 minutes
+    /// `onsetSustainedEpochs` (10 x 30s) encodes, measured against human-scored PSG (bias −3.8 min, MAE
+    /// 7.4 min — see that constant's own doc comment); kept as a parameter only so a caller can widen it
+    /// for an unusually noisy stream, never to second-guess the validated figure by default.
+    ///
+    /// Fork addition (#onset-v2-refine): `detectSleep`'s own window-finding (`onsetAndFinalWake`, V1,
+    /// motion + a bare HR-margin threshold) sets the DETECTED window `[start, end]` that both V1 and V2
+    /// stage; V2 then stages that window using richer per-epoch evidence (HR-variability, movement AND
+    /// respiratory regularity via the Viterbi/HMM recipe) and naturally labels a lying-still-but-awake
+    /// lead-in as "wake" on its own — the recipe does no separate pre-onset forcing (see `stageSession`'s
+    /// doc comment). So the FIRST sustained non-wake run in the FINAL hypnogram is frequently a tighter,
+    /// PSG-grounded estimate of when sleep actually began than the raw detected window start, without
+    /// touching detection (window accept/reject) or re-deriving anything detection already decided — this
+    /// only reads the hypnogram detection+staging already produced. Returns nil when the first segment is
+    /// already non-wake (nothing to refine — the detected start already IS the onset) or no run reaches
+    /// `sustainedSeconds`.
+    static func refinedOnsetTs(_ stages: [StageSegment], sustainedSeconds: Int = 300) -> Int? {
+        guard let first = stages.first, first.stage == "wake" else { return nil }
+        var i = 0
+        while i < stages.count {
+            guard stages[i].stage != "wake" else { i += 1; continue }
+            // Sum this consecutive non-wake run (segments of different non-wake stages, e.g.
+            // light -> deep, are still ONE run — only a "wake" segment breaks it).
+            let runStart = stages[i].start
+            var runEnd = stages[i].end
+            var j = i + 1
+            while j < stages.count, stages[j].stage != "wake" {
+                runEnd = stages[j].end
+                j += 1
+            }
+            if runEnd - runStart >= sustainedSeconds { return runStart }
+            i = j   // this run was too short — skip past it and look for the next one
+        }
+        return nil
+    }
+
     /// Viterbi most-likely path over the per-epoch log-emissions with the sticky transition matrix and a
     /// uniform start. Ties resolve to the earlier stage in `stageNames`.
     static func viterbi(_ emSeq: [[String: Double]]) -> [String] {

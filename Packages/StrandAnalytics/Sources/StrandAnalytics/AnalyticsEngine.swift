@@ -1063,12 +1063,28 @@ public enum AnalyticsEngine {
 
         // ── Cache rows ────────────────────────────────────────────────────────
         let cachedSleep = matched.map { s in
-            CachedSleepSession(
+            // Fork addition (#onset-v2-refine): when V2 staged this session, its hypnogram's own first
+            // sustained non-wake run (`SleepStagerV2.refinedOnsetTs`, the SAME PSG-measured rule
+            // `sustainedSleepOnset` uses) is frequently a tighter onset than the raw detected window
+            // start — see that function's doc comment for why. `startTsAdjusted` is the EXISTING field
+            // built for exactly this shape (#318, "the displayed/effective start can differ from the
+            // immutable detected key") — `effectiveStartTs` (`startTsAdjusted ?? startTs`) already reads
+            // it everywhere a session's start matters (Sleep tab, day-cycle windows, recovery scoring).
+            // The upsert's own `userEdited` guard (MetricsCache) means a night the person has manually
+            // corrected keeps THEIR edit untouched on every future sync — this only ever proposes a
+            // value for a night nobody has touched yet, and only ever moves the onset LATER (never
+            // earlier: `refinedOnsetTs` cannot return a time before `s.start`). V1-staged sessions are
+            // skipped (`useSleepStagerV2` false): V1 already FORCES its own onset index to "wake" before
+            // this point, so re-deriving from its stages would at best reproduce the same timestamp.
+            // Not upstreamed, not ported to the Android twin.
+            let refinedOnset = useSleepStagerV2 ? SleepStagerV2.refinedOnsetTs(s.stages) : nil
+            return CachedSleepSession(
                 startTs: s.start, endTs: s.end,
                 efficiency: s.efficiency,
                 restingHr: s.restingHR,
                 avgHrv: s.avgHRV,
                 stagesJSON: encodeStages(s.stages),
+                startTsAdjusted: refinedOnset,
                 // #345 follow-up: stamp the DAY's motion-coverage verdict on every session so the Sleep
                 // tab can caption a sparse (likely under-detected) night. A NOOP-computed night is always
                 // true/false here; imported nights never reach this path and keep nil (unknown).

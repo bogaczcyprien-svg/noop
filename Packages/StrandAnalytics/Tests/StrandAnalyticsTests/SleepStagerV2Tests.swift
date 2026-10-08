@@ -237,6 +237,47 @@ final class SleepStagerV2Tests: XCTestCase {
         XCTAssertNil(SleepStagerV2.sustainedSleepOnset(wake), "an all-wake window has no onset")
     }
 
+    /// `refinedOnsetTs` is the SAME 5-minute sustained-non-wake rule as `testSustainedSleepOnsetRule`
+    /// above, applied to the session's final MERGED `[StageSegment]` (real timestamps) instead of a raw
+    /// per-epoch label array — the shape `AnalyticsEngine` actually has in hand when it builds the
+    /// persisted `CachedSleepSession`.
+    func testRefinedOnsetTsFromStageSegments() {
+        // A brief (270 s < 300 s) light run must not count, even though it's the first non-wake segment.
+        let briefThenSustained: [StageSegment] = [
+            StageSegment(start: 0, end: 1_800, stage: "wake"),
+            StageSegment(start: 1_800, end: 2_070, stage: "light"),       // 270 s — too short
+            StageSegment(start: 2_070, end: 2_400, stage: "wake"),
+            StageSegment(start: 2_400, end: 3_000, stage: "light"),       // 600 s — sustained
+        ]
+        XCTAssertEqual(SleepStagerV2.refinedOnsetTs(briefThenSustained), 2_400)
+
+        // Two DIFFERENT non-wake stages back to back (light -> deep) are still ONE run; only a "wake"
+        // segment breaks it. Combined they clear the threshold even though neither alone would.
+        let crossStageRun: [StageSegment] = [
+            StageSegment(start: 0, end: 600, stage: "wake"),
+            StageSegment(start: 600, end: 780, stage: "light"),           // 180 s
+            StageSegment(start: 780, end: 960, stage: "deep"),            // + 180 s = 360 s combined
+        ]
+        XCTAssertEqual(SleepStagerV2.refinedOnsetTs(crossStageRun), 600)
+
+        // Exactly 300 s (the boundary) counts — the rule is >=, matching testSustainedSleepOnsetRule's
+        // own 10-epoch (not 11-epoch) boundary.
+        let exactBoundary: [StageSegment] = [
+            StageSegment(start: 0, end: 100, stage: "wake"),
+            StageSegment(start: 100, end: 400, stage: "light"),           // exactly 300 s
+        ]
+        XCTAssertEqual(SleepStagerV2.refinedOnsetTs(exactBoundary), 100)
+
+        // Nothing to refine: the FIRST segment is already non-wake, so the detected start already IS
+        // the onset by this rule's own definition.
+        let alreadyOnset: [StageSegment] = [StageSegment(start: 0, end: 600, stage: "light")]
+        XCTAssertNil(SleepStagerV2.refinedOnsetTs(alreadyOnset))
+
+        XCTAssertNil(SleepStagerV2.refinedOnsetTs([]), "an empty hypnogram has nothing to refine")
+        XCTAssertNil(SleepStagerV2.refinedOnsetTs(
+            [StageSegment(start: 0, end: 600, stage: "wake")]), "an all-wake window has no onset to refine")
+    }
+
     /// End-to-end: the same physiological night truncated to a shorter in-bed window must not shift where the
     /// REM guard stops applying. Both windows start at the same instant and share byte-identical streams, so
     /// any difference in the first ~60 min of the hypnogram would be the session-length dependence #930 is
