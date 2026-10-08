@@ -306,14 +306,33 @@ final class DaytimeStressTests: XCTestCase {
 
     /// Gravity for one local hour. `activeFraction` of the records step far enough between
     /// consecutive samples to clear `DaytimeStress.stressMotionThreshold` (0.45 g L2); the rest hold
-    /// still. The alternating ±step keeps every active record above the floor rather than only the
-    /// first, so the produced active fraction matches `activeFraction` closely.
+    /// still. FORK FIX: used to bunch all its active records at the START of the hour, which only
+    /// worked while gravity was aggregated over the whole hour in one go — now that it is bucketed
+    /// into 5-minute `bucketSeconds` windows, bunching concentrated a 10%-active hour into one
+    /// ~100%-active bucket followed by several untouched ones instead of ~10% active throughout, which
+    /// is what `activeFraction` is meant to simulate. Active indices are now spread EVENLY across the
+    /// hour instead. An isolated active sample (its predecessor not active) always steps up from the
+    /// still 0.0 background, which is enough contrast on its own; a RUN of active samples (reached at
+    /// `activeFraction` 1.0, where every index is active) still alternates relative to its own
+    /// predecessor, exactly as before, so a long run keeps stepping instead of going flat at a
+    /// constant value with zero delta between samples.
     private func hourGravity(_ hour: Int, activeFraction: Double, n: Int = 120) -> [GravitySample] {
         let base = hour * 3_600
         let activeCount = Int((Double(n) * activeFraction).rounded())
+        let activeIndices: Set<Int> = activeCount > 0
+            ? Set((0..<activeCount).map { k in Int((Double(k) * Double(n) / Double(activeCount)).rounded(.down)) })
+            : []
+        var lastWasActive = false
+        var lastX = 0.0
         return (0..<n).map { i in
-            // 0.5 g of step per axis-pair clears the 0.45 g stress-motion bar when it alternates.
-            let x = i < activeCount ? (i % 2 == 0 ? 0.5 : 0.0) : 0.0
+            var x = 0.0
+            if activeIndices.contains(i) {
+                // 0.5 g of step per axis-pair clears the 0.45 g stress-motion bar.
+                x = lastWasActive ? (lastX == 0.5 ? 0.0 : 0.5) : 0.5
+                lastWasActive = true; lastX = x
+            } else {
+                lastWasActive = false
+            }
             return GravitySample(ts: base + i * 30, x: x, y: 0, z: 1)
         }
     }
