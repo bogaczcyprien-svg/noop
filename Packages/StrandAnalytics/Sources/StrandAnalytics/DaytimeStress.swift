@@ -365,6 +365,16 @@ public enum DaytimeStress {
         return v.squareRoot()
     }
 
+    /// Minimum clean R-R beats a `bucketSeconds`-wide window needs before its RMSSD is trusted.
+    /// FORK ADDITION, surfaced by the bucket-width change: `HRVAnalyzer.analyze(rawRR:)` defaults to
+    /// its own `minBeats` (20), a figure validated for a WHOLE NIGHT's worth of R-R — a 5-minute
+    /// daytime bucket legitimately holds far fewer beats than a night does, so gating it at 20 read
+    /// `.empty` for nearly every bucket regardless of how clean its beats were (caught by
+    /// `DaytimeBaselinesTests.testDayRMSSDAggregateIsPresentWithRRAndTracksVariability` crashing on a
+    /// nil RMSSD it used to get reliably). 8 matches this file's own `HRVAnalyzer.rollingRmssd`'s
+    /// `minBeatsPerWindow` default, set there for exactly this "short window, not a night" reason.
+    static let minDaytimeBucketRRBeats: Int = 8
+
     /// FORK ADDITION: how far a single HR sample may sit from its OWN bucket's median before
     /// `cleanedMeanHR` drops it as a sensor glitch (strap slip, motion artifact landing one bad
     /// reading among real ones), bpm.
@@ -569,7 +579,7 @@ public enum DaytimeStress {
             for b in ordered {
                 let hrs = hrGrid[b] ?? []
                 let mHR = hrs.count >= minHourHRSamples ? cleanedMeanHR(hrs) : nil
-                let rrRes = HRVAnalyzer.analyze(rawRR: rrGrid[b] ?? [])
+                let rrRes = HRVAnalyzer.analyze(rawRR: rrGrid[b] ?? [], minBeats: minDaytimeBucketRRBeats)
                 out.append(HourAgg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd, nHR: hrs.count))
             }
             return out
@@ -847,7 +857,7 @@ public enum DaytimeStress {
         let aggs: [Agg] = hrByBucket.keys.sorted().map { b in
             let hrs = hrByBucket[b] ?? []
             let mHR = hrs.count >= minHourHRSamples ? cleanedMeanHR(hrs) : nil
-            let rrRes = HRVAnalyzer.analyze(rawRR: rrByBucket[b] ?? [])
+            let rrRes = HRVAnalyzer.analyze(rawRR: rrByBucket[b] ?? [], minBeats: minDaytimeBucketRRBeats)
             return Agg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd)
         }
         guard !aggs.isEmpty else { return [] }

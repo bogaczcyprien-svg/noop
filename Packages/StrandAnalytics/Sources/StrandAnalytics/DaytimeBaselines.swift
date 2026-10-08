@@ -103,7 +103,8 @@ public extension DaytimeStress {
         var wakingRMSSDs: [Double] = []
         for (bucket, hrs) in hrByBucket where isDaytimeAggregateHour(bucket) {
             if hrs.count >= minHourHRSamples, let m = cleanedMeanHR(hrs) { wakingMeanHRs.append(m) }
-            if let rmssd = HRVAnalyzer.analyze(rawRR: rrByBucket[bucket] ?? []).rmssd {
+            if let rmssd = HRVAnalyzer.analyze(rawRR: rrByBucket[bucket] ?? [],
+                                               minBeats: minDaytimeBucketRRBeats).rmssd {
                 wakingRMSSDs.append(rmssd)
             }
         }

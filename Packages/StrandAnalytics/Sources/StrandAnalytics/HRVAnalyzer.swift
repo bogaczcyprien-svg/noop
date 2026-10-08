@@ -267,11 +267,19 @@ public enum HRVAnalyzer {
     ///   even when `minBeats` clean intervals survive — because a short live capture that threw away most
     ///   of its beats is too noisy to trust. nil (the default, and what the NIGHTLY windowed path passes)
     ///   skips the gate entirely, so the nightly RMSSD is byte-identical to before this parameter existed.
-    public static func analyze(rawRR: [Double], maxRejectedFraction: Double? = nil) -> HRVResult {
+    /// - Parameter minBeats: the survivor floor, defaulting to the type's own `minBeats` (20, the
+    ///   validated NIGHTLY figure) so every pre-existing caller is byte-identical. ADDITIVE, for a
+    ///   caller windowing much shorter than a night — `DaytimeStress`'s 5-minute buckets pass a lower
+    ///   floor here, the same way `rollingRmssd`'s own `minBeatsPerWindow` (8) already departs from the
+    ///   nightly figure for a short window, and for the same reason: a short window legitimately holds
+    ///   far fewer beats than a night does, so gating it at the nightly floor would read every short
+    ///   window as `.empty` regardless of how clean its beats are.
+    public static func analyze(rawRR: [Double], maxRejectedFraction: Double? = nil,
+                               minBeats minBeatsFloor: Int = minBeats) -> HRVResult {
         let nInput = rawRR.count
         let cleaned = cleanRRGapAware(rawRR)
         let clean = cleaned.nn
-        guard clean.count >= minBeats else {
+        guard clean.count >= minBeatsFloor else {
             return .empty(nInput: nInput)
         }
         // Spot-only: refuse when too large a fraction of beats was noise (out-of-range or ectopic). Only

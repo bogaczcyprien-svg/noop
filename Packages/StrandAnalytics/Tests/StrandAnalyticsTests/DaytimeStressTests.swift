@@ -292,10 +292,14 @@ final class DaytimeStressTests: XCTestCase {
         XCTAssertGreaterThan(tense, relaxed)
     }
 
-    /// R-R for one hour with a controllable beat-to-beat jitter (drives RMSSD).
+    /// R-R for one hour with a controllable beat-to-beat jitter (drives RMSSD). FORK FIX: stepped at
+    /// 50s, which only put 6 of its 60 samples inside the matching 5-minute `bucketSeconds` bucket
+    /// (the rest landed in later buckets this fixture's HR never touches, so they were silently
+    /// ignored) — below `minDaytimeBucketRRBeats` (8), so RMSSD came back nil and tests relying on it
+    /// lost their signal. 20s puts 15 samples inside the first 300s, comfortably clearing the gate.
     private func hourRRVariable(_ hour: Int, rrMs: Int, jitter: Int, n: Int = 60) -> [RRInterval] {
         let base = hour * 3_600
-        return (0..<n).map { RRInterval(ts: base + $0 * 50, rrMs: rrMs + ($0 % 2 == 0 ? jitter : -jitter)) }
+        return (0..<n).map { RRInterval(ts: base + $0 * 20, rrMs: rrMs + ($0 % 2 == 0 ? jitter : -jitter)) }
     }
 
     // MARK: - Motion gate
