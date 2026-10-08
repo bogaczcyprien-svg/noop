@@ -47608,7 +47608,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge"
+            "value": "Réparation"
           }
         },
         "it": {
@@ -47666,7 +47666,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge %@%%"
+            "value": "Réparation %@%%"
           }
         },
         "it": {
@@ -47724,7 +47724,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge de %lld aujourd'hui, donc votre zone est de %lld–%lld bpm."
+            "value": "Réparation de %lld aujourd'hui, donc votre zone est de %lld–%lld bpm."
           }
         },
         "it": {
@@ -47782,7 +47782,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge (tout l'historique)"
+            "value": "Réparation (tout l'historique)"
           }
         },
         "it": {
@@ -47840,7 +47840,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge (année écoulée)"
+            "value": "Réparation (année écoulée)"
           }
         },
         "it": {
@@ -47904,7 +47904,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Référence de charge en cours de calibration. %1$@, %2$@. %3$@."
+            "value": "Référence de réparation en cours de calibration. %1$@, %2$@. %3$@."
           }
         },
         "it": {
@@ -47962,7 +47962,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recalibration de la référence de charge"
+            "value": "Recalibration de la référence de réparation"
           }
         },
         "it": {
@@ -48020,7 +48020,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est faible et le sommeil a été régulier."
+            "value": "La réparation est faible et le sommeil a été régulier."
           }
         },
         "it": {
@@ -48078,7 +48078,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est faible et le sommeil a été insuffisant."
+            "value": "La réparation est faible et le sommeil a été insuffisant."
           }
         },
         "it": {
@@ -48136,7 +48136,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est faible."
+            "value": "La réparation est faible."
           }
         },
         "it": {
@@ -48194,7 +48194,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est stable et le sommeil a été régulier."
+            "value": "La réparation est stable et le sommeil a été régulier."
           }
         },
         "it": {
@@ -48252,7 +48252,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est stable mais le sommeil a été insuffisant."
+            "value": "La réparation est stable mais le sommeil a été insuffisant."
           }
         },
         "it": {
@@ -48310,7 +48310,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est stable."
+            "value": "La réparation est stable."
           }
         },
         "it": {
@@ -48368,7 +48368,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est élevée et le sommeil a été régulier."
+            "value": "La réparation est élevée et le sommeil a été régulier."
           }
         },
         "it": {
@@ -48426,7 +48426,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est élevée mais le sommeil a été insuffisant."
+            "value": "La réparation est élevée mais le sommeil a été insuffisant."
           }
         },
         "it": {
@@ -48484,7 +48484,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge est élevée."
+            "value": "La réparation est élevée."
           }
         },
         "it": {
@@ -48542,7 +48542,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Modèle de charge"
+            "value": "Modèle de réparation"
           }
         },
         "it": {
@@ -48600,7 +48600,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Échelle de charge, du niveau épuisé au sommet"
+            "value": "Échelle de réparation, du niveau épuisé au sommet"
           }
         },
         "it": {
@@ -48658,7 +48658,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tendance de la charge"
+            "value": "Tendance de la réparation"
           }
         },
         "it": {
@@ -48716,7 +48716,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La Charge évalue votre VFC par rapport à votre valeur de référence personnelle (~55%%), votre fréquence cardiaque au repos (~20%%), la qualité de votre repos (~15%%), votre respiration (~5%%) et l'écart de température cutanée (~5%%). L'Effort est une charge cardiovasculaire de 0 à %lld calculée à partir du temps passé dans les zones de fréquence cardiaque. Le Repos est déterminé selon le mouvement et la fréquence cardiaque. Tout est calculé ici à partir des données brutes du bracelet. Cela fonctionne pour chaque jour où NOOP a collecté des flux bruts."
+            "value": "La Réparation évalue votre VFC par rapport à votre valeur de référence personnelle (~55%%), votre fréquence cardiaque au repos (~20%%), la qualité de votre repos (~15%%), votre respiration (~5%%) et l'écart de température cutanée (~5%%). L'Effort est une charge cardiovasculaire de 0 à %lld calculée à partir du temps passé dans les zones de fréquence cardiaque. Le Repos est déterminé selon le mouvement et la fréquence cardiaque. Tout est calculé ici à partir des données brutes du bracelet. Cela fonctionne pour chaque jour où NOOP a collecté des flux bruts."
           }
         },
         "it": {
@@ -48774,7 +48774,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge pondère votre VFC par rapport à votre référence personnelle (~55%%), votre fréquence cardiaque au repos (~20%%), la qualité du repos (~15%%), la respiration (~5%%) et l'écart de température cutanée (~5%%). L'effort est une charge cardiovasculaire de 0 à %@ basée sur le temps passé dans les zones de fréquence cardiaque. Le repos est réparti en phases à partir du mouvement et de la fréquence cardiaque. Tout est calculé ici à partir des données brutes du bracelet. Cela fonctionne pour tout jour où NOOP a collecté des flux bruts."
+            "value": "La réparation pondère votre VFC par rapport à votre référence personnelle (~55%%), votre fréquence cardiaque au repos (~20%%), la qualité du repos (~15%%), la respiration (~5%%) et l'écart de température cutanée (~5%%). L'effort est une charge cardiovasculaire de 0 à %@ basée sur le temps passé dans les zones de fréquence cardiaque. Le repos est réparti en phases à partir du mouvement et de la fréquence cardiaque. Tout est calculé ici à partir des données brutes du bracelet. Cela fonctionne pour tout jour où NOOP a collecté des flux bruts."
           }
         },
         "it": {
@@ -48890,7 +48890,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge · %@ pts"
+            "value": "Réparation · %@ pts"
           }
         },
         "it": {
@@ -48948,7 +48948,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge · Effort · Repos"
+            "value": "Réparation · Effort · Repos"
           }
         },
         "it": {
@@ -49006,7 +49006,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge → Charge du lendemain"
+            "value": "Réparation → Réparation du lendemain"
           }
         },
         "it": {
@@ -49064,7 +49064,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge, Effort et Repos (et en quoi ils diffèrent de WHOOP)."
+            "value": "Réparation, Effort et Repos (et en quoi ils diffèrent de WHOOP)."
           }
         },
         "it": {
@@ -49122,7 +49122,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge, l'effort et le repos sont calculés sur votre propre appareil à partir des données de votre bracelet. La charge a besoin d'environ quatre nuits de sommeil pour apprendre votre référence (c'est la « Calibration », comptée en nuits sur 4 sur l'anneau), et continue de s'affiner pendant vos premières semaines. Sur un WHOOP 5 ou MG, le bracelet conserve peu d'historique, donc ce compteur peut rester à 0 sur 4 tant que vous ne l'avez pas porté pendant quelques nuits. C'est la limite de synchronisation du bracelet, pas un défaut. Avant qu'il y ait un chiffre, NOOP montre ce qu'il peut sans en inventer un."
+            "value": "La réparation, l'effort et le repos sont calculés sur votre propre appareil à partir des données de votre bracelet. La réparation a besoin d'environ quatre nuits de sommeil pour apprendre votre référence (c'est la « Calibration », comptée en nuits sur 4 sur l'anneau), et continue de s'affiner pendant vos premières semaines. Sur un WHOOP 5 ou MG, le bracelet conserve peu d'historique, donc ce compteur peut rester à 0 sur 4 tant que vous ne l'avez pas porté pendant quelques nuits. C'est la limite de synchronisation du bracelet, pas un défaut. Avant qu'il y ait un chiffre, NOOP montre ce qu'il peut sans en inventer un."
           }
         },
         "it": {
@@ -49180,7 +49180,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge, l'effort et le repos deviennent personnalisés après quelques nuits de port."
+            "value": "La réparation, l'effort et le repos deviennent personnalisés après quelques nuits de port."
           }
         },
         "it": {
@@ -49238,7 +49238,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La charge, l'effort et le repos se construisent au fil de vos prochaines nuits de port."
+            "value": "La réparation, l'effort et le repos se construisent au fil de vos prochaines nuits de port."
           }
         },
         "it": {
@@ -49296,7 +49296,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge, effort, repos, VFC, fréquence cardiaque au repos et en direct, et batterie du bracelet en un coup d'œil."
+            "value": "Réparation, effort, repos, VFC, fréquence cardiaque au repos et en direct, et batterie du bracelet en un coup d'œil."
           }
         },
         "it": {
@@ -49354,7 +49354,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge : quel est votre niveau de récupération ?"
+            "value": "Réparation : quel est votre niveau de récupération ?"
           }
         },
         "it": {
