@@ -141,11 +141,17 @@ final class DaytimeStressTests: XCTestCase {
         XCTAssertGreaterThan(tense, calm)
     }
 
-    func testNonWakingHoursAreExcluded() {
-        // A 3 am hour (outside 06:00–22:00) is never placed on the waking timeline.
+    /// FORK CHANGE (#WHOOP-parity, explicit request — "je veux le stress comme WHOOP, le graphique
+    /// aussi"): `isWakingHour` used to hard-cut at 06:00–22:00, which left a real gap on the chart for
+    /// anyone awake outside that window (a late bedtime, an early riser) — not because they were
+    /// asleep, purely because of the clock. The window is now the full day; only a REAL sleep span
+    /// (via `maskedForSleep`, tested elsewhere) excludes an hour. Renamed from
+    /// `testNonWakingHoursAreExcluded`, which tested the behaviour this replaces.
+    func testEveryHourIsOnTheTimelineUnlessItOverlapsRealSleep() {
+        // A 3 am hour with no sleep span supplied is awake-by-default and now scored like any other.
         let hr = hourHR(3, bpm: 80) + hourHR(9, bpm: 60)
         let r = DaytimeStress.analyze(hr: hr, rr: [])
-        XCTAssertFalse(r.hours.contains { $0.hour == 3 })
+        XCTAssertTrue(r.hours.contains { $0.hour == 3 }, "a 3 am hour with no sleep span is awake, not excluded by clock")
         XCTAssertTrue(r.hours.contains { $0.hour == 9 })
     }
 
@@ -203,10 +209,13 @@ final class DaytimeStressTests: XCTestCase {
     }
 
     func testTimezoneOffsetShiftsWakingWindow() {
-        // ts at UTC hour 4 with a +3 h offset lands at local hour 7 → inside waking hours.
+        // ts at UTC hour 4 with a +3 h offset lands at local hour 7, not UTC hour 4 — the tzOffset
+        // arithmetic itself, independent of the (now full-day, see `wakingStartHour`'s doc comment)
+        // waking window, which no longer excludes anything by clock.
         let hr = hourHR(4, bpm: 60)
         let r = DaytimeStress.analyze(hr: hr, rr: [], tzOffsetSeconds: 3 * 3_600)
         XCTAssertTrue(r.hours.contains { $0.hour == 7 })
+        XCTAssertFalse(r.hours.contains { $0.hour == 4 }, "the hour must be reported at its LOCAL hour, not the raw UTC one")
     }
 
     func testRMSSDLowersStressDirectionMatchesDailyScore() {

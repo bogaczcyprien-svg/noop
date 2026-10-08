@@ -52,9 +52,18 @@ public enum DaytimeStress {
     public static let highBandFloor: Double = 2.0
     /// Consecutive most-recent covered hours that must all be HIGH to flag sustained stress.
     public static let sustainedHours: Int = 3
-    /// First/last local hour-of-day treated as "waking" for the timeline (06:00–22:00).
-    public static let wakingStartHour: Int = 6
-    public static let wakingEndHour: Int = 22
+    /// First/last local hour-of-day treated as "waking" for the timeline. WIDENED TO THE FULL DAY
+    /// (0–24, i.e. unbounded) at the user's explicit request to match WHOOP's own near-continuous
+    /// chart: the window used to hard-cut at 22:00, which — as the code's own prior comment on
+    /// `maskedForSleep` already flagged — excluded "a late bedtime past 22:00" purely by clock, not
+    /// because the wearer was actually asleep, leaving a real gap in the drawn line between the
+    /// cutoff and whenever sleep was actually detected. `overlapsSleep` is what actually carves out
+    /// genuine sleep time (any hour, any clock position) for the separate sleep-window scoring — it
+    /// does that job correctly regardless of this window's width, so widening this one only means a
+    /// late-awake or early-awake stretch gets scored like any other waking hour instead of silently
+    /// dropping out of the chart. Previously 06:00–22:00.
+    public static let wakingStartHour: Int = 0
+    public static let wakingEndHour: Int = 24
 
     // MARK: - Motion gate
     //
@@ -218,13 +227,14 @@ public enum DaytimeStress {
         /// motion-gate constants above.
         public let maskedForActivity: Bool
         /// True when this hour was left unscored because it OVERLAPS the caller-supplied sleep
-        /// span(s) — i.e. still genuinely asleep despite falling in the 06:00–22:00 clock window
-        /// `isWakingHour` otherwise treats as waking (a sleep-in past 6am, or a late bedtime past
-        /// 22:00's companion case the window already excludes by clock alone). Sleep HR/HRV —
-        /// including the normal cortisol-driven rise right at waking — is not what this proxy is
-        /// built to read as "stress", so it is excluded the same way an ambulatory hour is, not
-        /// scored and misread as a tense morning. 0 sleep spans supplied → never true (byte-identical
-        /// to every caller that does not know about sleep boundaries).
+        /// span(s) — i.e. still genuinely asleep. `isWakingHour`'s own window now spans the full day
+        /// (see that constant's doc comment), so this is the ONE thing that actually carves sleep out
+        /// of the timeline, at any clock hour — a sleep-in past 6am or a late bedtime are both caught
+        /// here by the real sleep span, not by a clock cutoff. Sleep HR/HRV — including the normal
+        /// cortisol-driven rise right at waking — is not what this proxy is built to read as "stress",
+        /// so it is excluded the same way an ambulatory hour is, not scored and misread as a tense
+        /// morning. 0 sleep spans supplied → never true (byte-identical to every caller that does not
+        /// know about sleep boundaries).
         public let maskedForSleep: Bool
 
         /// True when the hour was scored (had enough HR to place on the curve).
@@ -468,7 +478,7 @@ public enum DaytimeStress {
 
         // Sleep gate (mirrors the motion gate below): a bucket whose [start, start+bucketSeconds)
         // wall-clock span overlaps ANY supplied sleep span by any amount is still genuinely asleep,
-        // regardless of the 06:00 clock boundary `isWakingHour` otherwise uses. `bucket` here is the
+        // independent of `isWakingHour`'s own (now full-day) clock window. `bucket` here is the
         // LOCAL-shifted value every bucket key in this function is keyed by (`ts + tzOffsetSeconds`);
         // sleep spans arrive as raw wall-clock seconds, so the shift is undone before comparing —
         // same `bucket - tzOffsetSeconds` pattern `scoreGrid` already uses to recover wall-clock.
@@ -801,8 +811,9 @@ public enum DaytimeStress {
         return (r != 0 && (r < 0) != (b < 0)) ? q - 1 : q
     }
 
-    /// Whether a local hour-bucket start falls inside the waking window the timeline scores
-    /// (06:00–22:00). The single source of truth for "waking" — used both to build the calm
+    /// Whether a local hour-bucket start falls inside the waking window the timeline scores — the
+    /// full day (see `wakingStartHour`/`wakingEndHour`'s own doc comment for why this is no longer a
+    /// 06:00–22:00 cutoff). The single source of truth for "waking" — used both to build the calm
     /// reference and to pick the hours to score, so the two can never drift apart.
     static func isWakingHour(_ bucket: Int) -> Bool {
         let hourOfDay = floorDiv(bucket, bucketSeconds) % 24
