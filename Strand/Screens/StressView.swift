@@ -576,7 +576,13 @@ struct StressView: View {
                             let drawnPeak = day.timeline.filter { $0.level != nil }
                                 .max { ($0.level ?? 0) < ($1.level ?? 0) }
                             if let peak = drawnPeak, let lvl = peak.level {
-                                Text("peak \(StressTrace.formatLevel(lvl)) · \(hourLabel(peak.hour))")
+                                // FORK FIX: `hourLabel(peak.hour)` only ever printed ":00" — fine while a
+                                // bucket was an hour wide, but `day.timeline` is now a genuine per-minute
+                                // series (see `DaytimeStress.timelineStepSeconds`'s doc comment), so the
+                                // real peak can sit anywhere inside its hour. Format the actual instant.
+                                let peakTime = Date(timeIntervalSince1970: Double(peak.startTs))
+                                    .formatted(.dateTime.hour().minute())
+                                Text("peak \(StressTrace.formatLevel(lvl)) · \(peakTime)")
                                     .font(StrandFont.captionNumber)
                                     .foregroundStyle(StressRamp.color(lvl))
                             }
@@ -1849,22 +1855,35 @@ struct DaytimeLoadLine: View {
     }
 
     private var accessibilitySummary: String {
-        let scored = hours.compactMap { p in p.level.map { (p.hour, $0) } }
+        // FORK FIX: used `p.hour` (":00" always) as the label, byte-fine while a bucket was an hour —
+        // now that buckets are 5 minutes (see `DaytimeStress.bucketSeconds`'s doc comment), several
+        // scored points can share one hour, so an hour-only label would both read duplicate "H:00"
+        // entries aloud and silently lose the minute that actually distinguishes them. `startTs`
+        // formats to real HH:mm, the same real-instant formatting `scrubLabel` already uses above.
+        let scored = hours.compactMap { p in p.level.map { (p.startTs, $0) } }
         guard !scored.isEmpty else { return String(localized: "No intraday stress data yet today.") }
-        let parts = scored.map { "\($0.0):00 \(StressTrace.formatLevel($0.1))" }
+        let parts = scored.map { pair in
+            let time = Date(timeIntervalSince1970: Double(pair.0)).formatted(.dateTime.hour().minute())
+            return "\(time) \(StressTrace.formatLevel(pair.1))"
+        }
         return String(localized: "Autonomic load today: \(parts.joined(separator: ", "))")
     }
 }
 
 // MARK: - Stress totals (Calm / Moderate / High) split for the day
 
-/// Splits the day's SCORED waking hours into the three stress bands and exposes each
-/// band's share + duration. Each intraday bucket is one hour (`DaytimeStress.bucketSeconds`),
-/// so the band's hour-count is its duration. Calm = 0–1, Moderate = 1–2, High = 2–3.
+/// Splits the day's SCORED waking buckets into the three stress bands and exposes each band's
+/// share + duration, in MINUTES. FORK FIX: this used to count buckets 1:1 as HOURS, which was
+/// correct only because `DaytimeStress.bucketSeconds` was always exactly one hour — the 5-minute
+/// bucket-width change (see that constant's doc comment) turned the old field names into a real
+/// display bug (an ordinary calm day would have shown "48h calm" instead of "4h"). Each scored
+/// bucket is `DaytimeStress.bucketSeconds` seconds wide regardless of width, so duration is always
+/// bucket-count * bucketSeconds, converted to minutes here and formatted by `durationLabel` below.
+/// Calm = 0–1, Moderate = 1–2, High = 2–3.
 struct StressTotals {
-    let calmHours: Int
-    let moderateHours: Int
-    let highHours: Int
+    let calmMinutes: Int
+    let moderateMinutes: Int
+    let highMinutes: Int
 
     init(hours: [DaytimeStress.HourPoint]) {
         var c = 0, m = 0, hi = 0
@@ -1876,26 +1895,28 @@ struct StressTotals {
             case .high:   hi += 1
             }
         }
-        calmHours = c; moderateHours = m; highHours = hi
+        let bucketMinutes = DaytimeStress.bucketSeconds / 60
+        calmMinutes = c * bucketMinutes; moderateMinutes = m * bucketMinutes; highMinutes = hi * bucketMinutes
     }
 
-    var total: Int { calmHours + moderateHours + highHours }
+    /// Total scored minutes across all three bands.
+    var totalMinutes: Int { calmMinutes + moderateMinutes + highMinutes }
 
-    /// 0...1 share of the scored day spent in each band (0 when no scored hours).
+    /// 0...1 share of the scored day spent in each band (0 when no scored minutes).
     func fraction(_ band: StressBand) -> Double {
-        guard total > 0 else { return 0 }
+        guard totalMinutes > 0 else { return 0 }
         switch band {
-        case .low:    return Double(calmHours) / Double(total)
-        case .medium: return Double(moderateHours) / Double(total)
-        case .high:   return Double(highHours) / Double(total)
+        case .low:    return Double(calmMinutes) / Double(totalMinutes)
+        case .medium: return Double(moderateMinutes) / Double(totalMinutes)
+        case .high:   return Double(highMinutes) / Double(totalMinutes)
         }
     }
 
-    func hours(_ band: StressBand) -> Int {
+    func minutes(_ band: StressBand) -> Int {
         switch band {
-        case .low:    return calmHours
-        case .medium: return moderateHours
-        case .high:   return highHours
+        case .low:    return calmMinutes
+        case .medium: return moderateMinutes
+        case .high:   return highMinutes
         }
     }
 }
@@ -2016,7 +2037,7 @@ struct StressTotalsBar: View {
                             .font(StrandFont.captionNumber)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Spacer()
-                        Text(durationLabel(totals.hours(b.band)))
+                        Text(durationLabel(totals.minutes(b.band)))
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
@@ -2028,13 +2049,20 @@ struct StressTotalsBar: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            String(localized: "Today's stress split: calm \(durationLabel(totals.calmHours)), moderate \(durationLabel(totals.moderateHours)), high \(durationLabel(totals.highHours)).")
+            String(localized: "Today's stress split: calm \(durationLabel(totals.calmMinutes)), moderate \(durationLabel(totals.moderateMinutes)), high \(durationLabel(totals.highMinutes)).")
         )
     }
 
-    /// "—" when a band had no scored hours, else "Nh" (each scored bucket is one hour).
-    private func durationLabel(_ hours: Int) -> String {
-        hours <= 0 ? "—" : String(localized: "\(hours)h")
+    /// "—" when a band had no scored minutes, else "Xh Ym" / "Ym" — the SAME two localized patterns
+    /// `WorkoutsView.durationLabel` already uses (reusing its exact literals rather than adding a new
+    /// one). FORK FIX: used to print a raw bucket count as "Nh" directly, which only worked while a
+    /// bucket was always exactly one hour wide — see `StressTotals`'s own doc comment.
+    private func durationLabel(_ minutes: Int) -> String {
+        guard minutes > 0 else { return "—" }
+        let h = minutes / 60
+        let m = minutes % 60
+        if h > 0 { return String(localized: "\(h)h \(m)m") }
+        return String(localized: "\(m)m")
     }
 }
 

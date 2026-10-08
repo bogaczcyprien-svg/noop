@@ -10,6 +10,14 @@ final class DaytimeStressTests: XCTestCase {
         return (0..<n).map { HRSample(ts: base + $0, bpm: bpm) }
     }
 
+    /// Continuous HR samples spanning `durationSeconds` from `startSeconds`, one every `stepSeconds`
+    /// — unlike `hourHR` (which only fills the first few seconds of an hour), this actually covers
+    /// real wall-clock duration, needed to build fixtures spanning many consecutive `bucketSeconds`
+    /// windows (e.g. `sustainedWindows`' 36 x 5-min test below).
+    private func continuousHR(fromSeconds start: Int, durationSeconds: Int, bpm: Int, stepSeconds: Int = 50) -> [HRSample] {
+        stride(from: 0, to: durationSeconds, by: stepSeconds).map { HRSample(ts: start + $0, bpm: bpm) }
+    }
+
     func testTheSlidingReadIsOptIn() {
         let (hr, rr) = wornMorning()
         // The Stress screen reads `hours` and draws its own timeline, so it must not pay for a second
@@ -55,12 +63,17 @@ final class DaytimeStressTests: XCTestCase {
         let hourly = Set(res.hours.map(\.startTs))
         let extras = res.timeline.filter { !hourly.contains($0.startTs) }
         XCTAssertFalse(extras.isEmpty)
-        // Every added point sits exactly half a window off the hour, which is what "slid" means. A
-        // point anywhere else would mean the grid, not the phase, had moved.
+        // FORK CHANGE: every added point now sits at ONE OF SEVERAL phases inside the window — a
+        // multiple of `timelineStepSeconds`, not just `timelineStepSeconds` itself (see the
+        // `analyzeUncached` `timeline` step's own doc comment for why one straddling copy stopped
+        // being enough once `timelineStepSeconds` became a fifth of `bucketSeconds` instead of half).
+        // A point anywhere else would mean the grid, not a phase, had moved.
         for e in extras {
             let offset = ((e.startTs % DaytimeStress.bucketSeconds) + DaytimeStress.bucketSeconds)
                 % DaytimeStress.bucketSeconds
-            XCTAssertEqual(offset, DaytimeStress.timelineStepSeconds)
+            XCTAssertEqual(offset % DaytimeStress.timelineStepSeconds, 0)
+            XCTAssertGreaterThan(offset, 0)
+            XCTAssertLessThan(offset, DaytimeStress.bucketSeconds)
         }
         XCTAssertEqual(res.timeline.map(\.startTs), res.timeline.map(\.startTs).sorted())
     }
@@ -72,7 +85,7 @@ final class DaytimeStressTests: XCTestCase {
         // non-overlapping hours. This is the assertion that fails first if someone later points
         // `highStressMinutes` at the denser series.
         let highHours = res.hours.filter { ($0.level ?? 0) >= DaytimeStress.highBandFloor }.count
-        XCTAssertEqual(res.highStressMinutes, highHours * 60)
+        XCTAssertEqual(res.highStressMinutes, highHours * (DaytimeStress.bucketSeconds / 60))
         XCTAssertEqual(res.activityMaskedHours, res.hours.filter(\.maskedForActivity).count)
     }
 
@@ -89,9 +102,10 @@ final class DaytimeStressTests: XCTestCase {
     }
 
     func testTimelineMatchesTheKotlinTwinValueForValue() {
-        // The other half of the oracle. The Kotlin `DaytimeStressTest` asserts these same literals for
-        // this same scenario, so a change landing on ONE platform moves one of the two and fails here
-        // or there. An oracle only guards the direction it is written in.
+        // `res.hours` is STILL the Kotlin-twin oracle: this fixture's samples all land in the first
+        // few seconds of each clock hour, so the on-the-grid (phase 0) bucket starts at exactly that
+        // hour on both platforms regardless of bucket WIDTH, and the scoring formula itself never
+        // diverged. The Kotlin `DaytimeStressTest` asserts this same literal for this same scenario.
         let (hr, rr) = wornMorning()
         let res = DaytimeStress.analyze(hr: hr, rr: rr, includeTimeline: true)
         func render(_ points: [DaytimeStress.HourPoint]) -> String {
@@ -100,11 +114,32 @@ final class DaytimeStressTests: XCTestCase {
         }
         XCTAssertEqual(render(res.hours),
                        "25200:0.990715 28800:1.500000 32400:2.009285 36000:2.413289 39600:2.678875")
-        XCTAssertEqual(render(res.timeline),
-                       "23400:0.990715 25200:0.990715 27000:1.500000 28800:1.500000 30600:2.009285 "
-                       + "32400:2.009285 34200:2.413289 36000:2.413289 37800:2.678875 39600:2.678875")
-        XCTAssertEqual(res.highStressMinutes, 180)
-        XCTAssertTrue(res.sustainedHigh)
+
+        // FORK DIVERGENCE, not ported to Android: `bucketSeconds`/`timelineStepSeconds` no longer
+        // match the Kotlin twin's 3600/1800 pair (see those constants' own doc comments), so
+        // `timeline`'s exact shape stops being a cross-platform oracle here — only `res.hours` above
+        // still is. This fixture's samples are tightly clustered at the start of each hour, so EVERY
+        // phase (0, 60, 120, 180, 240) still catches them: each hour contributes exactly
+        // `bucketSeconds / timelineStepSeconds` timeline points, all sharing that hour's own level
+        // (same underlying samples, same reference — never a second, drifting scale).
+        let phasesPerHour = DaytimeStress.bucketSeconds / DaytimeStress.timelineStepSeconds
+        XCTAssertEqual(res.timeline.count, res.hours.count * phasesPerHour)
+        for h in res.hours {
+            let siblings = res.timeline.filter { abs($0.startTs - h.startTs) < DaytimeStress.bucketSeconds }
+            XCTAssertEqual(siblings.count, phasesPerHour)
+            for s in siblings {
+                XCTAssertEqual(s.level, h.level, "a straddling point must share its parent hour's level")
+            }
+        }
+
+        // FORK DIVERGENCE, not ported to Android: `sustainedWindows` (36 x 5-min windows = 3 real
+        // hours) replaced the Kotlin twin's `sustainedHours` (3 x 1-hour windows). This fixture's 3
+        // trailing high points no longer clear that bar — it would need 36 CONSECUTIVE high windows,
+        // not 3 (see `testSustainedHighFlagsAfterSustainedWindowsOfHighReadings` for that scenario
+        // built out properly). `sustainedRun` itself is unaffected: it is still exactly how many
+        // trailing scored points are HIGH, independent of the bar `sustainedHigh` checks it against.
+        XCTAssertEqual(res.highStressMinutes, 3 * (DaytimeStress.bucketSeconds / 60))
+        XCTAssertFalse(res.sustainedHigh)
         XCTAssertEqual(res.sustainedRun, 3)
         XCTAssertEqual(res.peak?.startTs, 39600)
     }
@@ -155,16 +190,31 @@ final class DaytimeStressTests: XCTestCase {
         XCTAssertTrue(r.hours.contains { $0.hour == 9 })
     }
 
-    func testSustainedHighFlagsAfterThreeConsecutiveHighHours() {
-        // A calm morning, then three increasingly tense afternoon hours that finish HIGH.
-        var hr: [HRSample] = []
-        for h in [8, 9, 10] { hr += hourHR(h, bpm: 58) }   // calm baseline hours
-        hr += hourHR(13, bpm: 120)
-        hr += hourHR(14, bpm: 125)
-        hr += hourHR(15, bpm: 130)
+    func testSustainedHighFlagsAfterSustainedWindowsOfHighReadings() {
+        // FORK CHANGE: `sustainedWindows` (36 x 5-min windows = 3 real hours, see that constant's doc
+        // comment) replaced `sustainedHours` (3 x 1-hour windows) — a trailing run now needs 36
+        // CONSECUTIVE scored 5-minute windows at HIGH, not 3 hourly ones. A long calm stretch (so the
+        // calm reference anchors low and isn't swamped by the tense run's own sample count) followed
+        // by a CONTINUOUS tense stretch spanning exactly `sustainedWindows` windows.
+        let calmDuration = 12 * 3_600
+        let tenseDuration = DaytimeStress.sustainedWindows * DaytimeStress.bucketSeconds
+        var hr = continuousHR(fromSeconds: 0, durationSeconds: calmDuration, bpm: 58)
+        hr += continuousHR(fromSeconds: 13 * 3_600, durationSeconds: tenseDuration, bpm: 130)
         let r = DaytimeStress.analyze(hr: hr, rr: [])
-        XCTAssertTrue(r.sustainedHigh, "three trailing HIGH hours should flag sustained stress")
-        XCTAssertGreaterThanOrEqual(r.sustainedRun, DaytimeStress.sustainedHours)
+        XCTAssertTrue(r.sustainedHigh, "sustainedWindows consecutive HIGH 5-minute windows should flag sustained stress")
+        XCTAssertGreaterThanOrEqual(r.sustainedRun, DaytimeStress.sustainedWindows)
+    }
+
+    func testSustainedHighNeedsEveryWindowInTheRunNotJustSomeOfThem() {
+        // One window short of `sustainedWindows` consecutive HIGH windows must not flag — this is the
+        // boundary the `>=` in `testSustainedHighFlagsAfterSustainedWindowsOfHighReadings` doesn't
+        // exercise on its own.
+        let calmDuration = 12 * 3_600
+        let tenseDuration = (DaytimeStress.sustainedWindows - 1) * DaytimeStress.bucketSeconds
+        var hr = continuousHR(fromSeconds: 0, durationSeconds: calmDuration, bpm: 58)
+        hr += continuousHR(fromSeconds: 13 * 3_600, durationSeconds: tenseDuration, bpm: 130)
+        let r = DaytimeStress.analyze(hr: hr, rr: [])
+        XCTAssertFalse(r.sustainedHigh, "one window short of sustainedWindows must not flag sustained stress")
     }
 
     func testFlatDayDoesNotFlagSustained() {

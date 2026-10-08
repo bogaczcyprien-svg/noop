@@ -19,8 +19,8 @@ import WhoopProtocol
 // afternoon as elevated *relative to that person's own calm hours*, no cloud, no history
 // needed beyond the day itself.
 //
-// "Sustained high stress" is an honest, conservative flag: the most recent
-// `sustainedHours` covered hours must ALL sit in the HIGH band (≥ highBandFloor). It
+// "Sustained high stress" is an honest, conservative flag: the most recent `sustainedWindows`
+// covered windows (36 x 5 min = 3 hours) must ALL sit in the HIGH band (≥ highBandFloor). It
 // drives a passive in-app suggestion to run a Breathe session — never a notification.
 //
 // APPROXIMATE and non-clinical: an hour with too little data (few HR samples / too few
@@ -30,28 +30,45 @@ public enum DaytimeStress {
 
     // MARK: - Tunables
 
-    /// Minimum HR samples in an hour before its mean HR is trusted (~5 min at 1 Hz).
-    public static let minHourHRSamples: Int = 300
-    /// Bucket width for the timeline, in seconds (one hour).
-    public static let bucketSeconds: Int = 3_600
-    /// How far the DISPLAY timeline slides its window between points.
-    ///
-    /// The scored unit stays a full `bucketSeconds` hour. This only decides how often that hour is
-    /// re-read, so a half-step gives two points an hour, each still an hour of data, rather than
-    /// half-hours of thinner data. Shrinking `bucketSeconds` itself would have been a scoring change
-    /// wearing a display change's clothes: the calm reference is a quartile ACROSS buckets, the
-    /// post-exercise shadow looks back exactly one bucket, and `sustainedHours` counts them.
-    ///
-    /// Half rather than a quarter because adjacent points then share half their samples instead of
-    /// three quarters. The curve is smoother either way, and a denser line invites the reader to see
-    /// detail it cannot resolve: a 30-minute spike still moves an hour's worth of weight, just sooner.
-    /// Half is the least overlap that still doubles the resolution, and it keeps every on-the-hour
-    /// point exactly where the hourly pass put it. Byte-twin of the Kotlin `timelineStepSeconds`.
-    public static let timelineStepSeconds: Int = 1_800
+    /// Minimum HR samples in a bucket before its mean HR is trusted. Rescaled for the 5-minute
+    /// `bucketSeconds` (was 300, "~5 min at 1 Hz" over the OLD 1-hour bucket — ~8% coverage). Kept
+    /// deliberately LOW rather than coverage-matched (8% of 5 min would be ~25) because a WHOOP 5/MG
+    /// sends live HR only ~every 30 s (see `StrainScorer.minSparseReadings`'s own doc comment for the
+    /// same hardware constraint) — a 25-sample floor would leave a 5/MG's daytime timeline blank
+    /// almost everywhere. 5 clears a sparse 30 s-cadence device's ~10 real readings per 5-minute
+    /// window comfortably while still rejecting a near-empty bucket.
+    public static let minHourHRSamples: Int = 5
+    /// Bucket width for the timeline, in seconds. FORK CHANGE (#WHOOP-parity, explicit request —
+    /// "je veux toutes les 1 minute... comment on fait pour arriver à 1"): widened resolution from a
+    /// full hour to 5 minutes, the shortest window RMSSD/HRV is scientifically meaningful over (the
+    /// Task Force of the ESC's 1996 standard for "short-term" HRV) — a literal 1-minute SCORED window
+    /// would make the HRV term statistical noise, not a tighter reading. `timelineStepSeconds` below
+    /// is what actually delivers "updates every minute": the SCORED window stays a valid 5 minutes,
+    /// it is just re-read every 60 s, the same relationship the old hour/half-hour pair had. Every
+    /// "hour"-named type/variable in this file (`HourPoint`, `hourOfDay`, …) now means "one
+    /// `bucketSeconds`-wide window", kept unrenamed to avoid a mechanical sweep through every reader
+    /// of this file, the UI layer and the Kotlin twin for a label only — the WIDTH is what changed.
+    public static let bucketSeconds: Int = 300
+    /// How far apart each PHASE of the DISPLAY timeline sits — now 60 s (every minute), the explicit
+    /// target. The scored unit stays a full `bucketSeconds` (5 min) window; this only decides how
+    /// often that window is re-read. `analyzeUncached`'s `timeline` step walks every phase from this
+    /// value up to (not including) `bucketSeconds` — with the current constants, 60/120/180/240 s —
+    /// so a point lands on every minute, not just one straddling copy. Adjacent points share 4 of 5
+    /// minutes of data (an 80% overlap) — expected and intended for a "live-updating" feel, the same
+    /// relationship a moving average has to its own window width: each point is still a genuine
+    /// 5-minute reading, just advanced one minute from its neighbour instead of restarting from
+    /// scratch. FORK-ONLY, not ported to Android: the Kotlin twin keeps `bucketSeconds = 3600` /
+    /// `timelineStepSeconds = 1800` (its own hourly/half-hour pair) — this is no longer its byte-twin.
+    public static let timelineStepSeconds: Int = 60
     /// Band floor for "high" on the shared 0–3 scale (matches StressBand .high).
     public static let highBandFloor: Double = 2.0
-    /// Consecutive most-recent covered hours that must all be HIGH to flag sustained stress.
-    public static let sustainedHours: Int = 3
+    /// Consecutive most-recent covered 5-minute windows that must all be HIGH to flag sustained
+    /// stress — 36 windows = 3 HOURS, unchanged from the original "3 consecutive hours" intent (was
+    /// `sustainedHours = 3` when a window was an hour; renamed since "hours" would now be a false
+    /// name for a count of 5-minute windows). Deliberately NOT rescaled down to "3 windows = 15
+    /// minutes": the flag drives a passive Breathe-session suggestion, and 15 minutes of elevated
+    /// readings is a normal brief spike, not the sustained pattern that nudge is for.
+    public static let sustainedWindows: Int = 36
     /// First/last local hour-of-day treated as "waking" for the timeline. WIDENED TO THE FULL DAY
     /// (0–24, i.e. unbounded) at the user's explicit request to match WHOOP's own near-continuous
     /// chart: the window used to hard-cut at 22:00, which — as the code's own prior comment on
@@ -103,14 +120,24 @@ public enum DaytimeStress {
     /// note); it is a reasoned extrapolation from this codebase's own documented walk-floor
     /// calibration, not a new physiological estimate.
     public static let stressMotionThreshold: Double = 0.45
-    /// Post-exercise shadow: HR stays elevated for a while AFTER exertion ends, so the single hour
-    /// that immediately FOLLOWS a directly-ambulatory hour is ALSO masked WHILE its mean HR is still
-    /// above the calm reference by this margin (bpm). A following hour whose HR has already returned
-    /// to the calm reference is scored normally, so the shadow self-limits to genuine cardiac
-    /// recovery. Deliberately ONE hour deep (keyed on the directly-active hour, not chained through
-    /// prior shadows) so a genuinely tense afternoon that happens to follow a workout is not masked
-    /// away. Range ≥ 0.
+    /// Post-exercise shadow: HR stays elevated for a while AFTER exertion ends, so a bucket that
+    /// falls within `postActivityShadowWindowBuckets` of a directly-ambulatory bucket is ALSO masked
+    /// WHILE its mean HR is still above the calm reference by this margin (bpm). A bucket whose HR has
+    /// already returned to the calm reference is scored normally, so the shadow self-limits to genuine
+    /// cardiac recovery — it does not chain indefinitely just because the window is wide. Range ≥ 0.
     public static let postActivityShadowBPM: Double = 8.0
+
+    /// How many PRECEDING `bucketSeconds` buckets the post-exercise shadow looks back through for a
+    /// directly-ambulatory one. FORK CHANGE: when a "bucket" was a full hour, looking back exactly ONE
+    /// bucket already meant "the hour right after a workout" — a real ~1-hour post-exercise window.
+    /// Now that `bucketSeconds` is 5 minutes (see that constant's doc), looking back only one bucket
+    /// would mean just 5 minutes, far too short to represent genuine post-exercise HR elevation (which
+    /// can run 30–60+ min for a hard effort) — so this widens the lookback to 12 buckets (12 x 5 min =
+    /// 60 min) to preserve the ORIGINAL real-world duration the shadow was meant to cover, the same
+    /// "keep the real-world meaning, rescale the count" treatment `sustainedWindows` got. Still
+    /// self-limiting via `postActivityShadowBPM`'s own margin check — widening the lookback only means
+    /// more buckets are ELIGIBLE to be shadowed, not that they automatically are.
+    public static let postActivityShadowWindowBuckets: Int = 12
 
     /// The sigma an ACTIVITY-flagged (or post-activity shadow) hour's HR term divides by, bpm.
     /// Deliberately NOT `sdHR` (the spread ACROSS THE DAY'S OWN CALM HOURS, which is naturally tiny —
@@ -256,7 +283,7 @@ public enum DaytimeStress {
     public struct Result: Equatable, Sendable {
         /// Waking-hour timeline, earliest → latest. Hours with no signal carry `level == nil`.
         public let hours: [HourPoint]
-        /// True when the most recent `sustainedHours` SCORED hours all sit in the HIGH band.
+        /// True when the most recent `sustainedWindows` SCORED windows all sit in the HIGH band.
         public let sustainedHigh: Bool
         /// Count of trailing high hours backing `sustainedHigh` (0 when not sustained).
         public let sustainedRun: Int
@@ -336,6 +363,33 @@ public enum DaytimeStress {
         guard let m, xs.count > 1 else { return 0 }
         let v = xs.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(xs.count)
         return v.squareRoot()
+    }
+
+    /// FORK ADDITION: how far a single HR sample may sit from its OWN bucket's median before
+    /// `cleanedMeanHR` drops it as a sensor glitch (strap slip, motion artifact landing one bad
+    /// reading among real ones), bpm.
+    static let hrOutlierDeviationBPM: Double = 30.0
+
+    /// Per-bucket mean HR with a single-pass outlier reject against the bucket's OWN median —
+    /// mirrors `HRVAnalyzer`'s validated Malik-style approach (deviation from a local reference) but
+    /// against the whole bucket's median rather than a sliding window: unlike RR intervals, bpm
+    /// samples carry no meaningful beat-to-beat ORDER to center a local window on, so the bucket's own
+    /// median IS the local reference. MOTIVATED by the bucket-width change in this file: an hourly
+    /// bucket averaged 60+ HR samples, where one glitch barely moved the mean; a 5-minute bucket with
+    /// a WHOOP 5/MG's sparse ~30 s cadence may carry as few as `minHourHRSamples` (5) — on that few
+    /// samples, ONE bad reading can swing the mean by several bpm, exactly the kind of noise this
+    /// file's z-score terms are sensitive to. Falls back to the plain mean when there are too few
+    /// samples to trust a median (< 3) or when every sample would be rejected (never discards the
+    /// whole reading over one disagreement) — this can only ever DROP samples toward what
+    /// `minHourHRSamples`'s existing gate already requires, never invent one. Not independently
+    /// validated against a ground-truth corpus; a reasoned extrapolation of the same cleaning
+    /// principle already validated for RR, not a new physiological estimate.
+    static func cleanedMeanHR(_ bpm: [Double]) -> Double? {
+        guard !bpm.isEmpty else { return nil }
+        guard bpm.count >= 3 else { return mean(bpm) }
+        let med = quantile(bpm.sorted(), 0.5)
+        let kept = bpm.filter { abs($0 - med) <= hrOutlierDeviationBPM }
+        return mean(kept.isEmpty ? bpm : kept)
     }
 
     /// Combined autonomic z-score. HR-up and HRV-down both push it positive — the SAME
@@ -514,7 +568,7 @@ public enum DaytimeStress {
             out.reserveCapacity(ordered.count)
             for b in ordered {
                 let hrs = hrGrid[b] ?? []
-                let mHR = hrs.count >= minHourHRSamples ? mean(hrs) : nil
+                let mHR = hrs.count >= minHourHRSamples ? cleanedMeanHR(hrs) : nil
                 let rrRes = HRVAnalyzer.analyze(rawRR: rrGrid[b] ?? [])
                 out.append(HourAgg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd, nHR: hrs.count))
             }
@@ -639,7 +693,7 @@ public enum DaytimeStress {
             points.reserveCapacity(gridAggs.count)
             for a in gridAggs {
             guard isWakingHour(a.bucket) else { continue }
-            let hourOfDay = floorDiv(a.bucket, bucketSeconds) % 24
+            let hourOfDayValue = hourOfDay(a.bucket)
             // The wall-clock bucket start (undo the local shift applied above).
             let wallStart = a.bucket - tzOffsetSeconds
             // Motion flag: an AMBULATORY hour — or the post-exercise shadow hour whose HR has not yet
@@ -651,7 +705,9 @@ public enum DaytimeStress {
             // self-limits to genuine cardiac recovery for the FLAG, even though it no longer blocks
             // scoring. Only meaningful when the hour actually HAD a reading — a no-HR hour is plain
             // `.noData`, not "masked".
-            let shadow = ambulatory(a.bucket - bucketSeconds)
+            let recentlyAmbulatory = (1...postActivityShadowWindowBuckets)
+                .contains { ambulatory(a.bucket - $0 * bucketSeconds) }
+            let shadow = recentlyAmbulatory
                 && a.meanHR != nil && refHR != nil && a.meanHR! > refHR! + postActivityShadowBPM
             let masked = a.meanHR != nil && (ambulatory(a.bucket) || shadow)
             // Sleep gate: still genuinely asleep despite the clock crossing 06:00 (see
@@ -673,7 +729,7 @@ public enum DaytimeStress {
                     : squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: sdHR,
                                       rmssd: a.rmssd, meanRMSSD: refRMSSD, sdRMSSD: sdRMSSD)))
                 : nil
-            points.append(HourPoint(hour: hourOfDay, startTs: wallStart,
+            points.append(HourPoint(hour: hourOfDayValue, startTs: wallStart,
                                     level: level, meanHR: a.meanHR, rmssd: a.rmssd,
                                     maskedForActivity: masked, maskedForSleep: sleepMasked))
             }
@@ -683,17 +739,30 @@ public enum DaytimeStress {
         let activityMaskedHours = points.reduce(0) { $0 + ($1.maskedForActivity ? 1 : 0) }
         let sleepMaskedHours = points.reduce(0) { $0 + ($1.maskedForSleep ? 1 : 0) }
 
-        // 4b) The half-step DISPLAY timeline: the same hour-long window re-read every
-        //     `timelineStepSeconds`, scored against the SAME references, and merged with the
-        //     on-the-hour points. Every hourly point survives untouched; only the straddling
-        //     midpoints are new, so the curve still passes through exactly the values scored above.
-        //     Nothing that counts hours reads this — see `Result.timeline`.
+        // 4b) The sliding DISPLAY timeline: the same `bucketSeconds`-wide window re-read at EVERY
+        //     `timelineStepSeconds` phase inside it (not just one straddling midpoint), scored against
+        //     the SAME references, and merged with the on-the-grid points. FORK CHANGE: when
+        //     `timelineStepSeconds` was exactly half of `bucketSeconds` (1800/3600), a single extra
+        //     phase WAS the whole story — there is only one midpoint between two half-widths. Now that
+        //     `timelineStepSeconds` (60) is a fifth of `bucketSeconds` (300), one extra phase would
+        //     cover only 2 of the 5 one-minute slots in each bucket — a "1-minute display" that was
+        //     still 5 minutes choppy most of the time. This loops every phase from
+        //     `timelineStepSeconds` up to (not including) `bucketSeconds`, so with the current
+        //     constants that is 60, 120, 180, 240 — four extra grids, landing a scored point on every
+        //     minute, not just one offset copy. Every on-grid point survives untouched; only the
+        //     straddling points are new, so the curve still passes through exactly the values scored
+        //     above. Nothing that counts hours reads this — see `Result.timeline`.
         let timeline: [HourPoint] = {
             guard includeTimeline,
                   timelineStepSeconds > 0, timelineStepSeconds < bucketSeconds else { return points }
-            let midAggs = aggregate(hrBuckets(timelineStepSeconds), rrBuckets(timelineStepSeconds))
-            return (points + scoreGrid(midAggs, activeFractions(timelineStepSeconds)))
-                .sorted { $0.startTs < $1.startTs }
+            var all = points
+            var phase = timelineStepSeconds
+            while phase < bucketSeconds {
+                let midAggs = aggregate(hrBuckets(phase), rrBuckets(phase))
+                all += scoreGrid(midAggs, activeFractions(phase))
+                phase += timelineStepSeconds
+            }
+            return all.sorted { $0.startTs < $1.startTs }
         }()
 
         let scored = points.compactMap { p -> (HourPoint, Double)? in p.level.map { (p, $0) } }
@@ -720,7 +789,7 @@ public enum DaytimeStress {
         for (_, lvl) in sustainedCandidates.reversed() {
             if lvl >= highBandFloor { run += 1 } else { break }
         }
-        let sustained = run >= sustainedHours
+        let sustained = run >= sustainedWindows
 
         let dayMean = mean(scored.map { $0.1 })
         let peak = scored.max { $0.1 < $1.1 }?.0
@@ -777,7 +846,7 @@ public enum DaytimeStress {
         struct Agg { let bucket: Int; let meanHR: Double?; let rmssd: Double? }
         let aggs: [Agg] = hrByBucket.keys.sorted().map { b in
             let hrs = hrByBucket[b] ?? []
-            let mHR = hrs.count >= minHourHRSamples ? mean(hrs) : nil
+            let mHR = hrs.count >= minHourHRSamples ? cleanedMeanHR(hrs) : nil
             let rrRes = HRVAnalyzer.analyze(rawRR: rrByBucket[b] ?? [])
             return Agg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd)
         }
@@ -791,13 +860,12 @@ public enum DaytimeStress {
         let sdRMSSD = std(rmssdVals, mean: mean(rmssdVals))
 
         return aggs.map { a in
-            let hourOfDay = floorDiv(a.bucket, bucketSeconds) % 24
             let wallStart = a.bucket - tzOffsetSeconds
             let level: Double? = a.meanHR != nil
                 ? squash(rawScore(hr: a.meanHR, meanHR: refHR, sdHR: sdHR,
                                   rmssd: a.rmssd, meanRMSSD: refRMSSD, sdRMSSD: sdRMSSD))
                 : nil
-            return HourPoint(hour: hourOfDay, startTs: wallStart, level: level,
+            return HourPoint(hour: hourOfDay(a.bucket), startTs: wallStart, level: level,
                              meanHR: a.meanHR, rmssd: a.rmssd)
         }
     }
@@ -811,13 +879,24 @@ public enum DaytimeStress {
         return (r != 0 && (r < 0) != (b < 0)) ? q - 1 : q
     }
 
+    /// The clock hour-of-day (0–23) a local-shifted bucket-start timestamp falls in. ALWAYS divides
+    /// by a literal 3600, never by `bucketSeconds`: the old `floorDiv(bucket, bucketSeconds) % 24`
+    /// only worked because bucket INDEX and HOUR happened to coincide when a bucket was exactly one
+    /// hour wide (24 buckets/day). Now that `bucketSeconds` is 300 (288 buckets/day), that same
+    /// expression wrapped every 24 buckets = 2 real hours — a real bug this change introduced and
+    /// caught here before shipping, not a pre-existing one. `bucketSeconds` divides evenly into 3600
+    /// (300 * 12 = 3600), so every bucket still falls inside exactly one clock hour.
+    static func hourOfDay(_ bucket: Int) -> Int {
+        floorDiv(bucket, 3_600) % 24
+    }
+
     /// Whether a local hour-bucket start falls inside the waking window the timeline scores — the
     /// full day (see `wakingStartHour`/`wakingEndHour`'s own doc comment for why this is no longer a
     /// 06:00–22:00 cutoff). The single source of truth for "waking" — used both to build the calm
     /// reference and to pick the hours to score, so the two can never drift apart.
     static func isWakingHour(_ bucket: Int) -> Bool {
-        let hourOfDay = floorDiv(bucket, bucketSeconds) % 24
-        return hourOfDay >= wakingStartHour && hourOfDay < wakingEndHour
+        let hour = hourOfDay(bucket)
+        return hour >= wakingStartHour && hour < wakingEndHour
     }
 
     /// The day's "calm" reference for a signal: the quartile toward the calm end (lower

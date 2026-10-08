@@ -65,8 +65,7 @@ public extension DaytimeStress {
     /// widening only ever means "score a few more real hours", this would be "pool a DIFFERENT set of
     /// hours into an already-measured constant". Kept fixed on purpose.
     private static func isDaytimeAggregateHour(_ bucket: Int) -> Bool {
-        let hourOfDay = floorDiv(bucket, bucketSeconds) % 24
-        return hourOfDay >= 6 && hourOfDay < 22
+        hourOfDay(bucket) >= 6 && hourOfDay(bucket) < 22
     }
 
     /// One day's daytime aggregates, computed with the SCORER's own hourly bucketing so the folded value
@@ -103,7 +102,7 @@ public extension DaytimeStress {
         var wakingMeanHRs: [Double] = []
         var wakingRMSSDs: [Double] = []
         for (bucket, hrs) in hrByBucket where isDaytimeAggregateHour(bucket) {
-            if hrs.count >= minHourHRSamples, let m = mean(hrs) { wakingMeanHRs.append(m) }
+            if hrs.count >= minHourHRSamples, let m = cleanedMeanHR(hrs) { wakingMeanHRs.append(m) }
             if let rmssd = HRVAnalyzer.analyze(rawRR: rrByBucket[bucket] ?? []).rmssd {
                 wakingRMSSDs.append(rmssd)
             }
