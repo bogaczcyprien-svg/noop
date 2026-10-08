@@ -33,13 +33,22 @@
         }
       },
       "version": "12.0.0",
-      "buildVersion": "444",
-      "versionDate": "2026-10-07",
-      "versionDescription": "intervals.icu push now includes your Charge (recovery) score itself, not just raw HRV/resting-HR -- new \"Charge (recup)\" field, on by default alongside Sleep.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork9/NOOP-v12.0.0-fork9-ios.ipa",
-      "size": 22458733,
+      "buildVersion": "445",
+      "versionDate": "2026-10-08",
+      "versionDescription": "Stress is now scored on 5-minute windows and updates every minute (sliding window), like WHOOP, instead of once an hour. Fixed the Stress screen's calm/moderate/high duration display, which was counting 5-minute blocks as whole hours.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork10/NOOP-v12.0.0-fork10-ios.ipa",
+      "size": 22463016,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.0.0",
+          "buildVersion": "445",
+          "date": "2026-10-08",
+          "localizedDescription": "Stress is now scored on 5-minute windows and updates every minute (sliding window), like WHOOP, instead of once an hour. Fixed the Stress screen's calm/moderate/high duration display, which was counting 5-minute blocks as whole hours.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork10/NOOP-v12.0.0-fork10-ios.ipa",
+          "size": 22463016,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "12.0.0",
           "buildVersion": "444",
