@@ -55,6 +55,20 @@ public extension DaytimeStress {
         }
     }
 
+    /// Fixed 06:00–22:00 clock window this aggregate pools "daytime" HR/RMSSD from — DELIBERATELY NOT
+    /// `isWakingHour` (which now spans the full day, see that constant's doc comment for why: the LIVE
+    /// per-hour chart was widened at the user's request to match WHOOP's near-continuous display). This
+    /// aggregate is a different concern: it is the VALIDATED (26-day Oura-reference correlation) pooled
+    /// "calm awake HR floor" input `baselineRelativeHighMarginBPM` was measured against, using a
+    /// 06:00–22:00 definition of daytime. Widening it here would silently change what the validated
+    /// figure actually means, with no new validation behind the change — unlike the live chart, where
+    /// widening only ever means "score a few more real hours", this would be "pool a DIFFERENT set of
+    /// hours into an already-measured constant". Kept fixed on purpose.
+    private static func isDaytimeAggregateHour(_ bucket: Int) -> Bool {
+        let hourOfDay = floorDiv(bucket, bucketSeconds) % 24
+        return hourOfDay >= 6 && hourOfDay < 22
+    }
+
     /// One day's daytime aggregates, computed with the SCORER's own hourly bucketing so the folded value
     /// matches what `.baselineRelative` later references:
     ///   - `hr`: the `daytimeHRAggregatePercentile` (P10) of the day's WAKING-hour mean HRs, where each
@@ -64,7 +78,8 @@ public extension DaytimeStress {
     ///     through the same `HRVAnalyzer.analyze(rawRR:)` cleaner the scorer uses (so ectopic beats can't
     ///     fabricate variability); `nil` when no waking hour had enough clean R-R (e.g. an HR-only day).
     /// Either field is `nil` independently. Bucketing keys off the HR buckets (like the scorer), so an
-    /// hour with R-R but no HR contributes neither.
+    /// hour with R-R but no HR contributes neither. Uses `isDaytimeAggregateHour`, NOT `isWakingHour` —
+    /// see that function's own doc comment for why this one stays a fixed 06:00–22:00 window.
     static func dayDaytimeAggregate(hr: [HRSample], rr: [RRInterval],
                                     tzOffsetSeconds: Int) -> (hr: Double?, rmssd: Double?) {
         guard !hr.isEmpty else { return (nil, nil) }
@@ -87,7 +102,7 @@ public extension DaytimeStress {
         // filter. Keyed off HR buckets so an R-R-only hour is ignored exactly as the scorer ignores it.
         var wakingMeanHRs: [Double] = []
         var wakingRMSSDs: [Double] = []
-        for (bucket, hrs) in hrByBucket where isWakingHour(bucket) {
+        for (bucket, hrs) in hrByBucket where isDaytimeAggregateHour(bucket) {
             if hrs.count >= minHourHRSamples, let m = mean(hrs) { wakingMeanHRs.append(m) }
             if let rmssd = HRVAnalyzer.analyze(rawRR: rrByBucket[bucket] ?? []).rmssd {
                 wakingRMSSDs.append(rmssd)

@@ -185,13 +185,20 @@ final class DaytimeStressTests: XCTestCase {
         // anchor far below every waking hour, inflating an ordinary calm day into sustained
         // high stress (tripping the passive Breathe nudge). So adding calm sleep hours to the
         // input must NOT change the waking timeline.
+        //
+        // FORK CHANGE: `isWakingHour` now spans the full day (see `wakingStartHour`'s doc
+        // comment — #WHOOP-parity, "je veux vraiment le stress comme WHOOP"), so hours 0-5 are
+        // no longer excluded by clock alone. The fixture must mark them as sleep EXPLICITLY via
+        // `sleepSpans`, the real mechanism `overlapsSleep` reads, instead of relying on the old
+        // clock cutoff as an incidental stand-in for "asleep".
         let waking: [HRSample] = zip(6...17, [62, 64, 63, 65, 64, 63, 62, 64, 66, 63, 64, 65])
             .flatMap { hourHR($0.0, bpm: $0.1) }
         let sleep: [HRSample] = zip(0...5, [50, 51, 52, 51, 50, 53])
             .flatMap { hourHR($0.0, bpm: $0.1) }
+        let sleepSpans: [(start: Int, end: Int)] = [(start: 0, end: 6 * 3_600)]
 
         let wakingOnly = DaytimeStress.analyze(hr: waking, rr: [])
-        let withSleep = DaytimeStress.analyze(hr: sleep + waking, rr: [])
+        let withSleep = DaytimeStress.analyze(hr: sleep + waking, rr: [], sleepSpans: sleepSpans)
 
         XCTAssertEqual(withSleep.sustainedHigh, wakingOnly.sustainedHigh,
             "sleep hours sharing the window must not change the sustained-high verdict")
