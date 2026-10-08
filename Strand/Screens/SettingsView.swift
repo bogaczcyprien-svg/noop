@@ -57,6 +57,11 @@ struct SettingsView: View {
     @AppStorage(PuffinExperiment.spo2CandidateDisplayKey) private var spo2CandidateDisplayEnabled = false
     @AppStorage(AppModel.ouraAllDayLiveHRKey) private var ouraAllDayLiveHREnabled = false   // item 27
 
+    /// #463 — fork default ON (was OFF upstream). Literal `true` here so the Toggle's OWN initial read
+    /// (before any explicit write) agrees with `PuffinExperiment.stressPersonalBaselineEnabled`'s
+    /// unset-key fallback — two readouts of "what does this default to" must not disagree.
+    @AppStorage(PuffinExperiment.stressPersonalBaselineKey) private var stressPersonalBaselineEnabled = true
+
     /// #1545 opt-in: score Effort with Banister's exponential TRIMP instead of Edwards' heart-rate zones.
     /// Default OFF — it re-scores the whole window against a different recipe. See
     /// [PuffinExperiment.banisterEffortKey].
@@ -1845,6 +1850,7 @@ struct SettingsView: View {
         if showFiveMGControls || model.repo.activeDeviceIsOura { spo2CandidateCard }
         if model.repo.activeDeviceIsOura { ouraAllDayLiveHRCard }   // item 27
         sleepStagingCard
+        stressPersonalBaselineCard
         rawSensorDiagnosticsCard
     }
 
@@ -1971,6 +1977,31 @@ struct SettingsView: View {
                     Task { await model.intelligence.analyzeRecent(); await model.repo.refresh() }
                 }
                 Text("Your WHOOP 5.0/MG sends a strap-computed SpO₂ percentage (the @82 candidate byte) every second — an 8-night independent validation tracked it at corr +0.99 against the WHOOP app, but two nights on the original test device moved the OPPOSITE direction, so device/firmware variance is unresolved. An Oura ring's own SpO₂ reading runs high on the wire (over 100% on a fifth to a half of samples on a clean night); this instead surfaces the ring's mean with each sample capped at 100% first, which has matched the Oura app's own displayed value on every full night checked against it so far, though only a few nights. Turning this on surfaces whichever applies to your device as \"strap estimate (unverified)\" in the Blood Oxygen tile when no calibrated import exists. It never feeds recovery or illness scoring. WHOOP 4.0 has no @82 stream, so this does nothing there.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Personal daytime-stress baseline (#463) — fork-ON by default (see
+    /// `PuffinExperiment.stressPersonalBaselineEnabled`'s own doc comment for why), exposed here so it's
+    /// a real, visible, reversible choice rather than a silent default nobody can see or turn off.
+    private var stressPersonalBaselineCard: some View {
+        SettingsSection(
+            icon: "waveform.path.ecg.rectangle",
+            title: "Experimental · Personal stress baseline",
+            blurb: "Compares each hour's Stress reading to your rolling personal history instead of just today's own calm hours."
+        ) {
+            VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
+                Toggle(isOn: $stressPersonalBaselineEnabled) {
+                    Text("Stress: personal rolling baseline")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+                Text("On (this fork's default): each hour is compared to your OWN recent history (like a WHOOP/Oura-style personal baseline), so the reference is already meaningful from the start of the day instead of needing to wait for enough calm hours to accumulate today. Off: compares each hour only to today's own calm hours (NOOP's original default, and upstream's only option). The personal-baseline margin is validated against Oura's own stress signal (r≈0.6, HR-only) but so far on a single subject — it's a reasoned choice, not a proven-universal one.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -75,16 +75,23 @@ enum PuffinExperiment {
 
     static var spo2CandidateDisplayEnabled: Bool { UserDefaults.standard.bool(forKey: spo2CandidateDisplayKey) }
 
-    /// Opt-in "Personal daytime-stress baseline" (#463): score TODAY's intraday stress timeline against a
+    /// "Personal daytime-stress baseline" (#463): score TODAY's intraday stress timeline against a
     /// PERSONAL cross-day rolling baseline (Oura-style `.baselineRelative`) instead of the day's own calm
-    /// hours (`.dayRelative`, the default). Default OFF — the validated r≈0.6 HR-only margin is so far
-    /// SINGLE-SUBJECT (see `DaytimeStress.baselineRelativeHighMarginBPM`), so this stays a chooseable lens,
-    /// not a silent default, until it is validated on more subjects. When OFF, `StressView` /
-    /// `StressScreen` pass no mode and the read is byte-identical to before. Mirrors the Android
-    /// `NoopPrefs.KEY_STRESS_PERSONAL_BASELINE`.
+    /// hours (`.dayRelative`). The validated r≈0.6 HR-only margin (see
+    /// `DaytimeStress.baselineRelativeHighMarginBPM`) is so far SINGLE-SUBJECT, not validated on more
+    /// subjects — upstream ships this OFF by default for exactly that reason. FORK DEFAULT: ON — at the
+    /// user's own explicit request, reasoning that "today's own calm hours" as the reference is thinner
+    /// early in the day (before enough calm hours accumulate) than a stable personal history would be,
+    /// closer to how a real baseline (WHOOP included) behaves. Still a real toggle, not forced: explicitly
+    /// turning it off in Settings (writing the key `false`) is honoured like any other preference — this
+    /// only changes what an UNSET key resolves to. Not upstreamed; this default stays fork-only. Mirrors
+    /// the Android `NoopPrefs.KEY_STRESS_PERSONAL_BASELINE`, whose own default is unchanged (still off).
     static let stressPersonalBaselineKey = "noopStressPersonalBaseline"
 
-    static var stressPersonalBaselineEnabled: Bool { UserDefaults.standard.bool(forKey: stressPersonalBaselineKey) }
+    static var stressPersonalBaselineEnabled: Bool {
+        UserDefaults.standard.object(forKey: stressPersonalBaselineKey) == nil
+            ? true : UserDefaults.standard.bool(forKey: stressPersonalBaselineKey)
+    }
 
     /// Opt-in "Banister Effort" (#1545): score Effort with Banister's EXPONENTIAL TRIMP instead of the
     /// default Edwards 5-zone summation.
