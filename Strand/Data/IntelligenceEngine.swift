@@ -564,6 +564,24 @@ final class IntelligenceEngine: ObservableObject {
         Set([computedId] + registeredIds).sorted()
     }
 
+    /// FORK-ONLY, not ported to Android. True for a free-text `WorkoutRow.sport` (Strava/intervals.icu
+    /// activity-type taxonomy, e.g. "Ride", "VirtualRide", "Swim") whose motion is NOT real walking —
+    /// used to exclude an imported session's window from the on-device step estimate (see
+    /// `excludedStepWindows` at its one call site in `analyzeRecent`). Matched case-insensitively so
+    /// both intervals.icu's raw `type` and a manually typed sport name work. Deliberately narrow: only
+    /// sports whose wrist motion plausibly fires the raw @57 counter are listed, so a real walk/run/hike
+    /// import never loses its steps.
+    nonisolated static func isNonAmbulatorySport(_ sport: String) -> Bool {
+        let s = sport.lowercased().trimmingCharacters(in: .whitespaces)
+        return Self.nonAmbulatorySports.contains(s)
+    }
+    private static let nonAmbulatorySports: Set<String> = [
+        "ride", "virtualride", "gravelride", "mountainbikeride", "mountain bike ride",
+        "ebikeride", "e-bike ride", "cycling", "cycle", "bike", "biking", "spinning",
+        "rowing", "row", "swim", "swimming", "openwaterswim", "open water swim",
+        "kayaking", "canoeing", "stand up paddling", "paddling",
+    ]
+
     /// The Saturday on-or-before a "yyyy-MM-dd" local-day string , the weekly key Fitness Age writes to.
     static func saturdayKey(onOrBefore dayStr: String) -> String {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
@@ -1418,6 +1436,19 @@ final class IntelligenceEngine: ObservableObject {
                     dayGrav = (try? await store.gravitySamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
                 }
 
+                // FORK-ONLY, not ported to Android. Imported intervals.icu sessions over this calendar
+                // day whose sport is non-ambulatory (cycling, rowing, swimming, …): their window is
+                // excluded from the on-device step estimate below, so pedaling/stroking motion ticked on
+                // the strap's raw @57 counter during a real ride never gets counted as walking (see
+                // `AnalyticsEngine.excludedStepWindows`). "intervals-icu" matches
+                // `IntervalsICUImporter.deviceId` (StrandiOS, a separate target this file can't import).
+                // Scoped to this one day's window, so the read stays cheap inside the per-day loop.
+                let intervalsRides = (try? await store.workouts(deviceId: "intervals-icu", from: dayMid,
+                                                                to: dayEnd, limit: 50)) ?? []
+                let excludedStepWindows: [(start: Int, end: Int)] = intervalsRides
+                    .filter { IntelligenceEngine.isNonAmbulatorySport($0.sport) }
+                    .map { (start: $0.startTs, end: $0.endTs) }
+
                 // CONSUME (#531 / #175): the strap's OWN band sleep_state for the night window as timestamped
                 // (ts, state) samples, so the H7 morning-stillness guard can confirm a borderline re-onset
                 // against the strap's OWN scored band, AND analyzeDay can grid it per session for persistence.
@@ -1524,6 +1555,7 @@ final class IntelligenceEngine: ObservableObject {
                                                      vendorResp: vendorResp, gravity: grav,
                                                      steps: steps, dayHr: dayHr, daySteps: daySteps,
                                                      dayGravity: dayGrav,
+                                                     excludedStepWindows: excludedStepWindows,   // FORK-ONLY
                                                      skinTemp: skin,
                                                      skinTempFamily: skinFamily,   // #938
                                                      skinTempAnchorRaw: skinAnchorRaw,   // #938 second capture

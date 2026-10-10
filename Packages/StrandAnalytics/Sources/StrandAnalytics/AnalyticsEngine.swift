@@ -355,6 +355,16 @@ public enum AnalyticsEngine {
                                   dayHr: [HRSample]? = nil,
                                   daySteps: [StepSample]? = nil,
                                   dayGravity: [GravitySample]? = nil,
+                                  // FORK-ONLY, not ported to Android. `[start, end)` unix-second windows
+                                  // (e.g. an imported cycling/rowing/swimming session) over which the
+                                  // step_motion_counter@57 estimate is suppressed. The counter is raw
+                                  // accelerometer motion, not a real gait classifier — on a strap with no
+                                  // per-sample activityClass (WHOOP 4.0, or any window StepsCounter falls
+                                  // back to "legacy unclassed" on), pedaling/handlebar vibration during a
+                                  // real bike ride ticks the SAME counter walking does and gets counted as
+                                  // steps (observed: ~12k shown for a day with two rides and ~2k actual
+                                  // walking). Default empty keeps every existing caller/test byte-identical.
+                                  excludedStepWindows: [(start: Int, end: Int)] = [],
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal
                                   // baseline from these means across nights and re-derives
@@ -997,7 +1007,11 @@ public enum AnalyticsEngine {
             // day's read window may include adjacent-day samples, so filter to the LOCAL-day key first
             // (#277); the wrap-aware tick math itself lives in the shared StepsCounter kernel so the daily
             // and per-workout (#398) totals can never disagree.
+            // FORK-ONLY: drop samples inside a caller-supplied non-ambulatory window (see
+            // `excludedStepWindows`) before handing the stream to the counter kernel, so a bike
+            // ride's motion ticks never enter the wrap-aware delta sum in the first place.
             let inDay = (daySteps ?? steps).filter { tsInDay($0.ts) }
+                .filter { sample in !excludedStepWindows.contains { sample.ts >= $0.start && sample.ts < $0.end } }
             guard let ticks = StepsCounter.stepsInWindow(inDay) else { return nil }
             // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
             // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so

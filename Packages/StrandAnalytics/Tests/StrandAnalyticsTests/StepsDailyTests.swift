@@ -141,4 +141,43 @@ final class StepsDailyTests: XCTestCase {
         let s = [step(0, 100), step(60, 150), step(120, 220)]
         XCTAssertEqual(stepsFor(s, ticksPerStep: 0.1), 240)
     }
+
+    // MARK: - excludedStepWindows (FORK-ONLY, not ported to Android)
+
+    func testExcludedWindowDropsTicksEntirelyInsideIt() {
+        // All three samples (and so both deltas) fall inside [0, 180) => excluded => nil, not 120.
+        let s = [step(0, 100), step(60, 150), step(120, 220)]
+        let total = AnalyticsEngine.analyzeDay(day: dayUtc, steps: s, profile: profile,
+                                               excludedStepWindows: [(start: noonUtc, end: noonUtc + 180)]).daily.steps
+        XCTAssertNil(total)
+    }
+
+    func testExcludedWindowLeavesTicksOutsideItUntouched() {
+        // A ride window that covers only the LAST sample: the first delta (100->150) survives, the
+        // second (150->220, landing at ts=120) is dropped by the exclusion.
+        let s = [step(0, 100), step(60, 150), step(120, 220)]
+        let total = AnalyticsEngine.analyzeDay(
+            day: dayUtc, steps: s, profile: profile,
+            excludedStepWindows: [(start: noonUtc + 90, end: noonUtc + 180)]).daily.steps
+        XCTAssertEqual(total, 50)
+    }
+
+    func testExcludedWindowEndIsExclusive() {
+        // A sample exactly AT the window's end boundary is NOT excluded (half-open [start, end)),
+        // matching the convention a workout's own [startTs, endTs) uses elsewhere in the engine.
+        let s = [step(0, 100), step(60, 150), step(120, 220)]
+        let total = AnalyticsEngine.analyzeDay(
+            day: dayUtc, steps: s, profile: profile,
+            excludedStepWindows: [(start: noonUtc, end: noonUtc + 60)]).daily.steps
+        // Only the first sample (ts=0) is excluded; the 150->220 delta at ts=120 still counts.
+        XCTAssertEqual(total, 70)
+    }
+
+    func testNoExcludedWindowsIsByteIdenticalToDefault() {
+        // Empty (the default) must leave every existing caller's total untouched.
+        let s = [step(0, 100), step(60, 150), step(120, 220)]
+        let total = AnalyticsEngine.analyzeDay(day: dayUtc, steps: s, profile: profile,
+                                               excludedStepWindows: []).daily.steps
+        XCTAssertEqual(total, stepsFor(s))
+    }
 }
