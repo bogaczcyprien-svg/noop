@@ -139315,10 +139315,40 @@
             "value": "Fréquence cardiaque moyenne nocturne"
           }
         },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frequenza cardiaca media notturna"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Średnie tętno nocne"
+          }
+        },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
             "value": "Frequência cardíaca média noturna"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Средняя частота сердечных сокращений ночью"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "夜间平均心率"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "夜間平均心率"
           }
         }
       }
