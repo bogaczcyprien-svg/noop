@@ -122,11 +122,22 @@ final class RecoverySaturationGuardTests: XCTestCase {
     func testSaturationNightStaysRedExactlyLikeBeforeTheGuard() {
         // The would-be easing on this fixture is large enough to cross red -> yellow. Instrument-first
         // means the band must NOT move: the night stays red until the easing is validated and enabled.
+        //
+        // Fork: hrv re-pinned from 41 to 25 (rhr/baselines unchanged). Under wHRV=0.55 (upstream) a
+        // z=-1.44 HRV term alone pulled this fixture red; under this fork's wHRV=0.30 the same z only
+        // scores ~46% (yellow) — not a guard regression, just HRV counting for less, exactly as the
+        // user who requested the re-weight intended. A more extreme HRV (z=-3.99) restores a
+        // comfortable red margin (~6%) while still clearing the guard's satEnterZ on both arms, so the
+        // test still proves what it is named for: detection alone must never move the band.
         let hrvB = baseline(mean: 50, sigma: 6.265)
         let rhrB = baseline(mean: 55, sigma: 5.0)
         let saturation = RecoveryScorer.recovery(
-            hrv: 41, rhr: 48, resp: nil,
+            hrv: 25, rhr: 48, resp: nil,
             hrvBaseline: hrvB, rhrBaseline: rhrB, respBaseline: nil, sleepPerf: nil)!
+        let sat = RecoveryScorer.parasympatheticSaturation(
+            hrvZ: RecoveryScorer.zScore(25, mean: hrvB.baseline, spread: hrvB.spread),
+            rhrZ: RecoveryScorer.zScore(rhrB.baseline, mean: 48, spread: rhrB.spread))
+        XCTAssertTrue(sat.active, "fixture must still fire the guard for this test to mean anything")
         XCTAssertLessThan(saturation, RecoveryScorer.bandRedMax,
                           "detection must not lift the night out of red while the easing is off")
     }

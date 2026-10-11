@@ -198,17 +198,22 @@ final class RecoveryScorerTraceTests: XCTestCase {
             "charge baseline hrv mean=50.0 spread=4.79 nValid=14 status=trusted",
             "charge baseline rhr mean=55.0 spread=2.39 nValid=14 status=trusted",
             "charge baseline resp mean=16.0 spread=1.6 nValid=14 status=trusted",
-            "charge term hrv z=2.0 w=0.55 (higher HRV is better)",
+            // Fork: re-pinned for wHRV=0.30 (was w=0.55; the freed weight funds wNightMeanHR, unused
+            // by this fixture since it supplies no nightMeanHR/nightMeanHRBaseline, so the term simply
+            // never enters and the other four weights are unchanged). This fork does not carry the
+            // change to the Android twin, so "byte-identical across platforms" no longer holds for
+            // this fixture on that side — same already-accepted divergence as logisticK below.
+            "charge term hrv z=2.0 w=0.3 (higher HRV is better)",
             "charge term rhr z=1.33 w=0.2 (lower RHR is better)",
             "charge term resp z=0.5 w=0.05 (lower resp is better)",
             "charge term sleepPerf z=0.42 w=0.15 (rest=0.9 center=0.85)",
             "charge term skinTempDev z=-0.0 w=0.05 (dev=0.0C penalty=-|dev|/1.0)",
             "charge nilTerm dropped=[] (each dropped term renormalizes the remaining weights)",
-            "charge renorm totalWeight=1.0 compositeZ=1.45 (z = sum(z*w)/sum(w))",
+            "charge renorm totalWeight=0.75 compositeZ=1.27 (z = sum(z*w)/sum(w))",
             // Fork: re-pinned for logisticK=1.7 (was "score=96.47... k=2.0", "score=93.38... k=1.6"
             // at the upstream value); this fork does not carry the change to the Android twin, so
             // "byte-identical across platforms" no longer holds for this fixture on that side.
-            "charge score=94.33 band=green (logistic k=1.7 z0=-0.2)",
+            "charge score=92.43 band=green (logistic k=1.7 z0=-0.2)",
         ])
     }
 }
