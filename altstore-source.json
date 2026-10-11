@@ -32,14 +32,23 @@
           "NSMotionUsageDescription": "NOOP reads your iPhone's step count for a walking or running workout to show steps in the activity summary. It stays on your device. Nothing leaves it."
         }
       },
-      "version": "12.0.0",
-      "buildVersion": "445",
-      "versionDate": "2026-10-08",
-      "versionDescription": "Stress is now scored on 5-minute windows and updates every minute (sliding window), like WHOOP, instead of once an hour. Fixed the Stress screen's calm/moderate/high duration display, which was counting 5-minute blocks as whole hours.",
-      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.0.0-fork10/NOOP-v12.0.0-fork10-ios.ipa",
-      "size": 22463016,
+      "version": "12.1.0",
+      "buildVersion": "446",
+      "versionDate": "2026-10-11",
+      "versionDescription": "NOOP 12.1.0. See the release notes for what changed.",
+      "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.1.0/NOOP-ios-unsigned-v12.1.0.ipa",
+      "size": 22559088,
       "minOSVersion": "17.0",
       "versions": [
+        {
+          "version": "12.1.0",
+          "buildVersion": "446",
+          "date": "2026-10-11",
+          "localizedDescription": "NOOP 12.1.0. See the release notes for what changed.",
+          "downloadURL": "https://github.com/bogaczcyprien-svg/noop/releases/download/v12.1.0/NOOP-ios-unsigned-v12.1.0.ipa",
+          "size": 22559088,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "12.0.0",
           "buildVersion": "445",
