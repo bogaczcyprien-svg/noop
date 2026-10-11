@@ -139359,7 +139359,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Today's macros" } },
         "es": { "stringUnit": { "state": "translated", "value": "Tus macros de hoy" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Tes macros aujourd'hui" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os teus macros hoje" } }
+        "it": { "stringUnit": { "state": "translated", "value": "I tuoi macro di oggi" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Twoje dzisiejsze makroskładniki" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os teus macros hoje" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Твои макросы сегодня" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "今日宏量营养素" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "今日巨量營養素" } }
       }
     },
     "Calorie balance": {
@@ -139368,7 +139373,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Calorie balance" } },
         "es": { "stringUnit": { "state": "translated", "value": "Balance calórico" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Bilan calorique" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Balanço calórico" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Bilancio calorico" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Bilans kaloryczny" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Balanço calórico" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Баланс калорий" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "卡路里平衡" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "卡路里平衡" } }
       }
     },
     "Add meal": {
@@ -139377,7 +139387,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Add meal" } },
         "es": { "stringUnit": { "state": "translated", "value": "Añadir comida" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Ajouter un repas" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Adicionar refeição" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Aggiungi pasto" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Dodaj posiłek" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Adicionar refeição" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Добавить приём пищи" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "添加餐食" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "新增餐食" } }
       }
     },
     "Edit meal": {
@@ -139386,7 +139401,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Edit meal" } },
         "es": { "stringUnit": { "state": "translated", "value": "Editar comida" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Modifier le repas" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Editar refeição" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Modifica pasto" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Edytuj posiłek" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Editar refeição" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Изменить приём пищи" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "编辑餐食" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "編輯餐食" } }
       }
     },
     "Meal name (optional)": {
@@ -139395,7 +139415,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Meal name (optional)" } },
         "es": { "stringUnit": { "state": "translated", "value": "Nombre de la comida (opcional)" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Nom du repas (optionnel)" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Nome da refeição (opcional)" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Nome del pasto (opzionale)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nazwa posiłku (opcjonalnie)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Nome da refeição (opcional)" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Название приёма пищи (необязательно)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "餐食名称（可选）" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "餐食名稱（選填）" } }
       }
     },
     "Today's meals": {
@@ -139404,7 +139429,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Today's meals" } },
         "es": { "stringUnit": { "state": "translated", "value": "Comidas de hoy" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Repas d'aujourd'hui" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeições de hoje" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Pasti di oggi" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Dzisiejsze posiłki" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeições de hoje" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Приёмы пищи сегодня" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "今日餐食" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "今日餐食" } }
       }
     },
     "Tap a meal to edit it, or use the trash to delete.": {
@@ -139413,7 +139443,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Tap a meal to edit it, or use the trash to delete." } },
         "es": { "stringUnit": { "state": "translated", "value": "Toca una comida para editarla, o usa la papelera para eliminarla." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Touchez un repas pour le modifier, ou utilisez la corbeille pour le supprimer." } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Toca numa refeição para a editar, ou usa o caixote do lixo para a eliminar." } }
+        "it": { "stringUnit": { "state": "translated", "value": "Tocca un pasto per modificarlo, oppure usa il cestino per eliminarlo." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Dotknij posiłku, aby go edytować, lub użyj kosza, aby go usunąć." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Toca numa refeição para a editar, ou usa o caixote do lixo para a eliminar." } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Нажмите на приём пищи, чтобы изменить его, или используйте корзину для удаления." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "点按一餐可编辑，或使用垃圾桶图标删除。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "點按一餐可編輯，或使用垃圾桶圖示刪除。" } }
       }
     },
     "Meal": {
@@ -139422,7 +139457,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Meal" } },
         "es": { "stringUnit": { "state": "translated", "value": "Comida" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Repas" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeição" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Pasto" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Posiłek" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeição" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Приём пищи" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "餐食" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "餐食" } }
       }
     },
     "Protein (g)": {
@@ -139431,7 +139471,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Protein (g)" } },
         "es": { "stringUnit": { "state": "translated", "value": "Proteína (g)" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Protéines (g)" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Proteína (g)" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Proteine (g)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Białko (g)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Proteína (g)" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Белки (г)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "蛋白质（克）" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "蛋白質（克）" } }
       }
     },
     "Carbs (g)": {
@@ -139440,7 +139485,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Carbs (g)" } },
         "es": { "stringUnit": { "state": "translated", "value": "Carbohidratos (g)" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Glucides (g)" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Hidratos de carbono (g)" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Carboidrati (g)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Węglowodany (g)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Hidratos de carbono (g)" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Углеводы (г)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "碳水化合物（克）" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "碳水化合物（克）" } }
       }
     },
     "Fat (g)": {
@@ -139449,7 +139499,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Fat (g)" } },
         "es": { "stringUnit": { "state": "translated", "value": "Grasa (g)" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Lipides (g)" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Gordura (g)" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Grassi (g)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Tłuszcze (g)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Gordura (g)" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Жиры (г)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "脂肪（克）" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "脂肪（克）" } }
       }
     },
     "Targets are an approximate guide from your weight and today's effort — not medical or dietetic advice.": {
@@ -139458,7 +139513,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Targets are an approximate guide from your weight and today's effort — not medical or dietetic advice." } },
         "es": { "stringUnit": { "state": "translated", "value": "Los objetivos son una guía aproximada basada en tu peso y tu esfuerzo de hoy — no son un consejo médico ni dietético." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Les objectifs sont un repère approximatif basé sur ton poids et ton effort du jour — pas un avis médical ou diététique." } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os objetivos são uma orientação aproximada com base no teu peso e no esforço de hoje — não são um conselho médico ou dietético." } }
+        "it": { "stringUnit": { "state": "translated", "value": "Gli obiettivi sono una guida approssimativa basata sul tuo peso e sullo sforzo di oggi — non un consiglio medico o dietetico." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Cele to przybliżona wskazówka na podstawie Twojej wagi i dzisiejszego wysiłku — nie są poradą medyczną ani dietetyczną." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os objetivos são uma orientação aproximada com base no teu peso e no esforço de hoje — não são um conselho médico ou dietético." } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Цели — приблизительный ориентир на основе вашего веса и сегодняшней нагрузки, а не медицинская или диетическая рекомендация." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "目标是根据你的体重和今日训练负荷得出的大致指引——并非医疗或营养建议。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "目標是根據你的體重和今日訓練負荷得出的大致指引——並非醫療或營養建議。" } }
       }
     },
     "Today's macros, on %@ only.": {
@@ -139467,7 +139527,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Today's macros, on %@ only." } },
         "es": { "stringUnit": { "state": "translated", "value": "Tus macros de hoy, solo en %@." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Tes macros aujourd'hui, sur %@ uniquement." } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os teus macros hoje, apenas em %@." } }
+        "it": { "stringUnit": { "state": "translated", "value": "I tuoi macro di oggi, solo su %@." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Twoje dzisiejsze makroskładniki, tylko na %@." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os teus macros hoje, apenas em %@." } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Твои макросы сегодня, только на %@." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "今日宏量营养素，仅限 %@。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "今日巨量營養素，僅限 %@。" } }
       }
     },
     "Fuel Source": {
@@ -139476,7 +139541,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Fuel Source" } },
         "es": { "stringUnit": { "state": "translated", "value": "Fuente de energía" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Source d'énergie" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Fonte de energia" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Fonte di energia" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Źródło energii" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Fonte de energia" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Источник энергии" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "能量来源" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "能量來源" } }
       }
     },
     "Estimated from heart rate": {
@@ -139485,7 +139555,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Estimated from heart rate" } },
         "es": { "stringUnit": { "state": "translated", "value": "Estimado a partir de la frecuencia cardíaca" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Estimé à partir de la fréquence cardiaque" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Estimado a partir da frequência cardíaca" } }
+        "it": { "stringUnit": { "state": "translated", "value": "Stimato dalla frequenza cardiaca" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Szacowane na podstawie tętna" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Estimado a partir da frequência cardíaca" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Оценка по частоте сердечных сокращений" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "根据心率估算" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "根據心率估算" } }
       }
     },
     "Estimated from your heart rate during this session — approximate, not laboratory calorimetry.": {
@@ -139494,7 +139569,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "Estimated from your heart rate during this session — approximate, not laboratory calorimetry." } },
         "es": { "stringUnit": { "state": "translated", "value": "Estimado a partir de tu frecuencia cardíaca durante esta sesión — aproximado, no es calorimetría de laboratorio." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Estimé à partir de ta fréquence cardiaque pendant cette séance — approximatif, pas une calorimétrie de laboratoire." } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "Estimado a partir da tua frequência cardíaca durante esta sessão — aproximado, não é calorimetria laboratorial." } }
+        "it": { "stringUnit": { "state": "translated", "value": "Stimato dalla tua frequenza cardiaca durante questa sessione — approssimativo, non calorimetria da laboratorio." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Szacowane na podstawie tętna podczas tej sesji — przybliżone, nie jest to kalorymetria laboratoryjna." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Estimado a partir da tua frequência cardíaca durante esta sessão — aproximado, não é calorimetria laboratorial." } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Оценка по частоте сердечных сокращений во время этой тренировки — приблизительно, не лабораторная калориметрия." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "根据本次训练中的心率估算——仅为近似值，并非实验室热量测定。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "根據本次訓練中的心率估算——僅為近似值，並非實驗室熱量測定。" } }
       }
     },
     "+%lld kcal surplus": {
@@ -139503,7 +139583,12 @@
         "en": { "stringUnit": { "state": "translated", "value": "+%lld kcal surplus" } },
         "es": { "stringUnit": { "state": "translated", "value": "+%lld kcal de superávit" } },
         "fr": { "stringUnit": { "state": "translated", "value": "+%lld kcal d'excédent" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "+%lld kcal de excedente" } }
+        "it": { "stringUnit": { "state": "translated", "value": "+%lld kcal di surplus" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "+%lld kcal nadwyżki" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "+%lld kcal de excedente" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "+%lld ккал профицит" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "+%lld 千卡盈余" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "+%lld 大卡盈餘" } }
       }
     },
     "%lld kcal deficit": {
@@ -139512,7 +139597,166 @@
         "en": { "stringUnit": { "state": "translated", "value": "%lld kcal deficit" } },
         "es": { "stringUnit": { "state": "translated", "value": "%lld kcal de déficit" } },
         "fr": { "stringUnit": { "state": "translated", "value": "%lld kcal de déficit" } },
-        "pt-PT": { "stringUnit": { "state": "translated", "value": "%lld kcal de défice" } }
+        "it": { "stringUnit": { "state": "translated", "value": "%lld kcal di deficit" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%lld kcal deficytu" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%lld kcal de défice" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "%lld ккал дефицит" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%lld 千卡缺口" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 大卡赤字" } }
+      }
+    },
+    "Logged meals": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Protokollierte Mahlzeiten" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Logged meals" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comidas registradas" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Repas enregistrés" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Pasti registrati" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zarejestrowane posiłki" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeições registadas" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Записанные приёмы пищи" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已记录的餐食" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "已記錄的餐食" } }
+      }
+    },
+    "%lldg / %lldg": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "en": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "it": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lldg / %lldg" } }
+      }
+    },
+    "%@: %lld of %lld grams": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@: %lld von %lld Gramm" } },
+        "en": { "stringUnit": { "state": "translated", "value": "%@: %lld of %lld grams" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@: %lld de %lld gramos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ : %lld sur %lld grammes" } },
+        "it": { "stringUnit": { "state": "translated", "value": "%@: %lld di %lld grammi" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%@: %lld z %lld gramów" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%@: %lld de %lld gramas" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "%@: %lld из %lld г" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%@：%lld / %lld 克" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "%@：%lld / %lld 克" } }
+      }
+    },
+    "Eaten %lld kcal · Burned %lld kcal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Gegessen %lld kcal · Verbrannt %lld kcal" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Eaten %lld kcal · Burned %lld kcal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Consumido %lld kcal · Quemado %lld kcal" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Mangé %lld kcal · Brûlé %lld kcal" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Consumate %lld kcal · Bruciate %lld kcal" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zjedzone %lld kcal · Spalone %lld kcal" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Consumido %lld kcal · Queimado %lld kcal" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Съедено %lld ккал · Сожжено %lld ккал" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "摄入 %lld 千卡 · 消耗 %lld 千卡" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "攝取 %lld 大卡 · 消耗 %lld 大卡" } }
+      }
+    },
+    "Eaten %lld kcal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Gegessen %lld kcal" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Eaten %lld kcal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Consumido %lld kcal" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Mangé %lld kcal" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Consumate %lld kcal" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zjedzone %lld kcal" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Consumido %lld kcal" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Съедено %lld ккал" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "摄入 %lld 千卡" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "攝取 %lld 大卡" } }
+      }
+    },
+    "Burned: not enough heart-rate data yet today.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verbrannt: heute noch nicht genug Herzfrequenzdaten." } },
+        "en": { "stringUnit": { "state": "translated", "value": "Burned: not enough heart-rate data yet today." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Quemado: todavía no hay suficientes datos de frecuencia cardíaca hoy." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Brûlé : pas encore assez de données de fréquence cardiaque aujourd'hui." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Bruciate: dati sulla frequenza cardiaca ancora insufficienti oggi." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Spalone: za mało danych o tętnie jak na razie dzisiaj." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Queimado: ainda não há dados suficientes de frequência cardíaca hoje." } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Сожжено: пока недостаточно данных о пульсе за сегодня." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "消耗：今日心率数据尚不足。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "消耗：今日心率資料尚不足。" } }
+      }
+    },
+    "%@ · %lldg P · %lldg C · %lldg F": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "en": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "it": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "%@ · %lldg P · %lldg C · %lldg F" } }
+      }
+    },
+    "%lld kcal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "en": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "it": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%lld kcal" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "%lld ккал" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%lld 千卡" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 大卡" } }
+      }
+    },
+    "%@, %lld calories": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@, %lld Kalorien" } },
+        "en": { "stringUnit": { "state": "translated", "value": "%@, %lld calories" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@, %lld calorías" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@, %lld calories" } },
+        "it": { "stringUnit": { "state": "translated", "value": "%@, %lld calorie" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%@, %lld kalorii" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%@, %lld calorias" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "%@, %lld калорий" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%@，%lld 卡路里" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "%@，%lld 卡路里" } }
+      }
+    },
+    "Delete this meal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diese Mahlzeit löschen" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Delete this meal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Eliminar esta comida" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Supprimer ce repas" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Elimina questo pasto" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Usuń ten posiłek" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Eliminar esta refeição" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Удалить этот приём пищи" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除此餐" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "刪除此餐" } }
+      }
+    },
+    "Fuel source: %lld percent fat, %lld percent carbohydrate": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Energiequelle: %lld Prozent Fett, %lld Prozent Kohlenhydrate" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Fuel source: %lld percent fat, %lld percent carbohydrate" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Fuente de energía: %lld por ciento grasa, %lld por ciento carbohidratos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Source d'énergie : %lld pour cent de lipides, %lld pour cent de glucides" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Fonte di energia: %lld percento grassi, %lld percento carboidrati" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Źródło energii: %lld procent tłuszczu, %lld procent węglowodanów" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Fonte de energia: %lld por cento de gordura, %lld por cento de hidratos de carbono" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Источник энергии: %lld процентов жиров, %lld процентов углеводов" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "能量来源：%lld% 脂肪，%lld% 碳水化合物" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "能量來源：%lld% 脂肪，%lld% 碳水化合物" } }
       }
     },
     "Resting heart rate and HRV are sitting at or below baseline: low physiological stress. You're in a calm, recovered state.": {

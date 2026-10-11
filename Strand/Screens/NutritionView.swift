@@ -85,10 +85,16 @@ struct NutritionView: View {
         }
     }
 
-    private func macroRow(_ label: LocalizedStringKey, eaten: Double, target: Int, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    /// `label` is a plain String (the call sites pass "Protein"/"Carbs"/"Fat" verbatim) rather than
+    /// `LocalizedStringKey`, so it can also be resolved to its localized text for the accessibility
+    /// string below — a `LocalizedStringKey` interpolated directly into another string literal would
+    /// print its internal representation, not the translated text. `Text(LocalizedStringKey(label))`
+    /// keeps the VISIBLE label localized exactly as `Text("Protein")` would.
+    private func macroRow(_ label: String, eaten: Double, target: Int, tint: Color) -> some View {
+        let localizedLabel = String(localized: String.LocalizationValue(label))
+        return VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(label)
+                Text(LocalizedStringKey(label))
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
                 Spacer()
@@ -100,7 +106,7 @@ struct NutritionView: View {
             LiquidTube(frac: target > 0 ? min(1.0, eaten / Double(target)) : 0, tint: tint, height: 8, animated: false)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(Int(eaten.rounded())) of \(target) grams")
+        .accessibilityLabel("\(localizedLabel): \(Int(eaten.rounded())) of \(target) grams")
     }
 
     // MARK: - Calorie surplus/deficit
@@ -193,8 +199,7 @@ struct NutritionView: View {
                         Text(meal.name?.isEmpty == false ? meal.name! : String(localized: "Meal"))
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("\(Self.entryTimeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(meal.loggedAt)))) · "
-                             + "\(Int(meal.proteinG.rounded()))g P · \(Int(meal.carbsG.rounded()))g C · \(Int(meal.fatG.rounded()))g F")
+                        Text("\(Self.entryTimeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(meal.loggedAt)))) · \(Int(meal.proteinG.rounded()))g P · \(Int(meal.carbsG.rounded()))g C · \(Int(meal.fatG.rounded()))g F")
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
