@@ -407,4 +407,48 @@ final class ChargeDriversTests: XCTestCase {
                            accuracy: 0.0, "displayRounded(\(c.value), \(c.digits))")
         }
     }
+
+    // MARK: - Night-mean HR driver row (FORK-ONLY, not ported to Android)
+
+    func testNightMeanHRRowOmittedWhenNoBaseline() {
+        let drivers = RecoveryScorer.chargeDrivers(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6), rhrBaseline: baseline(mean: 55, sigma: 3),
+            respBaseline: nil, sleepPerf: nil)
+        XCTAssertNil(drivers.first { $0.label == "Night-average heart rate" },
+                     "no row without a value+baseline, same as every other optional term")
+    }
+
+    func testNightMeanHRRowPresentAndDirectionallyHonest() {
+        let drivers = RecoveryScorer.chargeDrivers(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6), rhrBaseline: baseline(mean: 55, sigma: 3),
+            respBaseline: nil, sleepPerf: nil,
+            nightMeanHR: 66, nightMeanHRBaseline: baseline(mean: 60, sigma: 3))
+        let row = drivers.first { $0.label == "Night-average heart rate" }
+        XCTAssertNotNil(row)
+        XCTAssertLessThan(row!.deltaPoints, 0, "above-baseline night-mean HR must cost points")
+        XCTAssertEqual(row!.valueText, "66 bpm")
+        XCTAssertEqual(row!.baselineText, "60 bpm baseline")
+    }
+
+    func testNightMeanHRRowMarginalMatchesFullMinusNeutral() {
+        // Same SHARED CONTRACT every other row already proves (see hrvMarginal above): the row's
+        // deltaPoints must equal recovery(all terms) - recovery(this term neutralised), not an
+        // invented number.
+        let hrvB = baseline(mean: 50, sigma: 6)
+        let nmhrB = baseline(mean: 60, sigma: 3)
+        let full = RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil, hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+            sleepPerf: nil, nightMeanHR: 66, nightMeanHRBaseline: nmhrB)!
+        let neutral = RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil, hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+            sleepPerf: nil, nightMeanHR: nmhrB.baseline, nightMeanHRBaseline: nmhrB)!
+        let row = RecoveryScorer.chargeDrivers(
+            hrv: 50, rhr: 55, resp: nil, hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+            sleepPerf: nil, nightMeanHR: 66, nightMeanHRBaseline: nmhrB)
+            .first { $0.label == "Night-average heart rate" }!
+        XCTAssertEqual(Double(row.deltaPoints), (full - neutral).rounded(.toNearestOrAwayFromZero),
+                       accuracy: 1e-9)
+    }
 }

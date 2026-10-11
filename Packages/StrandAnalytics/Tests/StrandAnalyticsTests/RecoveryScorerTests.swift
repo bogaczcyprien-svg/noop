@@ -345,4 +345,63 @@ final class RecoveryScorerTests: XCTestCase {
             sleepPerf: 0.85)
         XCTAssertEqual(scored!, 58.419052293540744, accuracy: 1e-12)
     }
+
+    // MARK: - nightMeanHR (FORK-ONLY, not ported to Android)
+
+    func testNightMeanHRTermDropAndRenormalize() {
+        // With nightMeanHR present vs nil but everything else equal at baseline, the score
+        // stays near population mean either way (no driver pushes Z off zero).
+        let withTerm = RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6),
+            rhrBaseline: baseline(mean: 55, sigma: 3),
+            respBaseline: nil,
+            sleepPerf: RecoveryScorer.sleepPerfCenter,
+            nightMeanHR: 60, nightMeanHRBaseline: baseline(mean: 60, sigma: 3))!
+        let withoutTerm = RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6),
+            rhrBaseline: baseline(mean: 55, sigma: 3),
+            respBaseline: nil,
+            sleepPerf: RecoveryScorer.sleepPerfCenter)!
+        XCTAssertEqual(withTerm, withoutTerm, accuracy: 1e-6)
+    }
+
+    func testNightMeanHRAboveBaselineLowersAndBelowRaisesRecovery() {
+        // Lower-is-better, same direction as resting HR: a night-mean HR above its baseline
+        // must LOWER recovery, and one below it must RAISE it.
+        func score(_ v: Double) -> Double {
+            RecoveryScorer.recovery(
+                hrv: 50, rhr: 55, resp: nil,
+                hrvBaseline: baseline(mean: 50, sigma: 6),
+                rhrBaseline: baseline(mean: 55, sigma: 3),
+                respBaseline: nil,
+                sleepPerf: RecoveryScorer.sleepPerfCenter,
+                nightMeanHR: v, nightMeanHRBaseline: baseline(mean: 60, sigma: 3))!
+        }
+        let atBaseline = score(60)
+        let above = score(66)
+        let below = score(54)
+        XCTAssertLessThan(above, atBaseline)
+        XCTAssertGreaterThan(below, atBaseline)
+    }
+
+    func testNightMeanHRWeightMatchesWNightMeanHRConstant() {
+        // Sanity-pins that the new term actually uses RecoveryScorer.wNightMeanHR, not a stray
+        // literal: holding every other term fixed, doubling the weight should (roughly) double
+        // the term's marginal effect. Uses the raw DriverBaseline overload for direct weight control.
+        let hrvB = RecoveryScorer.DriverBaseline(mean: 50, spread: 6 / 1.253)
+        let nmhrB = RecoveryScorer.DriverBaseline(mean: 60, spread: 3 / 1.253)
+        func composite(_ v: Double) -> Double {
+            RecoveryScorer.recovery(
+                hrv: 50, rhr: 55, resp: nil,
+                hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+                sleepPerf: nil,
+                nightMeanHR: v, nightMeanHRBaseline: nmhrB)!
+        }
+        XCTAssertGreaterThan(RecoveryScorer.wNightMeanHR, 0,
+                             "the term must carry a real, positive weight")
+        XCTAssertGreaterThan(abs(composite(54) - composite(60)), 1e-6,
+                             "a below-baseline night-mean HR must move the score")
+    }
 }

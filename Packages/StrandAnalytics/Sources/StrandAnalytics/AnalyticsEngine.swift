@@ -53,10 +53,14 @@ public enum AnalyticsEngine {
         public let restingHR: BaselineState?
         public let resp: BaselineState?
         public let skinTemp: BaselineState?
+        /// FORK-ONLY, not ported to Android. Personal baseline for the #1169 primary-session MEAN
+        /// resting HR (see `RecoveryScorer.wNightMeanHR` / `Baselines.metricCfg["resting_hr_primary_mean"]`).
+        public let nightMeanHR: BaselineState?
         public init(hrv: BaselineState? = nil, restingHR: BaselineState? = nil,
-                    resp: BaselineState? = nil, skinTemp: BaselineState? = nil) {
+                    resp: BaselineState? = nil, skinTemp: BaselineState? = nil,
+                    nightMeanHR: BaselineState? = nil) {
             self.hrv = hrv; self.restingHR = restingHR; self.resp = resp
-            self.skinTemp = skinTemp
+            self.skinTemp = skinTemp; self.nightMeanHR = nightMeanHR
         }
     }
 
@@ -910,6 +914,11 @@ public enum AnalyticsEngine {
         if let hrvVal = avgHRVDaily, let rhrVal = restingHRDaily, let hrvBase = baselines.hrv {
             // Rest-quality term = the Rest composite ÷100 (replaces raw efficiency).
             let sleepPerf = restScore.map { $0 / 100.0 }
+            // FORK-ONLY, not ported to Android. #1169 primary-session MEAN resting HR for tonight, computed
+            // from the SAME sleep sessions + hr the rest of this function already has (see
+            // `primarySessionRestingHR`). nil drops the term and the weights renormalize, exactly like
+            // respRateDaily/skinTempDevC above. See RecoveryScorer.wNightMeanHR.
+            let nightMeanHRVal = Self.primarySessionRestingHR(sessions: matched, hr: hr)
             recovery = RecoveryScorer.recovery(
                 hrv: hrvVal,
                 rhr: Double(rhrVal),
@@ -918,7 +927,9 @@ public enum AnalyticsEngine {
                 rhrBaseline: baselines.restingHR,
                 respBaseline: baselines.resp,
                 sleepPerf: sleepPerf,
-                skinTempDev: skinTempDevC)  // symmetric penalty; drops + renormalizes when nil
+                skinTempDev: skinTempDevC,  // symmetric penalty; drops + renormalizes when nil
+                nightMeanHR: nightMeanHRVal,
+                nightMeanHRBaseline: baselines.nightMeanHR)
             // Driver breakdown from the identical inputs; omits any missing term, never faked.
             chargeDrivers = RecoveryScorer.chargeDrivers(
                 hrv: hrvVal,
@@ -928,7 +939,9 @@ public enum AnalyticsEngine {
                 rhrBaseline: baselines.restingHR,
                 respBaseline: baselines.resp,
                 sleepPerf: sleepPerf,
-                skinTempDev: skinTempDevC)
+                skinTempDev: skinTempDevC,
+                nightMeanHR: nightMeanHRVal,
+                nightMeanHRBaseline: baselines.nightMeanHR)
         }
         // A5: skin temp as a RELATIVE deviation marker (trend, not a clinical absolute). nil
         // when no deviation is available (no baseline yet / not worn) so the UI shows nothing.

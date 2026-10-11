@@ -17,8 +17,9 @@ import Foundation
 //
 // What we drop vs the strap path: the respiration, sleep-performance and skin-temp terms
 // are not supplied here (the watch's daily aggregate doesn't carry them in the same shape),
-// so RecoveryScorer renormalises the remaining HRV + RHR weights. The HRV term stays the
-// dominant driver either way.
+// so RecoveryScorer renormalises the remaining HRV + RHR weights. FORK-ONLY: the night-mean-HR
+// term is dropped the same way (the watch's daily aggregate has no primary-sleep-session
+// windowing to compute it from) — same renormalization, no new behavior to reason about here.
 //
 // The hard honesty rule: we return nil recovery + `.calibrating` when today's SDNN is
 // missing, OR the SDNN baseline isn't usable yet, OR the baseline has accepted fewer than

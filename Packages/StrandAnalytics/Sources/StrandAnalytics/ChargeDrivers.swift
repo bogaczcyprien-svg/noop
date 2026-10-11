@@ -105,13 +105,13 @@ extension RecoveryScorer {
 
     /// Build the ordered Charge driver list from the SAME inputs `recovery(...)` reads.
     ///
-    /// One row per term that actually fed the score (HRV, resting HR, rest quality,
-    /// respiration, skin-temp deviation). A term whose input is missing / uncalibrated is
-    /// OMITTED (no row), exactly as `recovery(...)` drops it. Each row's `deltaPoints` is the
+    /// One row per term that actually fed the score (HRV, resting HR, night-mean HR [FORK-ONLY],
+    /// rest quality, respiration, skin-temp deviation). A term whose input is missing / uncalibrated
+    /// is OMITTED (no row), exactly as `recovery(...)` drops it. Each row's `deltaPoints` is the
     /// term's marginal contribution to the 0-100 score: `recovery(all terms)` minus
     /// `recovery(this term omitted)`, rounded - real points from the real weighting, never
     /// invented. Rows are ordered by |deltaPoints| descending (biggest mover first); ties keep
-    /// a stable term order (hrv, rhr, sleepPerf, resp, skinTempDev).
+    /// a stable term order (hrv, rhr, nightMeanHR, sleepPerf, resp, skinTempDev).
     ///
     /// Returns an EMPTY list when there is no score at all (cold-start: HRV baseline not
     /// usable), since there are no real contributions to attribute. Parameters mirror
@@ -126,7 +126,10 @@ extension RecoveryScorer {
                                      rhrBaseline: BaselineState?,
                                      respBaseline: BaselineState?,
                                      sleepPerf: Double?,
-                                     skinTempDev: Double? = nil) -> [ChargeDriver] {
+                                     skinTempDev: Double? = nil,
+                                     // FORK-ONLY, not ported to Android. See RecoveryScorer.wNightMeanHR.
+                                     nightMeanHR: Double? = nil,
+                                     nightMeanHRBaseline: BaselineState? = nil) -> [ChargeDriver] {
 
         // No score => no real contributions to attribute (cold-start). recovery(...) enforces
         // the usable gate; mirror it so a nil headline never yields fabricated driver rows.
@@ -135,10 +138,14 @@ extension RecoveryScorer {
         // synthetic midpoint while the headline excluded it. Normalised once here so every use below,
         // score and row alike, sees the same thing. Twin of the Kotlin `rhrB`.
         let rhrB = rhrBaseline.flatMap { $0.usable ? $0 : nil }
+        // FORK-ONLY: same #1988 gate for the night-mean-HR baseline.
+        let nightMeanHRB = nightMeanHRBaseline.flatMap { $0.usable ? $0 : nil }
         guard let full = recovery(hrv: hrv, rhr: rhr, resp: resp,
                                   hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
                                   respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                  skinTempDev: skinTempDev) else {
+                                  skinTempDev: skinTempDev,
+                                  nightMeanHR: nightMeanHR,
+                                  nightMeanHRBaseline: nightMeanHRB) else {
             return []
         }
 
@@ -173,7 +180,8 @@ extension RecoveryScorer {
         let hrvPoints = points(recovery(hrv: hrvBaseline.baseline, rhr: rhr, resp: resp,
                                         hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
                                         respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                        skinTempDev: skinTempDev))
+                                        skinTempDev: skinTempDev,
+                                        nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
         drivers.append(ChargeDriver(
             label: "Heart rate variability",
             deltaPoints: hrvPoints,
@@ -189,13 +197,31 @@ extension RecoveryScorer {
             let rhrPoints = points(recovery(hrv: hrv, rhr: b.baseline, resp: resp,
                                             hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
                                             respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                            skinTempDev: skinTempDev))
+                                            skinTempDev: skinTempDev,
+                                            nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
                 label: "Resting heart rate",
                 deltaPoints: rhrPoints,
                 valueText: "\(Int(rhr.rounded())) bpm",
                 baselineText: "\(Int(b.baseline.rounded())) bpm baseline",
                 verdict: rhrVerdict(value: rhr, baseline: b.baseline, deltaPoints: rhrPoints)))
+        }
+
+        // ── Night-mean HR (FORK-ONLY, not ported to Android; lower vs baseline supports recovery) ──
+        // Neutral = night-mean HR at the baseline mean. See RecoveryScorer.wNightMeanHR.
+        if let b = nightMeanHRB {
+            let nightMeanHRPoints = points(recovery(hrv: hrv, rhr: rhr, resp: resp,
+                                                    hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
+                                                    respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                                    skinTempDev: skinTempDev,
+                                                    nightMeanHR: b.baseline, nightMeanHRBaseline: nightMeanHRB))
+            drivers.append(ChargeDriver(
+                label: "Night-average heart rate",
+                deltaPoints: nightMeanHRPoints,
+                valueText: "\(Int((nightMeanHR ?? b.baseline).rounded())) bpm",
+                baselineText: "\(Int(b.baseline.rounded())) bpm baseline",
+                verdict: rhrVerdict(value: nightMeanHR ?? b.baseline, baseline: b.baseline,
+                                    deltaPoints: nightMeanHRPoints)))
         }
 
         // ── Rest quality (the Rest composite; neutral at sleepPerfCenter) ────────
@@ -205,7 +231,8 @@ extension RecoveryScorer {
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
                                              respBaseline: respBaseline, sleepPerf: sleepPerfCenter,
-                                             skinTempDev: skinTempDev)),
+                                             skinTempDev: skinTempDev,
+                                             nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB)),
                 valueText: "\(Int((sp * 100).rounded()))%",
                 baselineText: "",   // centred on a fixed "good night", not a learned baseline
                 verdict: sleepVerdict(sleepPerf: sp)))
@@ -217,7 +244,8 @@ extension RecoveryScorer {
             let respPoints = points(recovery(hrv: hrv, rhr: rhr, resp: b.baseline,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
                                              respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                             skinTempDev: skinTempDev))
+                                             skinTempDev: skinTempDev,
+                                             nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
                 label: "Respiratory rate",
                 deltaPoints: respPoints,
@@ -234,7 +262,8 @@ extension RecoveryScorer {
             let skinTempPoints = points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                                  hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
                                                  respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                                 skinTempDev: 0))
+                                                 skinTempDev: 0,
+                                                 nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
                 label: "Skin temperature",
                 deltaPoints: skinTempPoints,

@@ -37,6 +37,14 @@ enum ChargeBreakdownWiring {
     /// `chargeDrivers` both apply that gate themselves since #1990, so these are belt-and-braces rather
     /// than load-bearing; they are kept because they say the intent at the call site, which is where a
     /// reader looks first.
+    ///
+    /// KNOWN GAP, FORK-ONLY: the night-mean-HR term (`RecoveryScorer.wNightMeanHR`) is NOT passed here,
+    /// because its raw nightly value is not a field on the persisted `DailyMetric` this reads (`row`) —
+    /// only the full raw-stream pass (AnalyticsEngine.analyzeDay) can compute it, and this sheet is
+    /// deliberately pure / DB-only (no raw-stream re-fetch on a UI render path). So the headline ring
+    /// (which DOES score with the term, via that raw-stream pass) can show a Charge number this sheet's
+    /// own rows do not fully add up to explain, on any night where the term moved the score. Closing
+    /// this needs a persisted per-night field (a WhoopStore/DailyMetric migration) — not done here.
     static func breakdown(baselines: ChargeBaselines.Resolved,
                           row: DailyMetric,
                           sleepPerfPercent: Double?) -> (drivers: [ChargeDriver], confidence: ScoreConfidence)? {

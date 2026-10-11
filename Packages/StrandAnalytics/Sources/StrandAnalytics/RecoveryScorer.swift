@@ -10,11 +10,23 @@ import WhoopProtocol
 // HRV-dominant, baseline-normalized proxy.
 //
 // Weighting (documented, grounded, explainable; this is "Charge" in the UI):
-//   higher HRV vs baseline       → higher recovery  (W_HRV       = 0.55, dominant)
-//   lower resting HR vs baseline → higher recovery  (W_RHR       = 0.20)
-//   higher rest quality (sleep)  → higher recovery  (W_SLEEP     = 0.15)
-//   lower resp vs baseline       → higher recovery  (W_RESP      = 0.05)
-//   skin-temp deviation from 0   → lower recovery   (W_SKIN_TEMP = 0.05)
+//   higher HRV vs baseline            → higher recovery  (W_HRV           = 0.30)
+//   lower night-mean HR vs baseline   → higher recovery  (W_NIGHT_MEAN_HR = 0.25)
+//   lower resting HR vs baseline      → higher recovery  (W_RHR           = 0.20)
+//   higher rest quality (sleep)       → higher recovery  (W_SLEEP         = 0.15)
+//   lower resp vs baseline            → higher recovery  (W_RESP          = 0.05)
+//   skin-temp deviation from 0        → lower recovery   (W_SKIN_TEMP     = 0.05)
+//
+// FORK-ONLY, not ported to Android, and not the upstream weighting: explicit user tuning request.
+// Upstream (and this fork until this change) weighted HRV at 0.55/0.60, dominant, on the rationale
+// that HRV is the most physiologically specific recovery signal. This user's stated reasoning for
+// moving weight OFF HRV and onto a night-mean-HR term is that HRV is noise-prone on a single night
+// (motion artefacts, a strap seated slightly loose, an arrhythmic beat or two) while the night's
+// MEAN heart rate is a steadier, less error-prone summary of how hard the body worked overnight —
+// and #1169's own validation data below supports that a mean-HR-style metric genuinely tracks
+// independent references (official WHOOP RHR, a Polar H10 ECG mean) better than noisier definitions.
+// The new W_NIGHT_MEAN_HR term is funded entirely by HRV's cut (0.55 -> 0.30, i.e. -0.25 -> +0.25);
+// every other weight (RHR/sleep/resp/skin-temp) is UNCHANGED, so this is additive, not a redesign.
 //
 // The Charge/Effort/Rest redesign folds skin temperature in (illness/overreach
 // signal): HRV dropped 0.60 → 0.55 to make room for W_SKIN_TEMP = 0.05. The
@@ -50,10 +62,15 @@ public enum RecoveryScorer {
 
     // MARK: - Constants (recovery.py)
 
-    public static let wHRV: Double = 0.55
+    // FORK-ONLY, not ported to Android: 0.55 -> 0.30, user-requested (see the header comment above).
+    public static let wHRV: Double = 0.30
     public static let wRHR: Double = 0.20
     public static let wResp: Double = 0.05
     public static let wSleep: Double = 0.15
+    /// FORK-ONLY, not ported to Android. Weight for the #1169 primary-session MEAN resting-HR term
+    /// (see `AnalyticsEngine.primarySessionRestingHR`), funded by HRV's cut above. A DIFFERENT
+    /// quantity from `wRHR`'s nightly 5-minute FLOOR — this is the night's mean, not its lowest point.
+    public static let wNightMeanHR: Double = 0.25
     /// Skin-temperature deviation weight (Charge/Effort/Rest redesign). HRV gave up
     /// 0.05 (0.60 → 0.55) to fund it.
     public static let wSkinTemp: Double = 0.05
@@ -331,7 +348,13 @@ public enum RecoveryScorer {
                                 hrvBaselineUsable: Bool = true,
                                 recoveryIndexSlope: Double? = nil,
                                 effortBaseline: DriverBaseline? = nil,
-                                priorDayEffort: Double? = nil) -> Double? {
+                                priorDayEffort: Double? = nil,
+                                // FORK-ONLY, not ported to Android. #1169 primary-session MEAN resting
+                                // HR + its personal baseline (see `wNightMeanHR`). nil (the default)
+                                // drops the term and the weights renormalize, so a caller that does not
+                                // supply it scores exactly as if this parameter did not exist.
+                                nightMeanHR: Double? = nil,
+                                nightMeanHRBaseline: DriverBaseline? = nil) -> Double? {
         // Cold-start gate: HRV is the dominant driver; if its baseline isn't
         // usable, refuse to score (more honest than a fabricated value).
         if !hrvBaselineUsable { return nil }
@@ -380,6 +403,11 @@ public enum RecoveryScorer {
         if let e = priorDayEffort, let b = effortBaseline {
             terms.append((zScore(b.mean, mean: e, spread: b.spread), wActivityBalance))
         }
+        // FORK-ONLY: night-mean-HR term. Lower vs baseline is better -> (μ − x) / σ, same direction
+        // as RHR/resp. Added only when both the value and its baseline are supplied.
+        if let v = nightMeanHR, let b = nightMeanHRBaseline {
+            terms.append((zScore(b.mean, mean: v, spread: b.spread), wNightMeanHR))
+        }
 
         guard !terms.isEmpty else { return nil }
         let totalWeight = terms.reduce(0) { $0 + $1.w }
@@ -410,7 +438,10 @@ public enum RecoveryScorer {
                                 skinTempDev: Double? = nil,
                                 recoveryIndexSlope: Double? = nil,
                                 effortBaseline: BaselineState? = nil,
-                                priorDayEffort: Double? = nil) -> Double? {
+                                priorDayEffort: Double? = nil,
+                                // FORK-ONLY, not ported to Android.
+                                nightMeanHR: Double? = nil,
+                                nightMeanHRBaseline: BaselineState? = nil) -> Double? {
         recovery(hrv: hrv,
                  rhr: rhr,
                  resp: resp,
@@ -428,6 +459,9 @@ public enum RecoveryScorer {
                  hrvBaselineUsable: hrvBaseline.usable,
                  recoveryIndexSlope: recoveryIndexSlope,
                  effortBaseline: effortBaseline.map(DriverBaseline.init),
-                 priorDayEffort: priorDayEffort)
+                 priorDayEffort: priorDayEffort,
+                 // FORK-ONLY: same #1988 "unusable baseline treated as absent" gate as rhrBaseline above.
+                 nightMeanHR: nightMeanHR,
+                 nightMeanHRBaseline: nightMeanHRBaseline.flatMap { $0.usable ? $0 : nil }.map(DriverBaseline.init))
     }
 }

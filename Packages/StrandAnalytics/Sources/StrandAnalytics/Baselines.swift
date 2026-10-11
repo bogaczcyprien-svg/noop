@@ -214,6 +214,17 @@ public enum Baselines {
         "strain": MetricCfg(minVal: 0.0, maxVal: 100.0, floorSpread: 5.0,
                             halfLifeB: 14.0, halfLifeS: 21.0),
 
+        // FORK-ONLY, not ported to Android. Personal baseline for the #1169 primary-session MEAN
+        // resting HR (`PrimarySessionRestingHR.meanHR` / `AnalyticsEngine.primarySessionRestingHR`) —
+        // a DIFFERENT quantity from "resting_hr" above (which is the shipped nightly 5-minute FLOOR).
+        // Same bpm bounds/floor/half-lives: it is still a sleeping-HR-range quantity, just averaged
+        // instead of floored, and #1169's own clean-room validation (official WHOOP RHR + Polar H10
+        // ECG mean as independent references) found this mean tracks both references more closely
+        // than the floor (MAE 6.0->2.0 dev / 7.5->0.8 holdout over a 5-night single-participant set).
+        // See RecoveryScorer.wNightMeanHR for where this baseline feeds the Charge score.
+        "resting_hr_primary_mean": MetricCfg(minVal: 30.0, maxVal: 120.0, floorSpread: 2.0,
+                                             halfLifeB: 14.0, halfLifeS: 21.0),
+
         // Readiness HRV baseline, folded in the LOG domain with hard-outlier rejection OFF (RD2 · the
         // window-fold spine mode — see Baselines.update's `rejectHardOutliers`). ReadinessEngine
         // z-scores lnRMSSD (RD1: HRV is right-skewed), so these bounds/floor are in LN(ms) units — NOT

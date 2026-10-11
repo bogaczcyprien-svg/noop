@@ -139289,6 +139289,40 @@
         }
       }
     },
+    "Night-average heart rate": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nächtliche durchschnittliche Herzfrequenz"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Night-average heart rate"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frecuencia cardíaca media nocturna"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fréquence cardiaque moyenne nocturne"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frequência cardíaca média noturna"
+          }
+        }
+      }
+    },
     "Resting heart rate and HRV are sitting at or below baseline: low physiological stress. You're in a calm, recovered state.": {
       "localizations": {
         "de": {

@@ -826,7 +826,9 @@ final class IntelligenceEngine: ObservableObject {
         guard let hrvCfg = Baselines.metricCfg["hrv"],
               let rhrCfg = Baselines.metricCfg["resting_hr"],
               let respCfg = Baselines.metricCfg["resp"],
-              let skinCfg = Baselines.metricCfg["skin_temp"] else { return }
+              let skinCfg = Baselines.metricCfg["skin_temp"],
+              // FORK-ONLY, not ported to Android. See RecoveryScorer.wNightMeanHR.
+              let nightMeanHRCfg = Baselines.metricCfg["resting_hr_primary_mean"] else { return }
 
         // #836 (idle-tick gate): re-scoring a 21-day window re-reads ~21×54 h of raw data and re-runs
         // analyzeDay over it. After a big Apple Health import (a reporter's: 2.1 M rows, ~190 k HR/day) that
@@ -2097,6 +2099,13 @@ final class IntelligenceEngine: ObservableObject {
         // so its history is the own nights alone.
         let skinHistory = ChargeBaselines.history(imported: [], own: ownNights(nightlySkinByDay),
                                                   anchorDay: newestDay, cfg: skinCfg, baselineEpoch: recoveryEpoch)
+        // FORK-ONLY, not ported to Android. Night-mean-HR baseline (see RecoveryScorer.wNightMeanHR):
+        // no imported counterpart either (same shape as skin temp above), folded from the #1169
+        // primary-session mean already collected into `primarySessionRHRByDay` for the `rhr_primary_session`
+        // instrumentation metric. Shares the resting-HR/skin-temp Charge-wide recalibration epoch.
+        let nightMeanHRHistory = ChargeBaselines.history(
+            imported: [], own: ownNights(primarySessionRHRByDay.mapValues { Optional($0) }),
+            anchorDay: newestDay, cfg: nightMeanHRCfg, baselineEpoch: recoveryEpoch)
         // Resp baseline gated on `usable`: RecoveryScorer includes the resp term whenever a
         // baseline object is present , a CALIBRATING (<4-night) baseline would let one noisy
         // RSA night move recovery (mirrors the skin-temp use-site gate; honest cold-start).
@@ -2107,6 +2116,10 @@ final class IntelligenceEngine: ObservableObject {
         // future use-site from trusting a CALIBRATING baseline. (PR #97 review.)
         let skinFold = Baselines.foldHistory(skinHistory.values, dayKeys: skinHistory.dayKeys, cfg: skinCfg,
                                              baselineEpoch: recoveryEpoch)
+        // FORK-ONLY: gated on `.usable` for the same reason as resp/skin above — a CALIBRATING
+        // baseline should not yet move Charge.
+        let nightMeanHRFold = Baselines.foldHistory(nightMeanHRHistory.values, dayKeys: nightMeanHRHistory.dayKeys,
+                                                     cfg: nightMeanHRCfg, baselineEpoch: recoveryEpoch)
         // #1614: the per-night HRV fold, traced. HRV ONLY, deliberately: it is Charge's dominant driver
         // and the one whose spread the score divides by, so tracing all four baselines would quadruple
         // the log for the three that are not the question being asked. Capped at the last 14 nights,
@@ -2132,7 +2145,9 @@ final class IntelligenceEngine: ObservableObject {
             restingHR: Baselines.foldHistory(rhrHistory.values, dayKeys: rhrHistory.dayKeys, cfg: rhrCfg,
                                              baselineEpoch: recoveryEpoch),
             resp: respFold.usable ? respFold : nil,
-            skinTemp: skinFold.usable ? skinFold : nil)
+            skinTemp: skinFold.usable ? skinFold : nil,
+            // FORK-ONLY, not ported to Android.
+            nightMeanHR: nightMeanHRFold.usable ? nightMeanHRFold : nil)
 
         // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
         // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
@@ -3340,6 +3355,13 @@ final class IntelligenceEngine: ObservableObject {
     /// baseline is usable (RecoveryScorer gates on `hrvBaseline.usable`, i.e. ≥ minNightsSeed valid
     /// nights) , so the honest null-until-4-nights cold-start is free. Mirrors AnalyticsEngine's own
     /// recovery call + Android IntelligenceEngine.recomputeRecovery. (#78)
+    ///
+    /// KNOWN GAP (pre-existing, same shape as `recoveryIndexSlope`/`priorDayEffort` below): the
+    /// FORK-ONLY night-mean-HR term (see RecoveryScorer.wNightMeanHR) is not threaded through here,
+    /// because its raw nightly value is not a field on the persisted `DailyMetric` — only the full
+    /// raw-stream pass (AnalyticsEngine.analyzeDay, via `matched`+`hr`) can compute it. A day re-scored
+    /// by THIS narrower path (e.g. after "Recalibrate baseline") therefore omits the term, same as a
+    /// day re-scored here already omits Recovery Index / Activity Balance.
     private static func recomputeRecovery(_ daily: DailyMetric, _ baselines: AnalyticsEngine.ProfileBaselines) -> Double? {
         guard let hrvVal = daily.avgHrv, let rhrVal = daily.restingHr, let hrvBase = baselines.hrv else { return nil }
         // Charge enrichment: feed the Rest COMPOSITE (÷100) as the sleep-quality term instead of raw
