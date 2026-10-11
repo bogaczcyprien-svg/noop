@@ -139353,6 +139353,168 @@
         }
       }
     },
+    "Today's macros": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Deine Makros heute" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Today's macros" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tus macros de hoy" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Tes macros aujourd'hui" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os teus macros hoje" } }
+      }
+    },
+    "Calorie balance": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kalorienbilanz" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Calorie balance" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Balance calórico" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Bilan calorique" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Balanço calórico" } }
+      }
+    },
+    "Add meal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mahlzeit hinzufügen" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Add meal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Añadir comida" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ajouter un repas" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Adicionar refeição" } }
+      }
+    },
+    "Edit meal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mahlzeit bearbeiten" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Edit meal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Editar comida" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modifier le repas" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Editar refeição" } }
+      }
+    },
+    "Meal name (optional)": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mahlzeitname (optional)" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Meal name (optional)" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Nombre de la comida (opcional)" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nom du repas (optionnel)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Nome da refeição (opcional)" } }
+      }
+    },
+    "Today's meals": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Heutige Mahlzeiten" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Today's meals" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comidas de hoy" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Repas d'aujourd'hui" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeições de hoje" } }
+      }
+    },
+    "Tap a meal to edit it, or use the trash to delete.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Tippe auf eine Mahlzeit, um sie zu bearbeiten, oder nutze den Papierkorb zum Löschen." } },
+        "en": { "stringUnit": { "state": "translated", "value": "Tap a meal to edit it, or use the trash to delete." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Toca una comida para editarla, o usa la papelera para eliminarla." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Touchez un repas pour le modifier, ou utilisez la corbeille pour le supprimer." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Toca numa refeição para a editar, ou usa o caixote do lixo para a eliminar." } }
+      }
+    },
+    "Meal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mahlzeit" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Meal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comida" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Repas" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Refeição" } }
+      }
+    },
+    "Protein (g)": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Eiweiß (g)" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Protein (g)" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Proteína (g)" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Protéines (g)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Proteína (g)" } }
+      }
+    },
+    "Carbs (g)": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kohlenhydrate (g)" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Carbs (g)" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Carbohidratos (g)" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Glucides (g)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Hidratos de carbono (g)" } }
+      }
+    },
+    "Fat (g)": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Fett (g)" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Fat (g)" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Grasa (g)" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Lipides (g)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Gordura (g)" } }
+      }
+    },
+    "Targets are an approximate guide from your weight and today's effort — not medical or dietetic advice.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die Ziele sind ein ungefährer Richtwert aus deinem Gewicht und deinem heutigen Trainingsaufwand — kein medizinischer oder ernährungswissenschaftlicher Rat." } },
+        "en": { "stringUnit": { "state": "translated", "value": "Targets are an approximate guide from your weight and today's effort — not medical or dietetic advice." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los objetivos son una guía aproximada basada en tu peso y tu esfuerzo de hoy — no son un consejo médico ni dietético." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les objectifs sont un repère approximatif basé sur ton poids et ton effort du jour — pas un avis médical ou diététique." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os objetivos são uma orientação aproximada com base no teu peso e no esforço de hoje — não são um conselho médico ou dietético." } }
+      }
+    },
+    "Today's macros, on %@ only.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Deine Makros heute, nur auf %@." } },
+        "en": { "stringUnit": { "state": "translated", "value": "Today's macros, on %@ only." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tus macros de hoy, solo en %@." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Tes macros aujourd'hui, sur %@ uniquement." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os teus macros hoje, apenas em %@." } }
+      }
+    },
+    "Fuel Source": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Energiequelle" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Fuel Source" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Fuente de energía" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Source d'énergie" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Fonte de energia" } }
+      }
+    },
+    "Estimated from heart rate": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Geschätzt anhand der Herzfrequenz" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Estimated from heart rate" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Estimado a partir de la frecuencia cardíaca" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Estimé à partir de la fréquence cardiaque" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Estimado a partir da frequência cardíaca" } }
+      }
+    },
+    "Estimated from your heart rate during this session — approximate, not laboratory calorimetry.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Geschätzt anhand deiner Herzfrequenz während dieser Einheit — ungefähr, keine Labor-Kalorimetrie." } },
+        "en": { "stringUnit": { "state": "translated", "value": "Estimated from your heart rate during this session — approximate, not laboratory calorimetry." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Estimado a partir de tu frecuencia cardíaca durante esta sesión — aproximado, no es calorimetría de laboratorio." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Estimé à partir de ta fréquence cardiaque pendant cette séance — approximatif, pas une calorimétrie de laboratoire." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Estimado a partir da tua frequência cardíaca durante esta sessão — aproximado, não é calorimetria laboratorial." } }
+      }
+    },
+    "+%lld kcal surplus": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "+%lld kcal Überschuss" } },
+        "en": { "stringUnit": { "state": "translated", "value": "+%lld kcal surplus" } },
+        "es": { "stringUnit": { "state": "translated", "value": "+%lld kcal de superávit" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "+%lld kcal d'excédent" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "+%lld kcal de excedente" } }
+      }
+    },
+    "%lld kcal deficit": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%lld kcal Defizit" } },
+        "en": { "stringUnit": { "state": "translated", "value": "%lld kcal deficit" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%lld kcal de déficit" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%lld kcal de déficit" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%lld kcal de défice" } }
+      }
+    },
     "Resting heart rate and HRV are sitting at or below baseline: low physiological stress. You're in a calm, recovered state.": {
       "localizations": {
         "de": {

@@ -23,6 +23,8 @@ struct MetricDescriptor: Identifiable, Hashable {
         case "apple-health": return "Apple Health"
         case "xiaomi-band":  return "Mi Band"
         case "nutrition-csv": return String(localized: "Nutrition")
+        // FORK-ONLY, not ported to Android: the manual meal logger behind the Nutrition tab.
+        case "macro-manual": return String(localized: "Logged meals")
         case "noop-mood":    return String(localized: "Mood")
         default:             return "Whoop"   // "my-whoop" + on-device computed sources
         }
@@ -187,6 +189,14 @@ enum MetricCatalog {
         d("protein_g", String(localized: "Protein"), "Nutrition", "g", "nutrition-csv", "p.circle", 0, nil),
         d("carbs_g", String(localized: "Carbs"), "Nutrition", "g", "nutrition-csv", "c.circle", 0, nil),
         d("fat_g", String(localized: "Fat"), "Nutrition", "g", "nutrition-csv", "f.circle", 0, nil),
+
+        // FORK-ONLY, not ported to Android: the same four keys, re-summed daily from the Nutrition
+        // tab's manually logged meals (NutritionStore.rebankMacroTotals) under their own source id, so
+        // a CSV import and hand-logged meals never collide in the Explorer/Compare pickers.
+        d("calories_in", String(localized: "Calories In"), "Nutrition", "kcal", "macro-manual", "fork.knife", 0, nil),
+        d("protein_g", String(localized: "Protein"), "Nutrition", "g", "macro-manual", "p.circle", 0, nil),
+        d("carbs_g", String(localized: "Carbs"), "Nutrition", "g", "macro-manual", "c.circle", 0, nil),
+        d("fat_g", String(localized: "Fat"), "Nutrition", "g", "macro-manual", "f.circle", 0, nil),
 
         // ── Mind (daily mood check-in, 1–5; non-clinical self-tracking)
         d("mood", String(localized: "Mood"), "Mind", "/5", "noop-mood", "face.smiling", 0, true),

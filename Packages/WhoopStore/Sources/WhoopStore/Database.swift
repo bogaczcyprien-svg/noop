@@ -1103,6 +1103,32 @@ extension WhoopStore {
         migrator.registerMigration("v47-rr-whoop5-fill") { db in
             try db.execute(sql: WhoopStore.whoop5RrFillMigrationSQL)
         }
+        // v48-meal-log: manual per-meal macro logging (carbs/protein/fat in grams, + optional name) for
+        // the opt-in Nutrition tab. FORK-ONLY, not ported to Android.
+        //
+        // One flat, deviceId-keyed table, no foreign keys — the v46-lift-log idiom. `id` is a
+        // client-generated TEXT identifier (edit/delete by id, backup round-trips). `loggedAt` is unix
+        // seconds. `caloriesKcal` is computed by the CALLER at log time (MacroTargets.kcal, the 4/4/9
+        // Atwater factors) and stored denormalised rather than recomputed on read, so a later change to
+        // the kcal-per-gram convention never silently rewrites history. Create is `ifNotExists`.
+        //
+        // Pinned in schema_oracle.json as `ios_only`: this feature is iOS-only by design.
+        migrator.registerMigration("v48-meal-log") { db in
+            try db.create(table: "meal", options: [.ifNotExists]) { t in
+                t.column("id", .text).primaryKey()
+                t.column("deviceId", .text).notNull()
+                t.column("loggedAt", .integer).notNull()   // unix seconds — when the meal was logged/eaten
+                t.column("name", .text)                     // optional, user-typed, verbatim
+                t.column("proteinG", .double).notNull()
+                t.column("carbsG", .double).notNull()
+                t.column("fatG", .double).notNull()
+                // Denormalised at log time (4/4/9 kcal/g) — never recomputed on read.
+                t.column("caloriesKcal", .double).notNull()
+                t.column("note", .text)
+            }
+            try db.create(index: "idx_meal_device_loggedAt", on: "meal",
+                          columns: ["deviceId", "loggedAt"], options: [.ifNotExists])
+        }
         return migrator
     }
 }

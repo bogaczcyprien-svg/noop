@@ -127,7 +127,10 @@ struct RootTabView: View {
         // the corresponding system material and safe-area behaviour from the same TabView.
         TabView(selection: nativeTabSelection) {
             tab(todayTabRoot, "Today", "square.grid.2x2", path: $tabPaths[0], scrollSignal: scrollTop[0]).tag(0)
-            tab(TrendsView(), "Trends", "chart.line.uptrend.xyaxis", path: $tabPaths[1], scrollSignal: scrollTop[1]).tag(1)
+            // FORK-ONLY, not ported to Android. Nutrition replaces Trends in the primary tab bar (the user
+            // rarely uses Trends); Trends moves into the More list instead (see moreSection("Insights") and
+            // the .trends case in MoreDestination/pillarScreen below). Same tag/array slot, no renumbering.
+            tab(NutritionView(), "Nutrition", "chart.pie.fill", path: $tabPaths[1], scrollSignal: scrollTop[1]).tag(1)
             tab(SleepView(), "Sleep", "bed.double", path: $tabPaths[2], scrollSignal: scrollTop[2]).tag(2)
             // K3: Coach promoted to a top-level tab (was behind the More list). The sparkles icon
             // matches the More-tab row and the macOS sidebar entry.
@@ -207,7 +210,9 @@ struct RootTabView: View {
             case .devices:
                 showDevices = true
                 router.requestedDestination = nil
-            case .insightsHub, .labBook, .fusedRecord, .rhythm, .alarms:
+            case .insightsHub, .labBook, .fusedRecord, .rhythm, .alarms, .trends:
+                // FORK-ONLY: `.trends` joined this group because Trends moved off the primary tab bar
+                // (Nutrition took its slot) — a deep-link to it now opens as a pillar sheet too.
                 routedPillar = dest
                 router.requestedDestination = nil
             case .coach:
@@ -224,10 +229,6 @@ struct RootTabView: View {
                     break
                 }
                 withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 3 }
-                router.requestedDestination = nil
-            case .trends:
-                // Trends is a primary tab on iPhone (not a pillar sheet) — switch to it.
-                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 1 }
                 router.requestedDestination = nil
             case .activeWorkout:
                 // The Today active-workout indicator opens Live through the quick-action Live sheet; once
@@ -321,9 +322,8 @@ struct RootTabView: View {
                 case .fusedRecord: FusedRecordHost()
                 case .rhythm: RhythmHost(onClose: { routedPillar = nil })
                 case .devices: DevicesView()
-                // .trends is never presented as a pillar sheet on iPhone (it's a primary tab — the
-                // requestedDestination handler switches `selectedTab` instead), but the switch must stay
-                // exhaustive. Fall back to Trends inside the sheet host if it ever arrives here.
+                // FORK-ONLY: Trends moved off the primary tab bar (Nutrition took its slot), so a
+                // deep-link to Trends now lands here like the other pillar screens above.
                 case .trends: TrendsView()
                 // .activeWorkout routes through the quick-action Live sheet (handled above); this keeps the
                 // switch exhaustive and falls back to Live if it ever reaches the pillar host.
@@ -470,6 +470,8 @@ struct RootTabView: View {
                     MoreRow("Insights", "lightbulb.fill", .insights)
                     MoreRow("Explore", "square.grid.2x2.fill", .explore)
                     MoreRow("Compare", "rectangle.split.2x1.fill", .compare)
+                    // FORK-ONLY: Trends moved off the primary tab bar (Nutrition took its slot).
+                    MoreRow("Trends", "chart.line.uptrend.xyaxis", .trends)
                 }
                 moreSection("Body") {
                     MoreRow("Live", "waveform.path.ecg", .live)
@@ -615,7 +617,7 @@ struct RootTabView: View {
 /// per-screen chrome the old inline links applied lives at the single `navigationDestination(for:)`
 /// registration in `moreTab`.
 private enum MoreDestination: Hashable {
-    case insightsHub, intelligence, coach, insights, explore, compare
+    case insightsHub, intelligence, coach, insights, explore, compare, trends
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, plannedTraining, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
@@ -628,6 +630,7 @@ private enum MoreDestination: Hashable {
         case .insights:        InsightsView()
         case .explore:         MetricExplorerView()
         case .compare:         CompareView()
+        case .trends:          TrendsView()
         case .live:            LiveView()
         case .workouts:        WorkoutsView()
         case .liftLog:         LiftLogView()

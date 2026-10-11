@@ -30,6 +30,11 @@ struct IntervalsICUActivitiesSection: View {
     @State private var debriefText: [Int: String] = [:]
     @State private var debriefFailed: Set<Int> = []
     @State private var debriefLoading: Set<Int> = []
+    /// FORK-ONLY, not ported to Android. Per-activity fat/carb substrate split (`SubstrateEstimator`),
+    /// keyed by `activity.startTs` like `debriefText` above. Computed eagerly per visible card (not
+    /// gated behind a tap, unlike the AI debrief) since the user wants the percentage directly on the
+    /// card. Absent key = not yet computed or no HR for that window.
+    @State private var substrateByTs: [Int: SubstrateEstimator.SubstrateEstimate] = [:]
 
     /// Cap the number of activities shown — the Today embedding passes a small number so it doesn't
     /// dump a full season of rides onto the home screen; nil (the "See all" destination) shows every
@@ -116,11 +121,31 @@ struct IntervalsICUActivitiesSection: View {
                     if let kcal = activity.energyKcal {
                         statPair("Calories", "\(Int(kcal.rounded())) kcal")
                     }
+                    if let sub = substrateByTs[activity.startTs] {
+                        statPair("Substrat", "\(Int(sub.fatPct.rounded()))% lipides / \(Int(sub.carbPct.rounded()))% glucides")
+                    }
                 }
 
                 debriefSection(activity)
             }
         }
+        .task(id: activity.startTs) { await loadSubstrate(activity) }
+    }
+
+    /// FORK-ONLY, not ported to Android. Computes this activity's fat/carb substrate split from the
+    /// SAME per-sample HR fetch `debrief(_:)` performs, eagerly per card (`.task(id:)` fires once per
+    /// activity, cached in `substrateByTs`) rather than gated behind the AI debrief tap.
+    private func loadSubstrate(_ activity: WorkoutRow) async {
+        guard substrateByTs[activity.startTs] == nil, let kcal = activity.energyKcal, kcal > 0,
+              let s = await store() else { return }
+        let hr = (try? await s.hrSamples(
+            deviceId: IntervalsICUImporter.deviceId, from: activity.startTs, to: activity.endTs, limit: 8_000
+        )) ?? []
+        guard let maxHR = profile.age > 0 ? StrainScorer.tanakaHRmax(age: Double(profile.age)) : nil,
+              let estimate = SubstrateEstimator.estimate(
+                hr: hr, restingHR: StrainScorer.defaultRestingHR, maxHR: maxHR, totalKcal: kcal)
+        else { return }
+        substrateByTs[activity.startTs] = estimate
     }
 
     @ViewBuilder

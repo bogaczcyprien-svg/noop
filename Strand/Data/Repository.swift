@@ -3396,6 +3396,22 @@ final class Repository: ObservableObject {
                                            maxHR: maxHR)
     }
 
+    /// FORK-ONLY, not ported to Android. Approximate fat-vs-carbohydrate substrate split for one
+    /// workout window, read from the SAME per-sample HR this row's zones/Avg-HR/HRR already read (via
+    /// `workoutHrDeviceIds`) — so a detected bout reads its own strap, not the day union, same as the
+    /// three methods above. `energyKcal` is the bout's already-estimated total energy (e.g.
+    /// `WorkoutRow.energyKcal`); this call only splits it, never recomputes it. nil when there is no
+    /// HR in the window, `energyKcal` is nil/non-positive, or `maxHR`/`restingHR` are degenerate.
+    func workoutSubstrateEstimate(from: Int, to: Int, maxHR: Double, restingHR: Double,
+                                  energyKcal: Double?, source: String = "") async -> SubstrateEstimator.SubstrateEstimate? {
+        guard to > from, let energyKcal, energyKcal > 0 else { return nil }
+        let ids = Self.workoutHrDeviceIds(source: source, activeStrapId: deviceId,
+                                          importedIds: importedReadIds)
+        let samples = await hrSamples(deviceIds: ids, from: from, to: to)
+        return SubstrateEstimator.estimate(hr: samples, restingHR: restingHR, maxHR: maxHR,
+                                           totalKcal: energyKcal)
+    }
+
     /// Apple Health daily aggregates (steps/energy/vo2/hr).
     func appleDailyRows(days: Int = 4000) async -> [AppleDaily] {
         guard let store = await ensureStore() else { return [] }

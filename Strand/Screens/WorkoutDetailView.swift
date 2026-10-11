@@ -56,6 +56,10 @@ struct WorkoutDetailView: View {
     /// #516: computed from the recorded workout-end + post-workout HR window. nil when the workout was
     /// not intense enough or the strap did not record enough post-workout coverage.
     @State private var heartRateRecovery: HeartRateRecovery.Result?
+    /// FORK-ONLY, not ported to Android. The approximate fat-vs-carbohydrate substrate split for this
+    /// session, from heart rate alone (SubstrateEstimator). nil when there's no HR in the window, or
+    /// the row carries no `energyKcal` to split.
+    @State private var substrate: SubstrateEstimator.SubstrateEstimate?
 
     /// The GPS route captured for this session on-device (#524), if any. Decoded from `RouteStore` by the
     /// row's natural key. nil = no route was recorded (honest — the map only shows when points exist).
@@ -88,6 +92,7 @@ struct WorkoutDetailView: View {
             routeCard
             hrCurveCard
             zonesCard
+            substrateCard
             heartRateRecoveryCard
             if let strain = row.strain {
                 effortCard(strain: strain)
@@ -139,6 +144,16 @@ struct WorkoutDetailView: View {
         let hrr = await repo.workoutHeartRateRecovery(
             from: row.startTs, to: row.endTs, maxHR: Double(profile.hrMax), source: row.source)
 
+        // FORK-ONLY: the day's resting HR backs the Karvonen reserve the substrate split reads %HRR
+        // from — the same effective floor Charge/Effort use, falling back to StrainScorer.defaultRestingHR
+        // when the day hasn't scored one yet.
+        let dayKey = Repository.dayString(Date(timeIntervalSince1970: TimeInterval(row.startTs)))
+        let dayRestingHR = await repo.dailyMetrics(fromDay: dayKey, toDay: dayKey).first?.restingHr
+        let substrateEstimate = await repo.workoutSubstrateEstimate(
+            from: row.startTs, to: row.endTs, maxHR: Double(profile.hrMax),
+            restingHR: Double(dayRestingHR ?? Int(StrainScorer.defaultRestingHR)),
+            energyKcal: row.energyKcal, source: row.source)
+
         // Steps for an on-foot session (#398), computed at display time over the exact window so it
         // "fills in after sync": prefer the strap's own counter (MG/5.0) once it has offloaded the window,
         // else the phone pedometer (any strap, incl. WHOOP 4.0 / CSV-import). Never shown for non-foot
@@ -163,6 +178,7 @@ struct WorkoutDetailView: View {
             self.zoneMinutes = minutes
             self.zonesFromImport = fromImport
             self.heartRateRecovery = hrr
+            self.substrate = substrateEstimate
             self.steps = stepReadout
             self.loaded = true
         }
@@ -505,6 +521,58 @@ struct WorkoutDetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Substrate split (FORK-ONLY, not ported to Android)
+
+    @ViewBuilder private var substrateCard: some View {
+        if let s = substrate {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                SectionHeader("Fuel Source", overline: "Estimated from heart rate")
+                NoopCard(tint: StrandPalette.metricAmber) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        GeometryReader { geo in
+                            HStack(spacing: 2) {
+                                Rectangle()
+                                    .fill(StrandPalette.metricAmber)
+                                    .frame(width: max(0, CGFloat(s.fatPct / 100.0) * geo.size.width))
+                                Rectangle()
+                                    .fill(StrandPalette.metricCyan)
+                            }
+                        }
+                        .frame(height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(String(localized: "Fuel source: \(Int(s.fatPct.rounded())) percent fat, \(Int(s.carbPct.rounded())) percent carbohydrate"))
+
+                        HStack(spacing: 20) {
+                            substrateStat("Fat", pct: s.fatPct, tint: StrandPalette.metricAmber)
+                            substrateStat("Carbs", pct: s.carbPct, tint: StrandPalette.metricCyan)
+                        }
+
+                        Text("Estimated from your heart rate during this session — approximate, not laboratory calorimetry.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func substrateStat(_ label: LocalizedStringKey, pct: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(tint)
+                    .frame(width: 8, height: 8)
+                Text(label)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            Text("\(Int(pct.rounded()))%")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
         }
     }
 
