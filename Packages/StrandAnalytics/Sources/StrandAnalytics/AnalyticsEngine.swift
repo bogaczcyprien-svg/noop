@@ -365,6 +365,19 @@ public enum AnalyticsEngine {
                                   // steps (observed: ~12k shown for a day with two rides and ~2k actual
                                   // walking). Default empty keeps every existing caller/test byte-identical.
                                   excludedStepWindows: [(start: Int, end: Int)] = [],
+                                  // FORK-ONLY, not ported to Android. `[start, end)` unix-second windows plus
+                                  // the externally-known kcal for that span (e.g. an imported cycling session's
+                                  // own power/speed-based energy from intervals.icu). The whole-day Keytel HR
+                                  // estimate below is generic-exercise-validated and systematically over-reads
+                                  // cycling: at a given HR, pedaling (seated, supported, lower muscle-mass
+                                  // demand) burns less than the running/treadmill effort Keytel was fit to —
+                                  // observed ~6000 kcal/day shown against a user-reported ~3000 kcal across two
+                                  // rides, corroborated by Apple Health (Santé) showing a lower total than NOOP
+                                  // for the same day. HR samples inside the window are dropped from the day
+                                  // estimate (same filter-before-summing shape as `excludedStepWindows`) and
+                                  // its own kcal is added back in their place. Default empty keeps every
+                                  // existing caller/test byte-identical.
+                                  excludedCalorieWindows: [(start: Int, end: Int, kcal: Double)] = [],
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal
                                   // baseline from these means across nights and re-derives
@@ -1032,10 +1045,21 @@ public enum AnalyticsEngine {
         // (dayString(ts, tzOffset)) so it agrees with the bucket (#277). Fall back to the
         // night-window hr for pure-function callers that don't supply dayHr. Strain keeps the full
         // window (bounded log).
+        // FORK-ONLY: drop samples inside a caller-supplied excluded-calorie window (see
+        // `excludedCalorieWindows`) before handing the stream to the Keytel day estimate, then add that
+        // window's own externally-known kcal back in its place — so a cycling session's HR never gets
+        // scored at the generic (running-calibrated) gross rate, and its own, better energy number is
+        // used for that span instead.
         let dayHrFiltered = (dayHr ?? hr).filter { tsInDay($0.ts) }
-        let activeKcalEst: Double? = dayHrFiltered.isEmpty ? nil : Calories.estimateDayCalories(
+            .filter { sample in !excludedCalorieWindows.contains { sample.ts >= $0.start && sample.ts < $0.end } }
+        let hrBasedKcal: Double? = dayHrFiltered.isEmpty ? nil : Calories.estimateDayCalories(
             dayHrFiltered, profile: profile, hrmax: effMaxHR,
             restingHR: restingHRDaily.map(Double.init))
+        let importedRideKcal = excludedCalorieWindows.reduce(0.0) { $0 + $1.kcal }
+        let activeKcalEst: Double? = {
+            guard let base = hrBasedKcal else { return importedRideKcal > 0 ? importedRideKcal : nil }
+            return base + importedRideKcal
+        }()
 
         // ── Assemble DailyMetric ──────────────────────────────────────────────
         let daily = DailyMetric(

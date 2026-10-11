@@ -280,4 +280,60 @@ final class DayCaloriesTests: XCTestCase {
         XCTAssertEqual(forward.activeKcal, 0.0, accuracy: 1e-12,
                        "the tie resolves to the lower reading, so no active energy is credited")
     }
+
+    // MARK: - excludedCalorieWindows (FORK-ONLY, not ported to Android)
+
+    func testExcludedCalorieWindowReplacesHrEstimateWithImportedKcal() throws {
+        // The whole day's HR falls inside the window => the generic Keytel estimate is dropped
+        // entirely and the day total is exactly the imported (e.g. intervals.icu) kcal.
+        let profile = UserProfile()
+        let samples = (0..<600).map { hr($0, 150) }
+        let total = try XCTUnwrap(AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: samples,
+            excludedCalorieWindows: [(start: noonUtc, end: noonUtc + 600, kcal: 500.0)],
+            profile: profile).daily.activeKcalEst)
+        XCTAssertEqual(total, 500.0, accuracy: 1e-9,
+                       "with the whole day's HR excluded, the total must be exactly the imported kcal")
+    }
+
+    func testExcludedCalorieWindowAddsImportedKcalAlongsideRemainingHr() throws {
+        // Only the "ride" portion of the day is excluded; the rest of the day keeps its own
+        // Keytel estimate, and the ride's imported kcal is added on top of it (not instead of it).
+        let profile = UserProfile()
+        let rideWindow = (0..<300).map { hr($0, 150) }
+        let restOfDay = (0..<300).map { hr(1_000 + $0, 90) }
+        let restOnlyKcal = try XCTUnwrap(AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: restOfDay, profile: profile).daily.activeKcalEst)
+        let total = try XCTUnwrap(AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: rideWindow + restOfDay,
+            excludedCalorieWindows: [(start: noonUtc, end: noonUtc + 300, kcal: 500.0)],
+            profile: profile).daily.activeKcalEst)
+        XCTAssertEqual(total, restOnlyKcal + 500.0, accuracy: 1e-9,
+                       "the excluded window's HR estimate must be replaced by its imported kcal, added "
+                       + "to the rest of the day's own estimate")
+    }
+
+    func testExcludedCalorieWindowEndIsExclusive() throws {
+        // A sample exactly AT the window's end boundary is NOT excluded (half-open [start, end)),
+        // matching the convention `excludedStepWindows` and a workout's own [startTs, endTs) use.
+        let profile = UserProfile()
+        let keptOnly = try XCTUnwrap(AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: [hr(100, 150)], profile: profile).daily.activeKcalEst)
+        let total = try XCTUnwrap(AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: [hr(0, 150), hr(100, 150)],
+            excludedCalorieWindows: [(start: noonUtc, end: noonUtc + 100, kcal: 42.0)],
+            profile: profile).daily.activeKcalEst)
+        XCTAssertEqual(total, keptOnly + 42.0, accuracy: 1e-9)
+    }
+
+    func testNoExcludedCalorieWindowsIsByteIdenticalToDefault() {
+        // Empty (the default) must leave every existing caller's total untouched.
+        let profile = UserProfile()
+        let samples = (0..<600).map { hr($0, 130) }
+        let withEmpty = AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: samples, excludedCalorieWindows: [], profile: profile).daily.activeKcalEst
+        let withoutParam = AnalyticsEngine.analyzeDay(
+            day: dayUtc, hr: samples, profile: profile).daily.activeKcalEst
+        XCTAssertEqual(withEmpty, withoutParam)
+    }
 }

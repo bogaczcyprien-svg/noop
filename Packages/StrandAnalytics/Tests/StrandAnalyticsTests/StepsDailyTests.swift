@@ -147,8 +147,9 @@ final class StepsDailyTests: XCTestCase {
     func testExcludedWindowDropsTicksEntirelyInsideIt() {
         // All three samples (and so both deltas) fall inside [0, 180) => excluded => nil, not 120.
         let s = [step(0, 100), step(60, 150), step(120, 220)]
-        let total = AnalyticsEngine.analyzeDay(day: dayUtc, steps: s, profile: profile,
-                                               excludedStepWindows: [(start: noonUtc, end: noonUtc + 180)]).daily.steps
+        let total = AnalyticsEngine.analyzeDay(day: dayUtc, steps: s,
+                                               excludedStepWindows: [(start: noonUtc, end: noonUtc + 180)],
+                                               profile: profile).daily.steps
         XCTAssertNil(total)
     }
 
@@ -157,8 +158,9 @@ final class StepsDailyTests: XCTestCase {
         // second (150->220, landing at ts=120) is dropped by the exclusion.
         let s = [step(0, 100), step(60, 150), step(120, 220)]
         let total = AnalyticsEngine.analyzeDay(
-            day: dayUtc, steps: s, profile: profile,
-            excludedStepWindows: [(start: noonUtc + 90, end: noonUtc + 180)]).daily.steps
+            day: dayUtc, steps: s,
+            excludedStepWindows: [(start: noonUtc + 90, end: noonUtc + 180)],
+            profile: profile).daily.steps
         XCTAssertEqual(total, 50)
     }
 
@@ -167,8 +169,9 @@ final class StepsDailyTests: XCTestCase {
         // matching the convention a workout's own [startTs, endTs) uses elsewhere in the engine.
         let s = [step(0, 100), step(60, 150), step(120, 220)]
         let total = AnalyticsEngine.analyzeDay(
-            day: dayUtc, steps: s, profile: profile,
-            excludedStepWindows: [(start: noonUtc, end: noonUtc + 60)]).daily.steps
+            day: dayUtc, steps: s,
+            excludedStepWindows: [(start: noonUtc, end: noonUtc + 60)],
+            profile: profile).daily.steps
         // Only the first sample (ts=0) is excluded; the 150->220 delta at ts=120 still counts.
         XCTAssertEqual(total, 70)
     }
@@ -176,8 +179,9 @@ final class StepsDailyTests: XCTestCase {
     func testNoExcludedWindowsIsByteIdenticalToDefault() {
         // Empty (the default) must leave every existing caller's total untouched.
         let s = [step(0, 100), step(60, 150), step(120, 220)]
-        let total = AnalyticsEngine.analyzeDay(day: dayUtc, steps: s, profile: profile,
-                                               excludedStepWindows: []).daily.steps
+        let total = AnalyticsEngine.analyzeDay(day: dayUtc, steps: s,
+                                               excludedStepWindows: [],
+                                               profile: profile).daily.steps
         XCTAssertEqual(total, stepsFor(s))
     }
 }

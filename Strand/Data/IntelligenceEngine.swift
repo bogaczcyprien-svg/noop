@@ -1449,6 +1449,20 @@ final class IntelligenceEngine: ObservableObject {
                     .filter { IntelligenceEngine.isNonAmbulatorySport($0.sport) }
                     .map { (start: $0.startTs, end: $0.endTs) }
 
+                // FORK-ONLY, not ported to Android. Same non-ambulatory intervals.icu sessions, this time
+                // handed to the day's calorie estimate (see `AnalyticsEngine.excludedCalorieWindows`): the
+                // whole-day Keytel HR formula is calibrated on generic/running exercise and over-reads a
+                // sustained cycling HR, so a ride with a known imported `energyKcal` (intervals.icu's own
+                // power/speed-based number) has its HR-estimated span replaced by that number instead.
+                // Only rides with a positive imported kcal qualify — one with none keeps using the HR
+                // estimate for its window exactly as before.
+                let excludedCalorieWindows: [(start: Int, end: Int, kcal: Double)] = intervalsRides
+                    .filter { IntelligenceEngine.isNonAmbulatorySport($0.sport) }
+                    .compactMap { ride in
+                        guard let kcal = ride.energyKcal, kcal > 0 else { return nil }
+                        return (start: ride.startTs, end: ride.endTs, kcal: kcal)
+                    }
+
                 // CONSUME (#531 / #175): the strap's OWN band sleep_state for the night window as timestamped
                 // (ts, state) samples, so the H7 morning-stillness guard can confirm a borderline re-onset
                 // against the strap's OWN scored band, AND analyzeDay can grid it per session for persistence.
@@ -1556,6 +1570,7 @@ final class IntelligenceEngine: ObservableObject {
                                                      steps: steps, dayHr: dayHr, daySteps: daySteps,
                                                      dayGravity: dayGrav,
                                                      excludedStepWindows: excludedStepWindows,   // FORK-ONLY
+                                                     excludedCalorieWindows: excludedCalorieWindows,   // FORK-ONLY
                                                      skinTemp: skin,
                                                      skinTempFamily: skinFamily,   // #938
                                                      skinTempAnchorRaw: skinAnchorRaw,   // #938 second capture
