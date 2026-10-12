@@ -42,6 +42,7 @@ extension TodaySection {
 extension KeyMetric {
     var customizationIcon: String {
         switch self {
+        case .dayMeanHr: return "heart.text.square.fill"
         case .charge: return "bolt.heart"
         case .effort: return "figure.run"
         case .rest: return "moon.stars"
@@ -59,6 +60,7 @@ extension KeyMetric {
 
     var customizationTint: Color {
         switch self {
+        case .dayMeanHr: return StrandPalette.metricRose
         case .charge: return StrandPalette.chargeColor
         case .effort: return StrandPalette.effortColor
         case .rest, .hrv: return StrandPalette.metricPurple
