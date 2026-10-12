@@ -16,9 +16,24 @@ struct NutritionView: View {
     @EnvironmentObject var profile: ProfileStore
 
     @State private var meals: [MealRow] = []
+    @State private var templates: [MealTemplateRow] = []
     @State private var reloadTick = 0
     @State private var showAddMeal = false
     @State private var editingMeal: MealRow?
+
+    // MARK: - Weekly trend (FORK-ONLY, not ported to Android)
+    @State private var proteinTrendPoints: [TrendPoint] = []
+    @State private var carbsTrendPoints: [TrendPoint] = []
+    @State private var fatTrendPoints: [TrendPoint] = []
+    @State private var proteinHitRatio: (hit: Int, of: Int) = (0, 0)
+    @State private var carbsHitRatio: (hit: Int, of: Int) = (0, 0)
+    @State private var fatHitRatio: (hit: Int, of: Int) = (0, 0)
+    private static let trendDays = 7
+
+    // MARK: - Nutrition <-> Recovery link (FORK-ONLY, not ported to Android)
+    @State private var recoveryInsights: [NutritionRecoveryInsight] = []
+    private static let insightsDays = 60
+    private static let insightsShown = 2
 
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
     private var cardOpacity: Double { max(0, min(1, Double(cardOpacityPercent) / 100)) }
@@ -40,25 +55,40 @@ struct NutritionView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 targetsSection
                 balanceSection
+                trendSection
+                templatesSection
                 addMealButton
                 mealsSection
+                insightsSection
                 Text("Targets are an approximate guide from your weight and today's effort — not medical or dietetic advice.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .task(id: reloadTick) { await reload() }
+        .task(id: reloadTick) { await reload(); await loadTrend(); await loadInsights() }
         .sheet(isPresented: $showAddMeal) {
-            MealEntrySheet(title: "Add meal", meal: nil) { name, p, c, f in
+            MealEntrySheet(title: "Add meal", meal: nil) { name, p, c, f, saveAsTemplate in
                 showAddMeal = false
-                Task { await save(name: name, proteinG: p, carbsG: c, fatG: f) }
+                Task {
+                    await save(name: name, proteinG: p, carbsG: c, fatG: f)
+                    if saveAsTemplate, let name, !name.isEmpty {
+                        _ = await repo.saveMealTemplate(name: name, proteinG: p, carbsG: c, fatG: f)
+                        reloadTick &+= 1
+                    }
+                }
             } onCancel: { showAddMeal = false }
         }
         .sheet(item: $editingMeal) { meal in
-            MealEntrySheet(title: "Edit meal", meal: meal) { name, p, c, f in
+            MealEntrySheet(title: "Edit meal", meal: meal) { name, p, c, f, saveAsTemplate in
                 editingMeal = nil
-                Task { await save(id: meal.id, loggedAt: meal.loggedAt, name: name, proteinG: p, carbsG: c, fatG: f) }
+                Task {
+                    await save(id: meal.id, loggedAt: meal.loggedAt, name: name, proteinG: p, carbsG: c, fatG: f)
+                    if saveAsTemplate, let name, !name.isEmpty {
+                        _ = await repo.saveMealTemplate(name: name, proteinG: p, carbsG: c, fatG: f)
+                        reloadTick &+= 1
+                    }
+                }
             } onCancel: { editingMeal = nil }
         }
     }
@@ -155,6 +185,166 @@ struct NutritionView: View {
         return String(localized: "Balanced")
     }
 
+    // MARK: - Weekly trend (FORK-ONLY, not ported to Android)
+    //
+    // Per-macro grams/day over the last `trendDays`, plus how many of the days that had ANY meal
+    // logged hit at least 90% of that day's target (days with no logging aren't counted as "missed" —
+    // honest about what was and wasn't tracked, same stance `balanceSection` takes for burned kcal).
+
+    private var trendSection: some View {
+        card(padding: 18) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("This week").strandOverline()
+                macroTrendRow("Protein", points: proteinTrendPoints, tint: StrandPalette.metricRose, hit: proteinHitRatio)
+                macroTrendRow("Carbs", points: carbsTrendPoints, tint: StrandPalette.metricCyan, hit: carbsHitRatio)
+                macroTrendRow("Fat", points: fatTrendPoints, tint: StrandPalette.metricAmber, hit: fatHitRatio)
+            }
+        }
+    }
+
+    private func macroTrendRow(_ label: String, points: [TrendPoint], tint: Color, hit: (hit: Int, of: Int)) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(LocalizedStringKey(label))
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Spacer()
+                if hit.of > 0 {
+                    Text("On target \(hit.hit)/\(hit.of) logged days")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+            if points.count >= 2 {
+                TrendChart(points: points, gradient: trendGradient(tint), valueRange: trendValueRange(points),
+                          showsArea: false, showsBars: true, height: 64, showsHover: false,
+                          valueFormat: { "\(Int($0.rounded()))g" },
+                          accessibilityLabel: String(localized: "\(label) weekly trend"))
+            } else {
+                Text("Log a few more days to see a trend.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .frame(height: 64, alignment: .center)
+            }
+        }
+    }
+
+    private func trendGradient(_ color: Color) -> Gradient {
+        Gradient(stops: [.init(color: color.opacity(0.55), location: 0), .init(color: color, location: 1)])
+    }
+
+    private func trendValueRange(_ points: [TrendPoint]) -> ClosedRange<Double> {
+        let maxV = points.map(\.value).max() ?? 1
+        return 0...max(maxV * 1.15, 1)
+    }
+
+    /// Local `yyyy-MM-dd` parser (day key -> Date), duplicated from `NutritionStore`'s file-private one
+    /// rather than cross-importing it — same precedent as `MacroTargets` duplicating `roundToNearest`.
+    private static let dayKeyParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private func loadTrend() async {
+        let days = Self.trendDays
+        async let proteinA = repo.series(key: "protein_g", source: NutritionStore.metricSeriesSourceId, days: days)
+        async let carbsA = repo.series(key: "carbs_g", source: NutritionStore.metricSeriesSourceId, days: days)
+        async let fatA = repo.series(key: "fat_g", source: NutritionStore.metricSeriesSourceId, days: days)
+        let protein = await proteinA
+        let carbs = await carbsA
+        let fat = await fatA
+
+        func toPoints(_ series: [(day: String, value: Double)]) -> [TrendPoint] {
+            series.compactMap { row in
+                Self.dayKeyParser.date(from: row.day).map { TrendPoint(date: $0, value: row.value) }
+            }
+        }
+        proteinTrendPoints = toPoints(protein)
+        carbsTrendPoints = toPoints(carbs)
+        fatTrendPoints = toPoints(fat)
+
+        let proteinByDay = Dictionary(uniqueKeysWithValues: protein.map { ($0.day, $0.value) })
+        let carbsByDay = Dictionary(uniqueKeysWithValues: carbs.map { ($0.day, $0.value) })
+        let fatByDay = Dictionary(uniqueKeysWithValues: fat.map { ($0.day, $0.value) })
+
+        var pHit = 0, pOf = 0, cHit = 0, cOf = 0, fHit = 0, fOf = 0
+        for d in repo.days.suffix(days) {
+            let target = MacroTargets.dailyTargets(weightKg: profile.weightKg, effort: d.strain, dailyEnergyKcal: d.activeKcalEst)
+            if let p = proteinByDay[d.day], p > 0 {
+                pOf += 1
+                if p >= Double(target.proteinG) * 0.9 { pHit += 1 }
+            }
+            if let c = carbsByDay[d.day], c > 0 {
+                cOf += 1
+                if c >= Double(target.carbsG) * 0.9 { cHit += 1 }
+            }
+            if let f = fatByDay[d.day], f > 0 {
+                fOf += 1
+                if f >= Double(target.fatG) * 0.9 { fHit += 1 }
+            }
+        }
+        proteinHitRatio = (pHit, pOf)
+        carbsHitRatio = (cHit, cOf)
+        fatHitRatio = (fHit, fOf)
+    }
+
+    // MARK: - Meal templates ("favorites") — FORK-ONLY, not ported to Android
+
+    @ViewBuilder private var templatesSection: some View {
+        if !templates.isEmpty {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("Quick add").strandOverline()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(templates) { template in
+                            templateChip(template)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func templateChip(_ template: MealTemplateRow) -> some View {
+        Button {
+            Task { await logTemplate(template) }
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(template.name)
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(1)
+                Text("\(Int(MacroTargets.kcal(proteinG: template.proteinG, carbsG: template.carbsG, fatG: template.fatG).rounded())) kcal")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(NoopPanelSurface(cornerRadius: 16, surfaceOpacity: cardOpacity))
+        }
+        .buttonStyle(LiquidPressStyle())
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await deleteTemplate(template) }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .accessibilityLabel("\(template.name), log this meal")
+    }
+
+    private func logTemplate(_ template: MealTemplateRow) async {
+        _ = await repo.logFromTemplate(template)
+        reloadTick &+= 1
+    }
+
+    private func deleteTemplate(_ template: MealTemplateRow) async {
+        _ = await repo.deleteMealTemplate(id: template.id)
+        reloadTick &+= 1
+    }
+
     // MARK: - Add meal
 
     private var addMealButton: some View {
@@ -230,10 +420,76 @@ struct NutritionView: View {
 
     private static var entryTimeFmt: DateFormatter { AppClock.hourMinuteFormatter() }
 
+    // MARK: - Nutrition <-> Recovery link (FORK-ONLY, not ported to Android)
+
+    @ViewBuilder private var insightsSection: some View {
+        card(padding: 18) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("Nutrition & Recovery").strandOverline()
+                if recoveryInsights.isEmpty {
+                    Text("Log meals across more days to see how nutrition relates to tomorrow's recovery.")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(recoveryInsights.prefix(Self.insightsShown), id: \.metricKey) { insight in
+                        insightRow(insight)
+                    }
+                }
+            }
+        }
+    }
+
+    private func insightMetricTitle(_ key: String) -> String {
+        switch key {
+        case "calories_in": return String(localized: "Calories")
+        case "protein_g": return String(localized: "Protein")
+        case "carbs_g": return String(localized: "Carbs")
+        case "fat_g": return String(localized: "Fat")
+        default: return String(localized: "Calorie balance")
+        }
+    }
+
+    private func insightRow(_ insight: NutritionRecoveryInsight) -> some View {
+        let r = insight.correlation.r
+        let title = insightMetricTitle(insight.metricKey)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(title) ↔ next-day Charge: r = \(signedR(r)) (\(strengthWord(r)) \(directionWord(r))) over \(insight.correlation.n) days.")
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func signedR(_ r: Double) -> String {
+        (r >= 0 ? "+" : "−") + String(format: "%.2f", abs(r))
+    }
+
+    private func strengthWord(_ r: Double) -> String {
+        switch abs(r) {
+        case ..<0.1:  return String(localized: "negligible")
+        case ..<0.3:  return String(localized: "weak")
+        case ..<0.5:  return String(localized: "moderate")
+        case ..<0.7:  return String(localized: "strong")
+        default:      return String(localized: "very strong")
+        }
+    }
+
+    private func directionWord(_ r: Double) -> String {
+        if abs(r) < 0.1 { return "" }
+        return r >= 0 ? String(localized: "positive") : String(localized: "negative")
+    }
+
+    private func loadInsights() async {
+        let (series, recovery) = await repo.nutritionRecoverySeries(days: Self.insightsDays)
+        recoveryInsights = NutritionRecoveryInsights.insights(series: series, recovery: recovery, lagDays: 1)
+    }
+
     // MARK: - Data
 
     private func reload() async {
         meals = await repo.meals()
+        templates = await repo.mealTemplates()
     }
 
     private func save(id: String = UUID().uuidString, loggedAt: Int = Int(Date().timeIntervalSince1970),
@@ -254,16 +510,18 @@ struct NutritionView: View {
 /// Carbs/protein/fat in grams (+ optional name) — the user types exact numbers, calories compute live.
 private struct MealEntrySheet: View {
     let title: LocalizedStringKey
-    let onSave: (_ name: String?, _ proteinG: Double, _ carbsG: Double, _ fatG: Double) -> Void
+    let onSave: (_ name: String?, _ proteinG: Double, _ carbsG: Double, _ fatG: Double, _ saveAsTemplate: Bool) -> Void
     let onCancel: () -> Void
 
     @State private var name: String
     @State private var proteinText: String
     @State private var carbsText: String
     @State private var fatText: String
+    /// Only offered once a name is typed — a template needs one to be found again in the quick-add row.
+    @State private var saveAsTemplate = false
 
     init(title: LocalizedStringKey, meal: MealRow?,
-         onSave: @escaping (_ name: String?, _ proteinG: Double, _ carbsG: Double, _ fatG: Double) -> Void,
+         onSave: @escaping (_ name: String?, _ proteinG: Double, _ carbsG: Double, _ fatG: Double, _ saveAsTemplate: Bool) -> Void,
          onCancel: @escaping () -> Void) {
         self.title = title
         self.onSave = onSave
@@ -297,6 +555,11 @@ private struct MealEntrySheet: View {
             gramField("Carbs (g)", text: $carbsText)
             gramField("Fat (g)", text: $fatText)
 
+            if !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Toggle("Save as template", isOn: $saveAsTemplate)
+                    .font(StrandFont.subhead)
+            }
+
             HStack {
                 Text("Calories")
                     .font(StrandFont.subhead)
@@ -311,8 +574,9 @@ private struct MealEntrySheet: View {
             HStack(spacing: NoopMetrics.gap) {
                 NoopButton("Cancel", kind: .secondary, fullWidth: true) { onCancel() }
                 NoopButton("Save", kind: .primary, fullWidth: true) {
-                    onSave(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name,
-                          proteinG, carbsG, fatG)
+                    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSave(trimmedName.isEmpty ? nil : trimmedName,
+                          proteinG, carbsG, fatG, saveAsTemplate && !trimmedName.isEmpty)
                 }
                 .disabled(!canSave)
             }

@@ -1129,6 +1129,28 @@ extension WhoopStore {
             try db.create(index: "idx_meal_device_loggedAt", on: "meal",
                           columns: ["deviceId", "loggedAt"], options: [.ifNotExists])
         }
+        // v49-meal-template: saved meal "favorites" — a named protein/carbs/fat bundle the Nutrition
+        // tab can re-log in one tap instead of retyping grams. FORK-ONLY, not ported to Android.
+        //
+        // Natural key is (deviceId, name), same idiom as v45's `liftExercise` vocabulary: re-saving an
+        // existing name updates it rather than duplicating, and `lastUsedTs` (bumped on every quick-add
+        // tap) drives most-recently-used-first ordering in the picker.
+        //
+        // Pinned in schema_oracle.json as `ios_only`: this feature is iOS-only by design.
+        migrator.registerMigration("v49-meal-template") { db in
+            try db.create(table: "mealTemplate", options: [.ifNotExists]) { t in
+                t.column("id", .text).primaryKey()
+                t.column("deviceId", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("proteinG", .double).notNull()
+                t.column("carbsG", .double).notNull()
+                t.column("fatG", .double).notNull()
+                t.column("createdAt", .integer).notNull()   // unix seconds
+                t.column("lastUsedTs", .integer)            // unix seconds; recency for the quick-add row
+            }
+            try db.create(index: "idx_mealTemplate_natural", on: "mealTemplate",
+                          columns: ["deviceId", "name"], options: [.unique, .ifNotExists])
+        }
         return migrator
     }
 }

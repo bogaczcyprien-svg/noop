@@ -98,4 +98,70 @@ extension Repository {
         MacroTargets.dailyTargets(weightKg: weightKg, effort: today?.strain,
                                   dailyEnergyKcal: today?.activeKcalEst)
     }
+
+    // MARK: - Meal templates ("favorites") — FORK-ONLY, not ported to Android
+
+    /// Saved templates, most-recently-used first — the Nutrition tab's quick-add row.
+    func mealTemplates() async -> [MealTemplateRow] {
+        guard let store = await storeHandle() else { return [] }
+        return (try? await store.mealTemplates(deviceId: NutritionStore.sourceId)) ?? []
+    }
+
+    /// Save (or overwrite, by name) a template from the add/edit meal form's "Save as template" toggle.
+    @discardableResult
+    func saveMealTemplate(name: String, proteinG: Double, carbsG: Double, fatG: Double) async -> MealTemplateRow {
+        let row = MealTemplateRow(id: UUID().uuidString, deviceId: NutritionStore.sourceId, name: name,
+                                  proteinG: proteinG, carbsG: carbsG, fatG: fatG,
+                                  createdAt: Int(Date().timeIntervalSince1970), lastUsedTs: nil)
+        if let store = await storeHandle() {
+            _ = try? await store.upsertMealTemplates([row])
+        }
+        return row
+    }
+
+    /// Log a meal now from a saved template (the "one tap" quick-add), bumping its `lastUsedTs` so it
+    /// stays near the top of the picker.
+    @discardableResult
+    func logFromTemplate(_ template: MealTemplateRow) async -> MealRow {
+        let now = Int(Date().timeIntervalSince1970)
+        if let store = await storeHandle() {
+            _ = try? await store.touchMealTemplate(id: template.id, now: now)
+        }
+        return await saveMeal(loggedAt: now, name: template.name, proteinG: template.proteinG,
+                             carbsG: template.carbsG, fatG: template.fatG)
+    }
+
+    /// Delete a saved template. Meals already logged from it are untouched.
+    @discardableResult
+    func deleteMealTemplate(id: String) async -> Bool {
+        guard let store = await storeHandle() else { return false }
+        return (try? await store.deleteMealTemplate(id: id)) ?? false
+    }
+
+    // MARK: - Nutrition <-> Recovery link (FORK-ONLY, not ported to Android)
+
+    /// The last `days` of each macro-manual series, plus a derived day-sum calorie BALANCE (eaten -
+    /// `DailyMetric.activeKcalEst`, only for days both exist), and the matching Recovery series — the
+    /// raw inputs `NutritionRecoveryInsights.insights(...)` correlates. Mixes two different stores'
+    /// output (metricSeries + DailyMetric), so it stays at this Repository tier rather than inside the
+    /// pure StrandAnalytics package, same stance as `balanceSection`'s live eaten-vs-burned glue.
+    func nutritionRecoverySeries(days: Int) async -> (series: [String: [(day: String, value: Double)]],
+                                                       recovery: [(day: String, value: Double)]) {
+        var series: [String: [(day: String, value: Double)]] = [:]
+        for key in ["calories_in", "protein_g", "carbs_g", "fat_g"] {
+            series[key] = await self.series(key: key, source: NutritionStore.metricSeriesSourceId, days: days)
+        }
+        let burnedByDay = Dictionary(uniqueKeysWithValues: self.days.suffix(days + 1).compactMap { d -> (String, Double)? in
+            d.activeKcalEst.map { (d.day, $0) }
+        })
+        if let eaten = series["calories_in"] {
+            series["balance_kcal"] = eaten.compactMap { row in
+                burnedByDay[row.day].map { (day: row.day, value: row.value - $0) }
+            }
+        }
+        let recovery = self.days.suffix(days + 1).compactMap { d -> (day: String, value: Double)? in
+            d.recovery.map { (d.day, $0) }
+        }
+        return (series, recovery)
+    }
 }

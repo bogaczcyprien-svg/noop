@@ -318,6 +318,11 @@ struct TodayView: View {
 
     // 14-day sparkline series, keyed by metric key. Loaded once in .task.
     @State private var sparks: [String: [Double]] = [:]
+    /// FORK-ONLY: the whole-day (incl. night) mean HR for the selected day — the Key Metric tile's
+    /// value, computed live from the same HR buckets the 24h curve fetches.
+    @State private var dayMeanHr: Double?
+    /// Drives the "Avg HR (24h)" tile's detail sheet (`DayMeanHRDetailView`).
+    @State private var showDayMeanHRDetail = false
     @State private var workouts: [WorkoutRow] = []
     /// #1694: a tapped Latest-Workouts tile. Wrapped so `.sheet(item:)` drives presentation, mirroring
     /// WorkoutsView's own detail target — the feed was read-only, so the only route to a session's
@@ -1626,6 +1631,14 @@ struct TodayView: View {
         // A1 (#514/#706): the Charge breakdown, opened by tapping the Today hero Charge ring. The body
         // builds lazily here (#819 lag) from the drivers DERIVED off the displayed row (never a second read).
         .sheet(isPresented: $showChargeBreakdown) { chargeBreakdownSheet }
+        // FORK-ONLY: the whole-day mean HR tile's detail — night-only figure + trend charts. Own
+        // NavigationStack inside the sheet, same idiom as the WorkoutDetailView sheet just above.
+        .sheet(isPresented: $showDayMeanHRDetail) {
+            NavigationStack {
+                DayMeanHRDetailView()
+                    .environmentObject(repo)
+            }
+        }
         // Every Today layout/card affordance presents the same draft-based editor. Section-level buttons
         // deep-link to their child page; Cancel/Save semantics and Shown/Hidden rows stay identical.
         .sheet(item: $customizationDestination) { destination in
@@ -3945,6 +3958,29 @@ struct TodayView: View {
         let d = displayDay
         let aLatest = appleDays.last
         switch metric {
+        case .dayMeanHr:
+            // FORK-ONLY: the only Key Metric tile that's tappable today — opens `DayMeanHRDetailView`
+            // (night-only figure + trend charts). The trailing chevron is the tap affordance, since no
+            // other tile in this grid carries one.
+            Button {
+                showDayMeanHRDetail = true
+            } label: {
+                StatTile(
+                    label: "Avg HR (24h)",
+                    value: dayMeanHr.map { "\(Int($0.rounded()))" } ?? "—",
+                    caption: dayMeanHr == nil ? Self.needsStrapCaption : "bpm",
+                    accent: dayMeanHr == nil ? StrandPalette.textPrimary : StrandPalette.metricRose,
+                    sparkline: sparks["day_mean_hr"],
+                    sparkColor: StrandPalette.metricRose,
+                    accessory: {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(Text(String(localized: "Opens the whole-day heart rate detail.")))
         case .charge:
             // Order of precedence: today's own scored recovery → mid-calibration "N of 4" → the last
             // scored day carried over ("Last night · <date>", #543) so a post-rollover today that
@@ -4707,6 +4743,9 @@ struct TodayView: View {
         async let stepsAppleSpark    = sparkValues("steps", source: "apple-health", window: 14)
         async let weightSpark        = sparkValues("weight", source: "apple-health", window: 90)
         async let activeKcalSpark    = sparkValues("active_kcal", source: "apple-health", window: 14)
+        // FORK-ONLY: the whole-day mean HR tile's sparkline — "day_mean_hr" is computed-only, written
+        // under the "-noop" device, same `exploreSeries` read path as spo2_candidate/skin_temp above.
+        async let dayMeanHrSpark     = sparkValuesExplore("day_mean_hr", source: "my-whoop", window: 14)
 
         sparks["recovery"]        = await recoverySpark
         sparks["strain"]          = await strainSpark
@@ -4717,6 +4756,7 @@ struct TodayView: View {
         sparks["spo2_candidate"]  = await spo2CandidateSpark
         sparks["skin_temp"]       = await skinTempSpark
         sparks["resp_rate"]   = await respRateSpark
+        sparks["day_mean_hr"] = await dayMeanHrSpark
         sparks["steps"]       = await stepsAppleSpark
         // Steps prefer the strap's own @57 daily total (no metricSeries, it lives on the daily row),
         // so a strap-only WHOOP 5/MG user gets a steps trend without Apple Health. Falls back to the
@@ -5031,6 +5071,10 @@ struct TodayView: View {
         // The chart keeps plotting means; only the footer reads the samples behind them (#2032).
         hrDayMin = hrBucketsLocal.map(\.minBpm).min()
         hrDayMax = hrBucketsLocal.map(\.maxBpm).max()
+        // FORK-ONLY: the whole-day (incl. night) mean HR Key Metric tile, computed live from the SAME
+        // bucket means the HR curve above just fetched — the window already spans the night (the
+        // logical day starts at 04:00), so this needs no second fetch.
+        dayMeanHr = WholeDayMeanHR.mean(bpm: hrBucketsLocal.map(\.bpm))
 
         // #316 / @63, the selected day's representative activity class for the Steps tile icon. Reads the
         // day's step samples (now carrying `activityClass` after the v19 column) and takes the LAST non-nil

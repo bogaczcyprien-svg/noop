@@ -256,6 +256,12 @@ final class IntelligenceEngine: ObservableObject {
         /// written as "rhr_primary_session_valid_samples" / "rhr_primary_session_duration_s" in pass 2. nil
         /// in lockstep with `primarySessionRHR`.
         let primarySessionRHRCoverage: PrimarySessionRestingHR.Coverage?
+        /// FORK-ONLY (but kept byte-identical with the Android twin, like the metric itself): the
+        /// WHOLE-DAY mean HR (including the night, not just a sleep session) for this day, computed
+        /// off the main actor from the same `hr` the primary-session mean above reads. nil below
+        /// `WholeDayMeanHR.defaultMinValidSamples` valid readings. Written to metricSeries as
+        /// "day_mean_hr" in pass 2, under the same computed "-noop" device ID as `rhr_primary_session`.
+        let dayMeanHR: Double?
     }
 
     /// Exact pre-upgrade R-R-derived cells retained only while an unlabelled WHOOP 5 window is withheld.
@@ -1879,6 +1885,8 @@ final class IntelligenceEngine: ObservableObject {
                 // windowing + delegation lives in the byte-identical, tested `AnalyticsEngine`.
                 let (primarySessionRHR, primarySessionRHRCoverage) =
                     AnalyticsEngine.primarySessionRestingHRWithCoverage(sessions: res.sleepSessions, hr: hr)
+                // Whole-day mean (not session-scoped): every valid reading in this day's own `hr`.
+                let dayMeanHR = WholeDayMeanHR.mean(bpm: hr.map { Double($0.bpm) })
                 let scan = DayScan(result: res, rhrLine: rhrLine, rhrBinLine: rhrBinLine,
                                    respLine: respLine,
                                    readOwner: owner, hrRows: hr.count,
@@ -1888,7 +1896,8 @@ final class IntelligenceEngine: ObservableObject {
                                    spo2CandidateSamples: spo2CandidateSampleCount,
                                    hrvOverCounted: hrvOverCounted,
                                    primarySessionRHR: primarySessionRHR,
-                                   primarySessionRHRCoverage: primarySessionRHRCoverage)
+                                   primarySessionRHRCoverage: primarySessionRHRCoverage,
+                                   dayMeanHR: dayMeanHR)
                 // #1005: cache this freshly-scored scan under its per-day key (only when the day was
                 // cache-eligible this pass, i.e. a registered WHOOP owner with no trace active). Reused
                 // days `continue`d above and never reach here, so the cache only ever holds fresh scans.
@@ -1982,6 +1991,8 @@ final class IntelligenceEngine: ObservableObject {
         var primarySessionRHRByDay: [String: Double] = [:]
         // #1169: its coverage inputs (valid-sample count + primary-session duration), same lifetime as the mean.
         var primarySessionRHRCoverageByDay: [String: PrimarySessionRestingHR.Coverage] = [:]
+        // Whole-day mean HR (including night) — folded the same way, for the "day_mean_hr" metricSeries key.
+        var dayMeanHRByDay: [String: Double] = [:]
 
         // Back on the main actor: fold the off-actor results into the pass-2 state in the SAME order the
         // loop produced them. Pure assignment / appends , no further store reads , so this is cheap and the
@@ -2012,6 +2023,9 @@ final class IntelligenceEngine: ObservableObject {
             }
             if let cov = scan.primarySessionRHRCoverage {
                 primarySessionRHRCoverageByDay[res.daily.day] = cov
+            }
+            if let v = scan.dayMeanHR {
+                dayMeanHRByDay[res.daily.day] = v
             }
             if let line = scan.rhrLine { diagnosticSink?(line, nil) }
             if let line = scan.rhrBinLine { diagnosticSink?(line, nil) }
@@ -2407,8 +2421,10 @@ final class IntelligenceEngine: ObservableObject {
                 restPoints.append(MetricPoint(day: daily.day, key: "hrv_rr_overcount", value: oc ? 1.0 : 0.0))
             }
             // #1169 shadow metric: the primary-session mean RHR, stored beside the shipped floor
-            // (daily.restingHr) under the "-noop" computed ID. Instrumentation only — never shown, never
-            // scored — so the mean-vs-floor comparison the issue needs can be evaluated from exports later.
+            // (daily.restingHr) under the "-noop" computed ID. Never fed to any score. Originally
+            // instrumentation-only ("never shown"); the whole-day HR detail screen now reads this back
+            // as the night-only figure beside the whole-day mean above, so the mean-vs-floor comparison
+            // the issue needs is also visible on-device, not only from exports.
             if let v = primarySessionRHRByDay[daily.day] {
                 restPoints.append(MetricPoint(day: daily.day, key: "rhr_primary_session", value: v))
             }
@@ -2417,6 +2433,11 @@ final class IntelligenceEngine: ObservableObject {
             if let cov = primarySessionRHRCoverageByDay[daily.day] {
                 restPoints.append(MetricPoint(day: daily.day, key: "rhr_primary_session_valid_samples", value: Double(cov.validSamples)))
                 restPoints.append(MetricPoint(day: daily.day, key: "rhr_primary_session_duration_s", value: cov.durationSec))
+            }
+            // The whole-day (incl. night) mean HR, beside the night-only shadow mean above. Unlike that
+            // one, this IS shown — the Today "Avg HR (24h)" key metric and its detail screen read it back.
+            if let v = dayMeanHRByDay[daily.day] {
+                restPoints.append(MetricPoint(day: daily.day, key: "day_mean_hr", value: v))
             }
             cachedSleep.append(contentsOf: night.cachedSleep)
             // Keep the analytics detector as an enrichment input for real imported/manual workouts, but do

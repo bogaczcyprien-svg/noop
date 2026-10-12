@@ -170,6 +170,9 @@ public struct DeviceRegistryStore: Sendable {
         // v48-meal-log: the manual per-meal macro log is deviceId-keyed like every table above — must be
         // cleared too, or a "delete all of this device's data" leaves someone's logged meals behind.
         "meal",
+        // v49-meal-template: saved meal favorites are deviceId-keyed too — must be cleared for the same
+        // reason.
+        "mealTemplate",
     ]
 
     /// Permanently delete every recorded sample/derived row belonging to one device, across all

@@ -16,6 +16,11 @@ import SwiftUI
 /// One of the Today screen's Key-Metric tiles. The rawValue is the stable persisted identifier — keep it
 /// byte-identical to the Android `KeyMetric` enum so a backup/restore reads the same layout on either OS.
 enum KeyMetric: String, CaseIterable, Identifiable {
+    /// FORK-ONLY — not offered on Android's `KeyMetric.kt` tile grid (the underlying "day_mean_hr"
+    /// metric IS shipped there, see `WholeDayMeanHR.kt`; only this Today tile is iOS/macOS-only). The
+    /// whole-day (incl. night) mean HR — tapping it opens `DayMeanHRDetailView`, which also shows the
+    /// night-only figure plus trend charts.
+    case dayMeanHr
     case charge
     case effort
     case rest
@@ -37,6 +42,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
     /// The tile's display label — matches the `StatTile(label:)` text rendered on the grid.
     var title: String {
         switch self {
+        case .dayMeanHr:   return String(localized: "Avg HR (24h)")
         case .charge:      return String(localized: "Charge")
         case .effort:      return String(localized: "Effort")
         case .rest:        return String(localized: "Rest")
@@ -55,7 +61,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
 
     /// The original, hard-coded grid order — the default when the user hasn't customised the layout.
     static let defaultOrder: [KeyMetric] = [
-        .charge, .effort, .rest, .hrv, .restingHr,
+        .dayMeanHr, .charge, .effort, .rest, .hrv, .restingHr,
         .bloodOxygen, .respiratory, .steps, .weight, .calories,
     ]
 }

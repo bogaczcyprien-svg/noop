@@ -60,6 +60,12 @@ struct WorkoutDetailView: View {
     /// session, from heart rate alone (SubstrateEstimator). nil when there's no HR in the window, or
     /// the row carries no `energyKcal` to split.
     @State private var substrate: SubstrateEstimator.SubstrateEstimate?
+    /// FORK-ONLY, not ported to Android. The post-exercise carb-refuel recommendation (weight +
+    /// duration based, ISSN guidance) alongside the substrate split. nil when `substrate` is nil or
+    /// the session doesn't clear `WorkoutCarbRefuelEstimator`'s "substantial enough" gate.
+    @State private var carbRefuel: WorkoutCarbRefuel?
+    /// True once "Log as meal" has been tapped for this screen instance — prevents a double-log tap.
+    @State private var carbRefuelLogged = false
 
     /// The GPS route captured for this session on-device (#524), if any. Decoded from `RouteStore` by the
     /// row's natural key. nil = no route was recorded (honest — the map only shows when points exist).
@@ -93,6 +99,7 @@ struct WorkoutDetailView: View {
             hrCurveCard
             zonesCard
             substrateCard
+            carbRefuelCard
             heartRateRecoveryCard
             if let strain = row.strain {
                 effortCard(strain: strain)
@@ -154,6 +161,14 @@ struct WorkoutDetailView: View {
             restingHR: Double(dayRestingHR ?? Int(StrainScorer.defaultRestingHR)),
             energyKcal: row.energyKcal, source: row.source)
 
+        // FORK-ONLY: the post-exercise carb-refuel target, gated and scaled from the SAME substrate
+        // split above — nil when there's no substrate estimate, or the session doesn't clear
+        // `WorkoutCarbRefuelEstimator`'s own "substantial enough" gate.
+        let durationS = row.durationS ?? Double(row.endTs - row.startTs)
+        let carbRefuelEstimate = substrateEstimate.flatMap {
+            WorkoutCarbRefuelEstimator.estimate(substrate: $0, weightKg: profile.weightKg, durationS: durationS)
+        }
+
         // Steps for an on-foot session (#398), computed at display time over the exact window so it
         // "fills in after sync": prefer the strap's own counter (MG/5.0) once it has offloaded the window,
         // else the phone pedometer (any strap, incl. WHOOP 4.0 / CSV-import). Never shown for non-foot
@@ -179,6 +194,7 @@ struct WorkoutDetailView: View {
             self.zonesFromImport = fromImport
             self.heartRateRecovery = hrr
             self.substrate = substrateEstimate
+            self.carbRefuel = carbRefuelEstimate
             self.steps = stepReadout
             self.loaded = true
         }
@@ -573,6 +589,55 @@ struct WorkoutDetailView: View {
             Text("\(Int(pct.rounded()))%")
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
+        }
+    }
+
+    // MARK: - Post-workout carb refuel (FORK-ONLY, not ported to Android)
+
+    @ViewBuilder private var carbRefuelCard: some View {
+        if let refuel = carbRefuel {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                SectionHeader("Refuel", overline: "Post-workout carbs")
+                NoopCard(tint: StrandPalette.metricCyan) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 20) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Target").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                Text("\(Int(refuel.refuelTargetG.rounded()))g")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Window").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                Text("\(Int(refuel.windowHours.rounded()))h")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("This session").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                Text("~\(Int(refuel.carbsBurnedG.rounded()))g")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                            }
+                        }
+
+                        NoopButton(carbRefuelLogged ? "Logged" : "Log as meal", systemImage: carbRefuelLogged ? "checkmark.circle.fill" : "fork.knife",
+                                  kind: .secondary, fullWidth: false) {
+                            Task {
+                                _ = await repo.saveMeal(loggedAt: Int(Date().timeIntervalSince1970),
+                                                        name: String(localized: "Recovery carbs"),
+                                                        proteinG: 0, carbsG: refuel.refuelTargetG, fatG: 0)
+                                carbRefuelLogged = true
+                            }
+                        }
+                        .disabled(carbRefuelLogged)
+
+                        Text("From your weight and this session's length — standard post-exercise sports-nutrition guidance (ISSN), not medical advice. \"This session\" is a separate, approximate estimate of carbs burned, not what sets the target.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
         }
     }
 

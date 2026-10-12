@@ -136,6 +136,8 @@ object IntelligenceEngine {
         val hrRows: Int,
         val primaryRhr: Double?,
         val primaryRhrCoverage: PrimarySessionRestingHR.Coverage?,
+        /** Whole-day (incl. night) mean HR — twin of Swift `DayScan.dayMeanHR`. */
+        val dayMeanHR: Double?,
         val spo2Candidate: Int?,
         val hrvOverCount: Boolean?,
         val diagLines: List<String>,
@@ -756,6 +758,8 @@ object IntelligenceEngine {
         val primarySessionRHRByDay = LinkedHashMap<String, Double>()
         // #1169: its coverage inputs (valid-sample count + primary-session duration), same lifetime as the mean.
         val primarySessionRHRCoverageByDay = LinkedHashMap<String, PrimarySessionRestingHR.Coverage>()
+        // Whole-day mean HR (including night), folded the same way, for the "day_mean_hr" metricSeries key.
+        val dayMeanHRByDay = LinkedHashMap<String, Double>()
 
         // In-memory nightly values harvested in pass 1, used to seed the pass-2 baseline.
         // Keyed by day so the union with imported history de-dupes cleanly per UTC day.
@@ -985,6 +989,7 @@ object IntelligenceEngine {
                     cached.spo2Candidate?.let { spo2CandidateByDay[day] = it }
                     cached.primaryRhr?.let { primarySessionRHRByDay[day] = it }
                     cached.primaryRhrCoverage?.let { primarySessionRHRCoverageByDay[day] = it }
+                    cached.dayMeanHR?.let { dayMeanHRByDay[day] = it }
                     scoredNights.add(cached.res)
                     resolvedScoreOwnerByDay[day] = cached.owner
                     for (line in cached.diagLines) diag(line)
@@ -1445,6 +1450,9 @@ object IntelligenceEngine {
             val (primaryRhr, primaryRhrCoverage) = AnalyticsEngine.primarySessionRestingHRWithCoverage(res.sleepSessions, hr)
             primaryRhr?.let { primarySessionRHRByDay[res.daily.day] = it }
             primaryRhrCoverage?.let { primarySessionRHRCoverageByDay[res.daily.day] = it }
+            // Whole-day mean (not session-scoped): every valid reading in this day's own `hr`.
+            val dayMeanHR = WholeDayMeanHR.mean(hr.map { it.bpm.toDouble() })
+            dayMeanHR?.let { dayMeanHRByDay[res.daily.day] = it }
             scoredNights.add(res)
             resolvedScoreOwnerByDay[res.daily.day] = owner
             // #1005: cache this freshly-scored night under its per-day key (only when it was cache-eligible
@@ -1460,6 +1468,7 @@ object IntelligenceEngine {
                 dayScanCache[day] = CachedDayScan(
                     key = key, res = res, owner = owner, hrRows = hr.size,
                     primaryRhr = primaryRhr, primaryRhrCoverage = primaryRhrCoverage,
+                    dayMeanHR = dayMeanHR,
                     spo2Candidate = spo2CandidateByDay[day], hrvOverCount = hrvOverCountByDay[day],
                     diagLines = dayDiagLines.toList(),
                     traces = dayTraces,
@@ -1702,8 +1711,10 @@ object IntelligenceEngine {
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "hrv_rr_overcount", value = if (oc) 1.0 else 0.0))
             }
             // #1169 shadow metric: the primary-session mean RHR, stored beside the shipped floor
-            // (daily.restingHr) under the "-noop" computed ID. Instrumentation only — never shown, never
-            // scored — for later mean-vs-floor evaluation from exports.
+            // (daily.restingHr) under the "-noop" computed ID. Never fed to any score. Originally
+            // instrumentation-only ("never shown"); the whole-day HR detail screen now reads this back
+            // as the night-only figure beside the whole-day mean below, so the mean-vs-floor comparison
+            // is also visible on-device, not only from exports.
             primarySessionRHRByDay[daily.day]?.let { v ->
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "rhr_primary_session", value = v))
             }
@@ -1712,6 +1723,11 @@ object IntelligenceEngine {
             primarySessionRHRCoverageByDay[daily.day]?.let { cov ->
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "rhr_primary_session_valid_samples", value = cov.validSamples.toDouble()))
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "rhr_primary_session_duration_s", value = cov.durationSec))
+            }
+            // The whole-day (incl. night) mean HR, beside the night-only shadow mean above. Unlike that
+            // one, this IS shown — the Today "Avg HR (24h)" key metric and its detail screen read it back.
+            dayMeanHRByDay[daily.day]?.let { v ->
+                restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "day_mean_hr", value = v))
             }
 
             out.add(
