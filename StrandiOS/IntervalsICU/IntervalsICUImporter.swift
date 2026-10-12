@@ -96,25 +96,29 @@ public struct IntervalsICUImporter {
         }
     }
 
+    /// intervals.icu returns `start_date_local` as a wall-clock string with no offset (e.g.
+    /// "2026-09-20T07:15:03" — 7:15am wherever the ride happened), not UTC. `IntervalsICUPlannedView`
+    /// already parses this same field with `TimeZone.current` for display; this formatter matches that
+    /// convention rather than mislabeling the string UTC, which shifted every backfilled HR sample (and
+    /// the calorie/step exclusion windows built from `WorkoutRow.startTs/endTs`) by the device's UTC
+    /// offset for any non-UTC user.
+    private static let localDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        f.timeZone = .current
+        f.calendar = Calendar(identifier: .gregorian)
+        return f
+    }()
+
     private static func startTs(_ a: IntervalsICUActivity) -> Int? {
-        guard let startLocal = a.start_date_local else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        guard let start = formatter.date(from: startLocal) else { return nil }
+        guard let startLocal = a.start_date_local,
+              let start = localDateFormatter.date(from: startLocal) else { return nil }
         return Int(start.timeIntervalSince1970)
     }
 
     private static func toWorkoutRow(_ a: IntervalsICUActivity) -> WorkoutRow? {
-        guard let startLocal = a.start_date_local else { return nil }
-        // intervals.icu returns e.g. "2026-09-20T07:15:03" — no offset; treat as UTC seconds since
-        // this row only needs a stable ordering key, not clock-accurate provenance.
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        guard let start = formatter.date(from: startLocal) else { return nil }
+        guard let startLocal = a.start_date_local,
+              let start = localDateFormatter.date(from: startLocal) else { return nil }
         let startTs = Int(start.timeIntervalSince1970)
         let duration = a.moving_time ?? a.elapsed_time ?? 0
         let endTs = startTs + duration
