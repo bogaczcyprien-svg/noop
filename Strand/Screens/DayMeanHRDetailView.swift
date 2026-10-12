@@ -65,16 +65,21 @@ struct DayMeanHRDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func trendCard(title: LocalizedStringKey, points: [TrendPoint], tint: Color) -> some View {
-        NoopCard {
+    /// `title` is a plain String (call sites pass "Whole day"/"Night only" verbatim) rather than
+    /// `LocalizedStringKey`, so it can be resolved to its localized text for the accessibility string
+    /// below — interpolating a `LocalizedStringKey` directly into another string literal would print
+    /// its internal representation, not the translated text. Same fix as `NutritionView.macroRow`.
+    private func trendCard(title: String, points: [TrendPoint], tint: Color) -> some View {
+        let localizedTitle = String(localized: String.LocalizationValue(title))
+        return NoopCard {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                Text(title).strandOverline()
+                Text(LocalizedStringKey(title)).strandOverline()
                 if points.count >= 2 {
                     TrendChart(points: points,
                               gradient: Gradient(stops: [.init(color: tint.opacity(0.55), location: 0), .init(color: tint, location: 1)]),
                               valueRange: 30...120, showsArea: true, height: NoopMetrics.chartHeight,
                               valueFormat: { "\(Int($0.rounded())) bpm" },
-                              accessibilityLabel: String(localized: "\(title) heart rate trend"))
+                              accessibilityLabel: String(localized: "\(localizedTitle) heart rate trend"))
                 } else {
                     Text("Not enough data for this window.")
                         .font(StrandFont.subhead)
