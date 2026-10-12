@@ -76,6 +76,9 @@ struct LiquidTodayView: View {
     /// every hole up and drew a day of sparse live windows as one continuous line. That bites hardest on a
     /// strap whose history never offloads, where heart rate exists ONLY for the windows it was connected.
     @State private var hrSegments: [String] = []
+    /// FORK-ONLY: the whole-day (incl. night) mean HR tile's value, derived from the SAME `hrValues`
+    /// bucket means the HR curve already fetches — no second fetch.
+    private var liquidDayMeanHr: Double? { WholeDayMeanHR.mean(bpm: hrValues) }
     @State private var workouts: [WorkoutRow] = [] // newest-first
     /// #today-hosted-cards: the shared SleepModel that backs every SleepModel-derived hosted sleep card
     /// (Stages vs typical today; more to follow). Built ONCE in `load()` from the SAME inputs the Sleep tab
@@ -1424,6 +1427,12 @@ struct LiquidTodayView: View {
     @ViewBuilder
     private func ktileFor(_ metric: KeyMetric, hrv: Double?, rhr: Double?) -> some View {
         switch metric {
+        case .dayMeanHr:
+            // FORK-ONLY: no custom night-only detail here (that lives in the classic `TodayView`'s
+            // `.sheet(DayMeanHRDetailView)`) — a plain, non-interactive tile (no `key:`) showing the
+            // same whole-day figure, computed from the SAME `hrValues` bucket means this screen's own
+            // HR curve already fetches (no second fetch, same precedent as the classic tile).
+            ktile(String(localized: "Avg HR (24h)"), icon: keyMetricIcon(metric), intText(liquidDayMeanHr), "bpm", StrandPalette.metricRose, fracOver(liquidDayMeanHr, 100))
         case .charge:
             // Reads the SAME resolved Charge the hero draws, not `displayDay?.recovery` raw — the tile and the
             // hero are the same number, so a carry that reached only one of them would put two answers for
@@ -1490,6 +1499,7 @@ struct LiquidTodayView: View {
 
     private func keyMetricIcon(_ metric: KeyMetric) -> String {
         switch metric {
+        case .dayMeanHr: return "heart.text.square.fill"
         case .charge: return "heart.fill"
         case .effort: return "bolt.fill"
         case .rest: return "moon.stars.fill"
