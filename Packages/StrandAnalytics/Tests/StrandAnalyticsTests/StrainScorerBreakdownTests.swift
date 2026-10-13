@@ -51,7 +51,11 @@ final class StrainScorerBreakdownTests: XCTestCase {
     }
 
     func testZoneMinutesSumsToTotalDuration() {
-        let samples = hr(185, 600) + hr(50, 600)   // 1200 1Hz samples = 20 minutes
+        // Sequential timestamps across the two legs (start: 600 continues where the first leg's 600
+        // samples at 1 Hz left off) — concatenating two `start: 0` arrays would make the boundary
+        // sample's inferred gap jump backward by ~600s, clamped to `maxSampleGapMin` and inflating the
+        // total by ~2 minutes.
+        let samples = hr(185, 600) + hr(50, 600, start: 600)   // 1200 1Hz samples = 20 minutes
         let b = StrainScorer.breakdown(samples, maxHR: 190, restingHR: 60)!
         XCTAssertEqual(b.zoneMinutes.reduce(0, +), 20.0, accuracy: 1e-6)
         XCTAssertEqual(b.zoneMinutes[5], 10.0, accuracy: 1e-6)   // the 185bpm leg: zone 5
