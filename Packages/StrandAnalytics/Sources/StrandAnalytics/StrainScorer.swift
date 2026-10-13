@@ -653,6 +653,77 @@ public enum StrainScorer {
     }
     private static let strainCache = AnalyticsMemoCache<StrainKey, Double?>(capacity: 48)
 
+    // MARK: - Breakdown (FORK-ONLY, not ported to Android)
+
+    /// Everything a "what shaped this Effort" screen needs: the inputs actually resolved and used
+    /// (not what the caller asked for — `maxHR`/`restingHR` as the computation saw them, after the
+    /// same refusal gate `strain(...)` applies), the zone-by-zone time split, and the day's raw HR
+    /// peak alongside its SUSTAINED peak (`sustainedPeak`, #2438) so a single sensor artefact is
+    /// visibly distinguishable from a real sustained effort.
+    public struct EffortBreakdown: Equatable, Sendable {
+        public let hrMaxUsed: Double
+        public let restingHRUsed: Double
+        public let method: Method
+        public let trimp: Double
+        /// 0...100, NOOP's native axis — same value `strain(...)` returns for identical inputs.
+        public let strain: Double
+        /// `[0]` is time BELOW zone 1 (credited but un-weighted under Edwards); `[1...5]` are zones
+        /// 1-5. Minutes, not a fraction — sums to the same duration `trimp` integrated over. See
+        /// `zoneMinutes`'s own doc comment for what "credited" means for a sparse/dropout stream.
+        public let zoneMinutes: [Double]
+        /// The day's raw HR maximum — a single sample, so a brief sensor artefact can sit here alone.
+        public let peakBpm: Double?
+        /// The highest bpm `sustainedPeakSamples` consecutive samples all held within
+        /// `sustainedPeakWindowS` — nil when no run of samples is that dense. Compare against
+        /// `peakBpm`: a `peakBpm` far above `sustainedPeakBpm` is the fingerprint of a one-sample
+        /// motion/PPG artefact rather than a real sustained effort.
+        public let sustainedPeakBpm: Double?
+
+        public init(hrMaxUsed: Double, restingHRUsed: Double, method: Method, trimp: Double,
+                   strain: Double, zoneMinutes: [Double], peakBpm: Double?, sustainedPeakBpm: Double?) {
+            self.hrMaxUsed = hrMaxUsed; self.restingHRUsed = restingHRUsed; self.method = method
+            self.trimp = trimp; self.strain = strain; self.zoneMinutes = zoneMinutes
+            self.peakBpm = peakBpm; self.sustainedPeakBpm = sustainedPeakBpm
+        }
+    }
+
+    /// The full breakdown behind a `strain(...)` call with the SAME parameters — same refusal gate
+    /// (nil for the same reasons: too little data, or `maxHR <= restingHR`), same TRIMP/strain. Not
+    /// memoized (unlike `strain`): this is a user-initiated "explain this number" read, not a hot
+    /// path re-evaluated on every live-HR tick.
+    public static func breakdown(_ hr: [HRSample], maxHR: Double? = nil,
+                                 restingHR: Double = defaultRestingHR,
+                                 method: Method = .edwards, sex: String = "male") -> EffortBreakdown? {
+        let effMax = maxHR ?? Double(defaultMaxHR())
+        let enoughData: Bool
+        if hr.count >= minReadings {
+            enoughData = true
+        } else if hr.count >= minSparseReadings {
+            let tss = hr.map { $0.ts }
+            enoughData = ((tss.max() ?? 0) - (tss.min() ?? 0)) >= minSpanSeconds
+        } else {
+            enoughData = false
+        }
+        guard enoughData, effMax > restingHR else { return nil }
+
+        let durations = sampleDurationsMinutes(hr)
+        let hrReserve = effMax - restingHR
+        let trimp: Double
+        switch method {
+        case .banister:
+            let b = sex.lowercased().hasPrefix("f") ? banisterBWomen : banisterBMen
+            trimp = banisterTRIMP(hr, restingHR: restingHR, hrReserve: hrReserve, durations: durations,
+                                  b: b, floorRatePerMinute: banisterBaselineRatePerMinute(b: b))
+        case .edwards:
+            trimp = edwardsTRIMP(hr, restingHR: restingHR, hrReserve: hrReserve, durations: durations)
+        }
+        let zones = zoneMinutes(hr, restingHR: restingHR, hrReserve: hrReserve, durations: durations)
+        let strainValue = trimpToStrain(trimp, denominator: logMapDenominator(method: method, sex: sex))
+        return EffortBreakdown(hrMaxUsed: effMax, restingHRUsed: restingHR, method: method, trimp: trimp,
+                               strain: strainValue, zoneMinutes: zones,
+                               peakBpm: hr.map { Double($0.bpm) }.max(), sustainedPeakBpm: sustainedPeak(hr))
+    }
+
     private static func strainUncached(_ hr: [HRSample], maxHR: Double?, restingHR: Double,
                                        method: Method, sex: String, denominator: Double,
                                        diag: ((String) -> Void)? = nil, day: String = "") -> Double? {

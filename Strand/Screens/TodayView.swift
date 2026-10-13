@@ -527,6 +527,15 @@ struct TodayView: View {
     // with the ring. A calibrating night (empty drivers) taps through to the EXISTING calibration countdown.
     @State private var showChargeBreakdown = false
 
+    // FORK-ONLY, not ported to Android. The Effort "what shaped it" sheet, opened by tapping the
+    // Effort ring/tile — mirrors the Charge breakdown sheet's shape, but for Effort: zone-by-zone
+    // minutes, the HRmax/resting HR actually used, and the day's peak vs. sustained peak (so a
+    // single sensor artefact reads as distinguishable from a real sustained effort). Computed once in
+    // `load()` from the EXACT same inputs the live Effort number uses, so the sheet always explains
+    // the number already on screen rather than a separately-resolved one.
+    @State private var showEffortBreakdown = false
+    @State private var effortBreakdown: StrainScorer.EffortBreakdown?
+
     // S4: the Synthesis card collapses to a single one-liner that expands on tap. Default collapsed so the
     // home screen stays tight; the live content (#506) is unchanged, only the chrome folds. @State (not
     // persisted) so a relaunch starts collapsed again.
@@ -1631,6 +1640,8 @@ struct TodayView: View {
         // A1 (#514/#706): the Charge breakdown, opened by tapping the Today hero Charge ring. The body
         // builds lazily here (#819 lag) from the drivers DERIVED off the displayed row (never a second read).
         .sheet(isPresented: $showChargeBreakdown) { chargeBreakdownSheet }
+        // FORK-ONLY: the Effort "what shaped it" sheet.
+        .sheet(isPresented: $showEffortBreakdown) { effortBreakdownSheet }
         // FORK-ONLY: the whole-day mean HR tile's detail — night-only figure + trend charts. Own
         // NavigationStack inside the sheet, same idiom as the WorkoutDetailView sheet just above.
         .sheet(isPresented: $showDayMeanHRDetail) {
@@ -2271,6 +2282,143 @@ struct TodayView: View {
                 }
                 #endif
             }
+        }
+    }
+
+    // MARK: - Effort breakdown (FORK-ONLY, not ported to Android)
+
+    private var effortBreakdownSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    if let b = effortBreakdown {
+                        NoopCard(padding: 18, tint: StrandPalette.effortColor) {
+                            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Resting HR used").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                        Text("\(Int(b.restingHRUsed.rounded())) bpm")
+                                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        Text("Max HR used").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                        Text("\(Int(b.hrMaxUsed.rounded())) bpm")
+                                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                }
+                                Divider().overlay(StrandPalette.hairline)
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Today's peak").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                        Text(b.peakBpm.map { "\(Int($0.rounded())) bpm" } ?? "—")
+                                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        Text("Sustained peak").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                        Text(b.sustainedPeakBpm.map { "\(Int($0.rounded())) bpm" } ?? "—")
+                                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                }
+                                // A peak well above the sustained peak is the fingerprint of a brief sensor/
+                                // motion artefact rather than a real effort — called out explicitly rather
+                                // than left for the reader to notice the two numbers disagree.
+                                if let peak = b.peakBpm, let sustained = b.sustainedPeakBpm, peak - sustained >= 15 {
+                                    Text("Your peak reading is well above what held for more than a few seconds — likely a brief sensor spike, not sustained effort.")
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.statusWarning)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        NoopCard(padding: 18, tint: StrandPalette.effortColor) {
+                            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                                Text("Time by zone").strandOverline()
+                                ForEach(1...5, id: \.self) { zone in
+                                    effortZoneRow(zone: zone, minutes: b.zoneMinutes[zone])
+                                }
+                                effortZoneRow(zone: 0, minutes: b.zoneMinutes[0])
+                            }
+                        }
+                    } else {
+                        NoopCard(padding: 18, tint: StrandPalette.effortColor) {
+                            Text("Not enough heart-rate data yet today to break this down.")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    NavigationLink {
+                        ScoringGuideView(initialSection: .effort, onClose: { showEffortBreakdown = false })
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "function")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(StrandPalette.effortColor)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("How Effort is calculated")
+                                    .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+                                Text("The method behind the score, not today's values.")
+                                    .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        .padding(14)
+                        .background(NoopPanelSurface(cornerRadius: 14))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("How Effort is calculated. The method behind the score.")
+                }
+                .padding(NoopMetrics.screenPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            #if os(iOS)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            #endif
+            .background(StrandPalette.surfaceBase.ignoresSafeArea())
+            .navigationTitle("What shaped your Effort")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showEffortBreakdown = false }
+                        .foregroundStyle(StrandPalette.accent)
+                }
+                #else
+                ToolbarItem {
+                    Button("Done") { showEffortBreakdown = false }
+                        .foregroundStyle(StrandPalette.accent)
+                }
+                #endif
+            }
+        }
+    }
+
+    /// One zone row in the Effort breakdown: zone 0 is "Below zone 1" (credited time that scores zero
+    /// under Edwards), zones 1-5 are the Edwards bands. Reuses `StrandPalette.hrZoneColor`, the same
+    /// per-zone colors `WorkoutDetailView`'s zone bar already uses, so a zone means the same color
+    /// everywhere in the app.
+    private func effortZoneRow(zone: Int, minutes: Double) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(zone == 0 ? StrandPalette.textTertiary : StrandPalette.hrZoneColor(zone))
+                .frame(width: 9, height: 9)
+            Text(zone == 0 ? String(localized: "Below zone 1") : String(localized: "Zone \(zone)"))
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer()
+            Text("\(Int(minutes.rounded())) min")
+                .font(StrandFont.subhead.weight(.semibold))
+                .foregroundStyle(StrandPalette.textSecondary)
+                .monospacedDigit()
         }
     }
 
@@ -4010,17 +4158,29 @@ struct TodayView: View {
             // #1001: resolve through `effortStrain` so this tile shows the hero ring's figure. Reading
             // `d.strain` straight off the daily row left it behind by the whole morning on an active day.
             let effort = effortStrain(d)
-            StatTile(
-                label: "Effort",
-                value: effort.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—",
-                caption: effort != nil ? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")
-                                       : (buildingHint(.effort) ?? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")),
-                accent: effort.map { StrandPalette.effortTint(fraction: $0 / StrainScorer.maxStrain) } ?? StrandPalette.textPrimary,
-                sparkline: sparks["strain"],
-                sparkColor: StrandPalette.strain066,
-                // Inline ⓘ in the tile header (not a corner overlay) so it never sits over the value (#495).
-                accessory: { scoreInfoButton(.effort) }
-            )
+            // FORK-ONLY: the whole tile opens the new Effort breakdown sheet (zone minutes, HRmax/
+            // resting HR used, peak vs. sustained peak) — the ⓘ accessory still opens the general
+            // ScoringGuideView explainer, same as every other tile's ⓘ; the two are complementary, not
+            // duplicates (one explains the METHOD, the other explains TODAY'S number). A nested Button
+            // (ⓘ) inside this outer one is a standard, working SwiftUI pattern — the more specific
+            // hit-target wins inside its own bounds.
+            Button {
+                showEffortBreakdown = true
+            } label: {
+                StatTile(
+                    label: "Effort",
+                    value: effort.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—",
+                    caption: effort != nil ? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")
+                                           : (buildingHint(.effort) ?? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")),
+                    accent: effort.map { StrandPalette.effortTint(fraction: $0 / StrainScorer.maxStrain) } ?? StrandPalette.textPrimary,
+                    sparkline: sparks["strain"],
+                    sparkColor: StrandPalette.strain066,
+                    // Inline ⓘ in the tile header (not a corner overlay) so it never sits over the value (#495).
+                    accessory: { scoreInfoButton(.effort) }
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(Text(String(localized: "Opens what shaped today's Effort.")))
         case .rest:
             // #1164/#2012: a provisional Rest is SAID to be provisional, in the caption, rather than
             // withheld. Blanking the number too left a user who had slept, and whose score was computed,
@@ -5125,8 +5285,14 @@ struct TodayView: View {
                 StrainScorer.strain(todayHr, maxHR: maxHR, restingHR: restHR,
                                     method: method, sex: sex)
             }.value
+            // FORK-ONLY: the SAME inputs feed the "what shaped it" breakdown sheet, so it always
+            // explains the number actually on screen rather than a separately-resolved one.
+            effortBreakdown = await Task.detached(priority: .utility) {
+                StrainScorer.breakdown(todayHr, maxHR: maxHR, restingHR: restHR, method: method, sex: sex)
+            }.value
         } else {
             liveStrainLocal = nil
+            effortBreakdown = nil
         }
         liveTodayStrain = liveStrainLocal
         // Pin the chart axis to the loaded window, today midnight→now, a past day the full 24h, so
