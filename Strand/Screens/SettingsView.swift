@@ -24,6 +24,12 @@ struct SettingsView: View {
     /// Profile-photo picker selection (PhotosUI). Cleared back to nil once the bytes are loaded.
     @State private var avatarPickerItem: PhotosPickerItem?
 
+    /// Debounces the rescan the max-HR override triggers (see `hrMaxField`) — the Stepper fires on
+    /// every single bpm increment, so a plain `.onChangeCompat` would queue up to ~200 full rescans
+    /// dragging from 0 to a real value. Cancel-and-replace collapses a burst of taps into one rescan
+    /// 800ms after the LAST one, same shape as a search-field debounce.
+    @State private var hrMaxRescanTask: Task<Void, Never>?
+
     /// Custom background image (#custom-background). The store owns the decoded image + toggles; the
     /// picker selection + the file-importer flag are local UI state.
     @ObservedObject private var backgroundStore = BackgroundImageStore.shared
@@ -455,6 +461,22 @@ struct SettingsView: View {
                             .foregroundStyle(profile.hrMaxOverride > 0
                                              ? StrandPalette.accent
                                              : StrandPalette.textTertiary)
+                    }
+                }
+                // Without this, a changed override sits unused until the next periodic analyze loop
+                // (up to ~30 min, per the Banister-toggle precedent above) — every OTHER score-affecting
+                // toggle on this screen (Banister, SpO2 candidate, HRV window) already re-scores
+                // immediately on change; this was the one score input that silently did not, which is
+                // exactly the gap a live device report traced ("I set my real max HR, Effort is still
+                // too high") back to: today's STORED Effort kept whatever ceiling was in effect the
+                // last time the background pass ran, not the newly-entered one.
+                .onChangeCompat(of: profile.hrMaxOverride) { _ in
+                    hrMaxRescanTask?.cancel()
+                    hrMaxRescanTask = Task {
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        guard !Task.isCancelled else { return }
+                        await model.intelligence.analyzeRecent()
+                        await model.repo.refresh()
                     }
                 }
                 rowDivider
