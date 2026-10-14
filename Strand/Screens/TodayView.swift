@@ -3398,16 +3398,20 @@ struct TodayView: View {
             // is not an oversight. The Liquid Today sends Charge to the trend because it has no breakdown
             // to offer; THIS shell has one, so its Charge ring keeps it and matches Android.
             //
-            // Effort and Rest have no breakdown on any platform, so the trend is the richest thing they
-            // have and both rings open it, exactly as Android's do. The keys are the ones
-            // `HeroRingDetailRouteTests` pins against `MetricCatalog`; `TabRoute.metric` falls back to the
-            // Health screen on an unknown key rather than failing, which is why they are pinned.
+            // FORK-ONLY update: Effort gained its own breakdown sheet (zone minutes, HRmax/resting HR
+            // used, peak vs. sustained peak) on THIS shell only — Android and the Liquid Today still have
+            // none, so this ring now diverges from both, the same deliberate FORK-ONLY-UI shape as the
+            // Nutrition tab. `HeroRingMetric.effort` ("strain") stays pinned by `HeroRingDetailRouteTests`
+            // regardless — it is still the key `LiquidTodayView`'s own Effort tile resolves through. Rest
+            // still has no breakdown anywhere, so its ring keeps opening the trend, exactly as Android's
+            // does; the keys are the ones that test pins against `MetricCatalog`, `TabRoute.metric` falls
+            // back to the Health screen on an unknown key rather than failing, which is why they are pinned.
             heroRingColumn(section: .charge, domain: .charge, provenanceKey: "recovery",
                            onOpenBreakdown: { showChargeBreakdown = true }) {
                 chargeRing(score: score, d: d, diameter: ring)
             }
             heroRingColumn(section: .effort, domain: .effort,
-                           detailRoute: .metric(HeroRingMetric.effort)) { effortRing(d: d, diameter: ring) }
+                           onOpenBreakdown: { showEffortBreakdown = true }) { effortRing(d: d, diameter: ring) }
             // `provenanceKey` spells the same string the route does and stays a literal on purpose: it
             // asks which SOURCE won this day, not which catalog entry to open. See `HeroRingMetric`.
             heroRingColumn(section: .rest, domain: .rest, provenanceKey: "sleep_performance",
@@ -3462,6 +3466,20 @@ struct TodayView: View {
         }
     }
 
+    /// The VoiceOver label for a ring/chevron that opens a "what shaped it" BREAKDOWN sheet (as
+    /// opposed to `domainGuideAccessibilityLabel`'s general scoring-guide destination). Was a bare
+    /// "See what shaped your Charge" literal at both call sites, harmless only because Charge was the
+    /// sole `onOpenBreakdown` domain — Effort's breakdown sheet (FORK-ONLY) made that wrong the moment
+    /// a second domain used the same path, so this is domain-aware from the start.
+    private static func domainBreakdownAccessibilityLabel(_ domain: DomainTheme) -> LocalizedStringKey {
+        switch domain {
+        case .charge: return "See what shaped your Charge"
+        case .effort: return "See what shaped your Effort"
+        case .rest:   return "See what shaped your Rest"
+        case .stress: return "See what shaped your Stress"
+        }
+    }
+
     /// One hero ring column: the ring centred, with a tappable UPPERCASE domain label + chevron
     /// beneath it (the WHOOP affordance) that opens the matching scoring-guide section. The ring is
     /// intrinsically diameter×diameter, so the column just centres it and stretches to an equal share
@@ -3508,7 +3526,7 @@ struct TodayView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Self.domainLabel(domain))
-                .accessibilityHint("See what shaped your Charge")
+                .accessibilityHint(Self.domainBreakdownAccessibilityLabel(domain))
                 .accessibilityAddTraits(.isButton)
             } else {
                 ring()
@@ -3545,7 +3563,7 @@ struct TodayView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(onOpenBreakdown == nil ? Self.domainGuideAccessibilityLabel(domain)
-                                                        : "See what shaped your Charge")
+                                                        : Self.domainBreakdownAccessibilityLabel(domain))
             // Component 4, the real per-day source under the ring (only when this score has a value for
             // the day AND we resolved its winner; a calibrating / empty ring shows no provenance badge).
             // Apple Watch (M1): a watch-sourced score reads "Apple Watch" with its confidence bound to the
