@@ -2291,6 +2291,36 @@ struct TodayView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    // #2460-adjacent: `effortStrain` resolves through `StrainScorer.effectiveEffort`
+                    // (max(live, stored)), so the number on the ring/tile can come from either source.
+                    // The breakdown below is ALWAYS the LIVE recompute (same inputs as `liveTodayStrain`)
+                    // — when STORED is what's actually winning, that breakdown does NOT fully explain the
+                    // displayed number, and saying nothing about it would be exactly the "two readouts
+                    // that can disagree" trap AGENTS.md warns about. Surface which source won, honestly.
+                    if selectedDayOffset == 0, let displayed = effortStrain(displayDay) {
+                        let storedValue = displayDay?.strain
+                        let storedWins = (storedValue ?? -1) > (liveTodayStrain ?? -1)
+                        if storedWins {
+                            NoopCard(padding: 18, tint: StrandPalette.statusWarning) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(StrandPalette.statusWarning)
+                                        Text("This number is from an earlier full scan, not live")
+                                            .font(StrandFont.subhead.weight(.semibold))
+                                            .foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                    Text("Shown: \(UnitFormatter.effortDisplay(displayed, scale: effortScale)) · Right now: \(liveTodayStrain.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—")")
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                    Text("Effort never drops within a day, so the higher of the two always wins. The zone breakdown below is the live recompute — it may not fully account for what the earlier scan saw.")
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
                     if let b = effortBreakdown {
                         NoopCard(padding: 18, tint: StrandPalette.effortColor) {
                             VStack(alignment: .leading, spacing: NoopMetrics.gap) {

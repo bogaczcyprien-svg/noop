@@ -35,7 +35,67 @@ public struct IntervalsICUImporter {
         let rows = activities.compactMap(toWorkoutRow)
         let count = try await store.upsertWorkouts(rows, deviceId: deviceId)
         await backfillHR(activities: activities, client: client, store: store)
+        await deduplicateTimezoneArtifacts(store: store)
         return count
+    }
+
+    /// One-time cleanup for a specific, now-fixed historical bug: before `localDateFormatter` existed,
+    /// every imported ride's `startTs`/`endTs` came from mislabeling `start_date_local` as UTC. For any
+    /// non-UTC user, a later sync running the FIXED parser re-imported the same ride under its correct
+    /// (different) time — `upsertWorkouts`' natural key is (deviceId, startTs, sport), so the new,
+    /// correct row did not overwrite the old, wrong one, it sat beside it (a confirmed, user-reported
+    /// case: the same ride appeared twice, 2h apart, identical stats).
+    ///
+    /// Finds exact-duplicate PAIRS in the "intervals-icu" partition only (the device id no other writer
+    /// touches): same (sport, durationS, avgHr, maxHr, distanceM, energyKcal, notes) but a different
+    /// startTs, where the gap between the two timestamps is EXACTLY `TimeZone.current`'s UTC offset at
+    /// the correct one's instant — the precise signature of "the same wall-clock string parsed once as
+    /// UTC and once as local", not a loose nearby-time heuristic. Deletes only the UTC-mislabeled one.
+    ///
+    /// Does NOT touch the backfilled `hrSample` rows the old, wrong import window wrote under the
+    /// strap's own device id (`Repository.whoopSource`) — those sit in the SAME table a real strap
+    /// sample would, with no provenance tag distinguishing them, so removing them risks deleting a
+    /// genuine reading the strap recorded at that same old (now-stale) clock time. That gap is real and
+    /// unresolved; this only fixes the visible, unambiguous workout-list duplicate.
+    static func deduplicateTimezoneArtifacts(store: WhoopStore) async {
+        let farFuture = Int(Date().timeIntervalSince1970) + 86_400
+        guard let rows = try? await store.workouts(deviceId: deviceId, from: 0, to: farFuture, limit: 5000),
+              rows.count >= 2 else { return }
+
+        var toDelete: [(sport: String, startTs: Int)] = []
+        var consumed = Set<Int>()
+        for i in rows.indices {
+            guard !consumed.contains(i) else { continue }
+            for j in (i + 1)..<rows.count {
+                guard !consumed.contains(j) else { continue }
+                let a = rows[i], b = rows[j]
+                guard a.sport == b.sport, a.startTs != b.startTs, a.durationS == b.durationS,
+                      a.avgHr == b.avgHr, a.maxHr == b.maxHr, a.distanceM == b.distanceM,
+                      a.energyKcal == b.energyKcal, a.notes == b.notes
+                else { continue }
+                if isUTCMislabeledPair(oldCandidateTs: a.startTs, newCandidateTs: b.startTs) {
+                    toDelete.append((a.sport, a.startTs))
+                } else if isUTCMislabeledPair(oldCandidateTs: b.startTs, newCandidateTs: a.startTs) {
+                    toDelete.append((b.sport, b.startTs))
+                } else {
+                    continue
+                }
+                consumed.insert(i); consumed.insert(j)
+                break
+            }
+        }
+        for d in toDelete {
+            _ = try? await store.deleteWorkouts(deviceId: deviceId, sport: d.sport, from: d.startTs, to: d.startTs)
+        }
+    }
+
+    /// True when `oldCandidateTs` is exactly what you get by parsing the SAME wall-clock string that
+    /// produced `newCandidateTs` as UTC instead of as `TimeZone.current` — i.e. `oldTs - newTs` equals
+    /// the local UTC offset AT `newCandidateTs`'s own instant (evaluated there, not "now", so a DST
+    /// transition between the ride and today can't throw the comparison off by an hour).
+    private static func isUTCMislabeledPair(oldCandidateTs: Int, newCandidateTs: Int) -> Bool {
+        let offset = TimeZone.current.secondsFromGMT(for: Date(timeIntervalSince1970: TimeInterval(newCandidateTs)))
+        return oldCandidateTs - newCandidateTs == offset
     }
 
     private static func backfillHR(activities: [IntervalsICUActivity], client: IntervalsICUClient,
