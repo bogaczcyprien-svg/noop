@@ -110,8 +110,19 @@ object StrainScorer {
      * to erase genuine light activity, high enough that ordinary sitting nets to nothing. Resting HR is
      * measured asleep, so a waking body sits above it even at complete rest — which is precisely the gap
      * this closes. Treat it as calibratable, not as physiology.
+     *
+     * RAISED (0.10 -> 0.30), at explicit user request, after a confirmed report: a calm day whose HR
+     * never exceeded ~26% HRR (a brief errand bump to 83 bpm against a 44/195 rest/max pair, otherwise
+     * resting) still scored a visible Effort under Banister — Edwards scores the SAME day exactly 0 (its
+     * 60%-HRR zone-1 floor is well above that bump), and the user's actual complaint was specifically
+     * that ordinary daytime HR, not real exercise, was moving the number. 0.10 only suppressed the
+     * literal baseline (sitting still); it did not reach a brief daytime bump. 0.30 sits above that kind
+     * of ordinary bump while remaining far below real training intensity (a 3-4 h ride sits at 50-80%+
+     * HRR, essentially unaffected). Same "fork-only tuning, not upstreamed, not validated against WHOOP's
+     * own (undisclosed) weighting" caveat as the Edwards zone-1 dampening. Swift twin:
+     * `StrainScorer.banisterSedentaryHRR`.
      */
-    const val banisterSedentaryHRR: Double = 0.10
+    const val banisterSedentaryHRR: Double = 0.30
 
     /** TRIMP per minute at [banisterSedentaryHRR] — the rate subtracted from every day. */
     fun banisterBaselineRatePerMinute(b: Double): Double =

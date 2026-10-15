@@ -38,14 +38,17 @@ class BanisterParityOracleTest {
     }
 
     private companion object {
+        // Regenerated for `banisterSedentaryHRR` 0.10 -> 0.30 (see its doc comment). The sedentary floor
+        // moved past the 0.15 and 0.20 intensities this oracle also samples, so they now net to zero
+        // alongside 0.00/0.05/0.10 — not a parity regression, the expected shape of a higher floor.
         const val SWIFT = """
 0.00=0.000000
 0.05=0.000000
 0.10=0.000000
-0.15=49.270000
-0.20=58.140000
-0.35=71.670000
-0.60=84.800000
+0.15=0.000000
+0.20=0.000000
+0.35=57.096810
+0.60=82.380200
 1.00=100.000000
 """
     }

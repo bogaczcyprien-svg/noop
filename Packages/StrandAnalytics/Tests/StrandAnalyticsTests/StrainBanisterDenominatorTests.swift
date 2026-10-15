@@ -160,6 +160,10 @@ final class StrainBanisterDenominatorTests: XCTestCase {
 
         XCTAssertEqual(edwards, 0.0, "an hour below the floor earns nothing under Edwards, by design")
         XCTAssertNotNil(banister)
-        XCTAssertGreaterThan(banister!, 40.0, "Banister credits the same hour on the 0–100 axis")
+        // Bound lowered (40.0 -> 20.0) alongside `banisterSedentaryHRR` 0.10 -> 0.30: a higher sedentary
+        // floor subtracts more from every sample, including this session's, so the credited amount drops
+        // (~35 at the new constant) without disappearing — it still clears Edwards' literal 0.0 by a wide
+        // margin, which is the property this test exists to pin.
+        XCTAssertGreaterThan(banister!, 20.0, "Banister credits the same hour on the 0–100 axis")
     }
 }
