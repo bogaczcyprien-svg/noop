@@ -170,6 +170,9 @@ class StrainBanisterDenominatorTest {
 
         assertEquals("an hour below the floor earns nothing under Edwards, by design", 0.0, edwards!!, eps)
         assertNotNull(banister)
-        assertTrue("Banister credits the same hour on the 0–100 axis ($banister)", banister!! > 40.0)
+        // Bound lowered (40.0 -> 20.0) alongside banisterSedentaryHRR 0.10 -> 0.30 (see its doc
+        // comment): a higher sedentary floor subtracts more from every sample, so the credited amount
+        // drops (~35 at the new constant) without disappearing — still well clear of Edwards' 0.0.
+        assertTrue("Banister credits the same hour on the 0–100 axis ($banister)", banister!! > 20.0)
     }
 }

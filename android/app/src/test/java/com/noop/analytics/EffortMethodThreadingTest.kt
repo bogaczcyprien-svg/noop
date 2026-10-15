@@ -62,7 +62,10 @@ class EffortMethodThreadingTest {
     fun banisterReachesTheDayScore() {
         val banister = score(StrainScorer.Method.BANISTER)
         assertNotNull(banister)
-        assertTrue("an hour at 45% HRR should score under Banister, got $banister", banister!! > 40.0)
+        // Bound lowered (40.0 -> 20.0) alongside banisterSedentaryHRR 0.10 -> 0.30 (see its doc
+        // comment): a higher sedentary floor subtracts more from every sample, including this hour's,
+        // so the credited amount drops (~36 at the new constant) without disappearing.
+        assertTrue("an hour at 45% HRR should score under Banister, got $banister", banister!! > 20.0)
     }
 
     /**

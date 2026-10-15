@@ -50,7 +50,11 @@ final class EffortMethodThreadingTests: XCTestCase {
     func testBanisterReachesTheDayScore() {
         let banister = score(.banister)
         XCTAssertNotNil(banister)
-        XCTAssertGreaterThan(banister!, 40.0, "an hour at 45% HRR should score under Banister")
+        // Bound lowered (40.0 -> 20.0) alongside `banisterSedentaryHRR` 0.10 -> 0.30 (see its doc
+        // comment): a higher sedentary floor subtracts more from every sample, including this hour's,
+        // so the credited amount drops (~36 at the new constant) without disappearing — still a world
+        // away from Edwards' exact 0.0 for the same hour, which is the property this test pins.
+        XCTAssertGreaterThan(banister!, 20.0, "an hour at 45% HRR should score under Banister")
     }
 
     /// And it reaches the BOUTS inside the day by the same route. A day scored on Banister whose detected
