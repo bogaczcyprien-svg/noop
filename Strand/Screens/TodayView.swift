@@ -2324,6 +2324,30 @@ struct TodayView: View {
                     if let b = effortBreakdown {
                         NoopCard(padding: 18, tint: StrandPalette.effortColor) {
                             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                                // #2460-adjacent: the zone card below is an EDWARDS-shaped view (it is the
+                                // only diagnostic `zoneMinutes` can produce — see its doc comment) even when
+                                // `b.method` is Banister, which does not use these zones or a floor at all. A
+                                // Banister day can show "0 min in every zone" and still carry a real, nonzero
+                                // score from ordinary HR above resting — the zone card alone would read as
+                                // "this should be zero" when it is not. Naming the method AND showing the
+                                // number this computation actually produced (same inputs as what's on
+                                // screen — see the file-level comment above) closes that gap directly,
+                                // instead of leaving the reader to infer a possibly-wrong story from zones
+                                // that may not apply to their method.
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Method").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                        Text(b.method == .banister ? "Exponential (Banister)" : "Heart-rate zones (Edwards)")
+                                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        Text("This computation").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                                        Text(UnitFormatter.effortDisplay(b.strain, scale: effortScale))
+                                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                                    }
+                                }
+                                Divider().overlay(StrandPalette.hairline)
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text("Resting HR used").font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
@@ -2365,6 +2389,19 @@ struct TodayView: View {
                         NoopCard(padding: 18, tint: StrandPalette.effortColor) {
                             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                                 Text("Time by zone").strandOverline()
+                                if b.method == .banister {
+                                    // These zones are an Edwards-only lens — `zoneMinutes` has no Banister
+                                    // equivalent to show (see StrainScorer.zoneMinutes's doc comment: "the
+                                    // zones describe what the day WAS, not how it was scored"). Without this
+                                    // note, "0 min in every zone" reads as "this should be zero", which is
+                                    // false under Banister: it has no floor and credits every minute above
+                                    // resting HR, so "This computation" above can be well above zero even
+                                    // while every zone here reads 0.
+                                    Text("Your Effort uses the exponential (Banister) curve, which doesn't use these zones or a floor — it credits every minute above resting HR. These zone minutes won't add up to your score; see \"This computation\" above for the real total.")
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                                 ForEach(1...5, id: \.self) { zone in
                                     effortZoneRow(zone: zone, minutes: b.zoneMinutes[zone])
                                 }
