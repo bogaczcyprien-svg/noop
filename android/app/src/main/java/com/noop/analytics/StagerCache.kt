@@ -34,8 +34,9 @@ import com.noop.data.RrInterval
  */
 internal object StagerCache {
 
-    /** Which recipe produced a cached hypnogram — part of the key so V1 and V2 never alias each other. */
-    enum class Version { V1, V2 }
+    /** Which recipe produced a cached hypnogram — part of the key so V1 and V2 never alias each other.
+     *  [V2_NO_LEAD_IN] is V2 without the lead-in rule ([SleepStagerV2.leadInCardiacWakeEnd]); tests only. */
+    enum class Version { V1, V2, V2_NO_LEAD_IN }
 
     /**
      * A night's cache key: the staging recipe, the window, and a per-stream digest of every consumed

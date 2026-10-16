@@ -71,6 +71,7 @@ object SleepStagerV2 {
     fun stageSession(
         start: Long, end: Long, grav: List<GravitySample>,
         hr: List<HrSample>, rr: List<RrInterval>, resp: List<RespSample>,
+        leadInCardiacWake: Boolean = true,
     ): List<StageSegment> {
         // PERF CLIP (v7.0.2 / #707): bound the grav/hr/rr streams to the only seconds any Epoch feature can
         // possibly READ before doing ANYTHING else — both the fingerprint and the compute then operate on the
@@ -92,9 +93,10 @@ object SleepStagerV2 {
         val hrC = clipSorted(hr.sortedBy { it.ts }, start - PAD_LO, end + PAD_HI) { it.ts }
         val rrC = clipSorted(rr.sortedBy { it.ts }, start - PAD_LO, end + PAD_HI) { it.ts }
 
-        val key = StagerCache.fingerprint(StagerCache.Version.V2, start, end, gravC, hrC, rrC)
+        val version = if (leadInCardiacWake) StagerCache.Version.V2 else StagerCache.Version.V2_NO_LEAD_IN
+        val key = StagerCache.fingerprint(version, start, end, gravC, hrC, rrC)
         StagerCache.get(key)?.let { return StagerCache.copyOf(it) }
-        val segments = stageSessionUncached(start, end, gravC, hrC, rrC, resp)
+        val segments = stageSessionUncached(start, end, gravC, hrC, rrC, resp, leadInCardiacWake)
         StagerCache.put(key, segments)
         return StagerCache.copyOf(segments)
     }
@@ -130,6 +132,7 @@ object SleepStagerV2 {
     private fun stageSessionUncached(
         start: Long, end: Long, grav: List<GravitySample>,
         hr: List<HrSample>, rr: List<RrInterval>, resp: List<RespSample>,
+        leadInCardiacWake: Boolean,
     ): List<StageSegment> {
         // Sort defensively so the windowed features behave regardless of caller ordering.
         val gravS = grav.sortedBy { it.ts }
@@ -138,7 +141,7 @@ object SleepStagerV2 {
 
         val feats = features(start, end, gravS, hrS, rrS)
         if (feats.isEmpty()) return listOf(StageSegment(start = start, end = end, stage = "light"))
-        val labels = stageEpochs(feats)
+        val labels = stageEpochs(feats, leadInCardiacWake)
 
         // Tile [start, end] with one segment per staged epoch. The first segment back-fills [start, firstEpoch)
         // and the last extends to `end`. "awake" is renamed to the canonical "wake" used by V1 / StageSegment.
@@ -544,6 +547,27 @@ object SleepStagerV2 {
         return null
     }
 
+    /** Upper bound, in window-relative minutes, on how far into a window the lead-in clamp lift may reach.
+     *  A-priori, not fit: long enough for an ordinary lie-awake-before-sleep stretch, short enough that a
+     *  night whose HR stays elevated throughout cannot have more than its first 90 minutes re-read as wake.
+     *  Mirrors Swift `SleepStagerV2.leadInCardiacWakeMaxMinutes`. */
+    internal const val leadInCardiacWakeMaxMinutes = 90.0
+
+    /** Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
+     *  [stageEpochs] holds a motionless, elevated-HR epoch out of wake all night, which also covers lying
+     *  still AWAKE before sleep, so the first sustained non-wake run lands early. Stage once with the clamp
+     *  lifted everywhere and the REM-latency guard measured from the window start ([openLabels]; see the
+     *  PASS 0 note in [stageEpochs]), take that hypnogram's [sustainedSleepOnset], and lift the clamp only
+     *  for the epochs before it, capped at [leadInCardiacWakeMaxMinutes]. Returns the exclusive end index of
+     *  the lifted lead-in; 0 when the open pass never sustains sleep. Byte-identical twin of the Swift
+     *  `SleepStagerV2.leadInCardiacWakeEnd`; on by default at the fork owner's request, not validated against PSG. */
+    internal fun leadInCardiacWakeEnd(feats: List<Epoch>, openLabels: List<String>): Int {
+        val onset = sustainedSleepOnset(openLabels) ?: return 0
+        var cut = 0
+        while (cut < onset && feats[cut].minutesSinceOnset <= leadInCardiacWakeMaxMinutes) cut++
+        return cut
+    }
+
     /** Viterbi most-likely path over the per-epoch log-emissions with the sticky transition matrix and a
      *  uniform start. Ties resolve to the earlier stage in [stageNames]. */
     private fun viterbi(emSeq: List<Map<String, Double>>): List<String> {
@@ -588,8 +612,11 @@ object SleepStagerV2 {
      *  between the passes — every emission term, z-score and percentile is computed ONCE and reused — so the
      *  extra cost is one Viterbi over an already-built lattice, not a second featurisation, and
      *  [stageSession] memoizes the whole thing anyway. When no sustained run exists the origin falls back to
-     *  the window start, which is exactly the origin the shipped `c`-based guard used. */
-    private fun stageEpochs(feats: List<Epoch>): List<String> {
+     *  the window start, which is exactly the origin the shipped `c`-based guard used.
+     *
+     *  [leadInCardiacWake] (default true; `false` is the pre-rule recipe, kept for tests) adds a PASS 0 ahead of both; see
+     *  [leadInCardiacWakeEnd]. */
+    private fun stageEpochs(feats: List<Epoch>, leadInCardiacWake: Boolean = true): List<String> {
         if (feats.isEmpty()) return emptyList()
 
         // Per-night z-score over the present values (population std; 0 std → 1 so a flat channel is neutral).
@@ -617,8 +644,7 @@ object SleepStagerV2 {
 
         // Held as the concrete HashMap (not the read-only `Map` view) so pass 2 can add the REM-latency guard
         // in place; `viterbi` still takes `List<Map<…>>`, which this satisfies by List's covariance.
-        val seq = ArrayList<HashMap<String, Double>>(feats.size)
-        for (f in feats) {
+        fun emission(f: Epoch, clampQuiescentCardiac: Boolean): HashMap<String, Double> {
             val zhrv = zhr(f.hr); val zhvv = zhv(f.hrVar); val zmvv = zmv(f.moveFrac)
             val gate = deepGateSlope * maxOf(0.0, fpct(f.hrFlat11) - deepGateThresh)
             // Cardiac contribution to the AWAKE emission. On a motion-quiescent epoch the wrist did not move,
@@ -627,7 +653,8 @@ object SleepStagerV2 {
             // the same cardiac coefficients verbatim, so a night with any motion stages byte-identical; the
             // correction only ever holds a still, elevated-HR epoch. Mirrors Swift `awakeCardiac`.
             val awakeCardiac0 = 0.8 * zhvv + 0.4 * zhrv
-            val awakeCardiac = if (motionQuiescent(f)) minOf(0.0, awakeCardiac0) else awakeCardiac0
+            val awakeCardiac =
+                if (clampQuiescentCardiac && motionQuiescent(f)) minOf(0.0, awakeCardiac0) else awakeCardiac0
             val em = HashMap<String, Double>()
             em["deep"] = -1.1 * zhvv - 0.5 * zmvv - gate + baseLogPrior["deep"]!!
             em["rem"] = 0.6 * zhvv - 0.6 * zmvv + 0.4 * zhrv + baseLogPrior["rem"]!!
@@ -638,7 +665,25 @@ object SleepStagerV2 {
             for (s in stageNames) em[s] = em[s]!! + pr[s]!!
             if (f.jerkMax > f.jerkScale * jerkFloorGateMult) em["awake"] = em["awake"]!! + motionGateBoost
             f.respReg?.let { rg -> val z = zrg(rg); em["deep"] = em["deep"]!! + respWeight * z; em["rem"] = em["rem"]!! - respWeight * z }
-            seq.add(em)
+            return em
+        }
+
+        val seq = ArrayList<HashMap<String, Double>>(feats.size)
+        for (f in feats) seq.add(emission(f, clampQuiescentCardiac = true))
+
+        // PASS 0 (`leadInCardiacWake`, default on) — lift the quiescent cardiac clamp over the pre-sleep lead-in
+        // only. See [leadInCardiacWakeEnd] for the rule and its bound. Mirrors Swift.
+        if (leadInCardiacWake) {
+            val unclamped = feats.map { emission(it, clampQuiescentCardiac = false) }
+            // The probe carries the REM-latency guard from the WINDOW START: a still, elevated-HR lead-in
+            // otherwise scores REM nearly as well as wake, and a probe that calls it REM finds "sleep" at
+            // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
+            // them against the real onset as usual. Mirrors Swift.
+            val probe = unclamped.mapIndexed { i, em ->
+                HashMap(em).also { it["rem"] = it["rem"]!! - remLatencyGuard(feats[i].minutesSinceOnset) }
+            }
+            val cut = leadInCardiacWakeEnd(feats, viterbi(probe))
+            for (i in 0 until cut) seq[i] = unclamped[i]
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.

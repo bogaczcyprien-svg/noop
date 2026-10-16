@@ -85,6 +85,12 @@ struct RecipeConfig: Equatable {
     /// see `Variants.preNine30Guard`. It is a diagnostic, not a candidate.
     var remLatencyMode: RemLatencyMode = .gradedFromOnset
 
+    /// Lead-in cardiac wake (`SleepStagerV2.leadInCardiacWakeEnd`): lift the quiescent cardiac clamp before
+    /// the unclamped pass's sleep onset, capped at `leadInCardiacWakeMaxMinutes`. Shipped on; only runs in
+    /// `.gradedFromOnset`, the mode the shipped stager uses.
+    var leadInCardiacWake: Bool = true
+    var leadInCardiacWakeMaxMinutes: Double = 90.0
+
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
         priorLight: log(0.50), priorDeep: log(0.15), priorRem: log(0.22), priorAwake: log(0.10),
@@ -438,14 +444,13 @@ enum V2Recipe {
             return Double(lo) / Double(fsorted.count)
         }
 
-        var seq: [[String: Double]] = []
-        seq.reserveCapacity(feats.count)
-        for f in feats {
+        func emission(_ f: Epoch, clampQuiescentCardiac: Bool) -> [String: Double] {
             let zhrv = zhr(f.hr), zhvv = zhv(f.hrVar), zmvv = zmv(f.moveFrac)
             let gate = cfg.deepGateSlope * max(0.0, fpct(f.hrFlat11) - cfg.deepGateThresh)
             let awakeCardiac0 = cfg.awakeZhv * dz(zhvv, cfg.awakeDeadzone)
                 + cfg.awakeZhr * dz(zhrv, cfg.awakeDeadzone)
-            let awakeCardiac = motionQuiescent(f, cfg) ? min(0.0, awakeCardiac0) : awakeCardiac0
+            let awakeCardiac = clampQuiescentCardiac && motionQuiescent(f, cfg)
+                ? min(0.0, awakeCardiac0) : awakeCardiac0
             var em: [String: Double] = [
                 "deep": cfg.deepZhv * zhvv + cfg.deepZhr * zhrv + cfg.deepZmv * zmvv - gate + prior["deep"]!,
                 "rem": cfg.remZhv * zhvv + cfg.remZmv * zmvv + cfg.remZhr * zhrv + prior["rem"]!,
@@ -467,10 +472,24 @@ enum V2Recipe {
             for s in stageNames { em[s]! += pr[s]! }
             if f.jerkMax > f.jerkScale * cfg.jerkFloorGateMult { em["awake"]! += cfg.motionGateBoost }
             if let rg = f.respReg { let z = zrg(rg); em["deep"]! += cfg.respWeight * z; em["rem"]! -= cfg.respWeight * z }
-            seq.append(em)
+            return em
         }
 
+        var seq: [[String: Double]] = feats.map { emission($0, clampQuiescentCardiac: true) }
+
         if cfg.remLatencyMode == .preNine30FractionStep { return viterbi(seq, cfg) }
+
+        // Lead-in cardiac wake: same pass 0 as `SleepStagerV2.stageEpochs`.
+        if cfg.leadInCardiacWake {
+            let unclamped = feats.map { emission($0, clampQuiescentCardiac: false) }
+            var probe = unclamped
+            for i in feats.indices { probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg) }
+            var cut = 0
+            if let onset = sustainedSleepOnset(viterbi(probe, cfg), cfg) {
+                while cut < onset, feats[cut].minutesSinceOnset <= cfg.leadInCardiacWakeMaxMinutes { cut += 1 }
+            }
+            for i in 0..<cut { seq[i] = unclamped[i] }
+        }
 
         let provisional = viterbi(seq, cfg)
         let originMin = sustainedSleepOnset(provisional, cfg).map { feats[$0].minutesSinceOnset } ?? 0.0
