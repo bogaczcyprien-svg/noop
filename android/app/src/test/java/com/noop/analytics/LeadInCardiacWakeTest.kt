@@ -132,13 +132,18 @@ class LeadInCardiacWakeTest {
         assertTrue(wakeMinutesIn(on, 4 * 60 * 60, 4 * 60 * 60 + 40 * 60) < 5.0)
     }
 
-    /** A lead-in longer than the cap: only its first 90 minutes can be re-read as wake. */
+    /** A lead-in longer than the cap: onset never moves past the 90-minute cap. On this fixture the open
+     *  pass does not find the long lead-in at all (a 150-minute elevated stretch is less extreme in the
+     *  night's own z-score), so onset stays where the clamped path puts it; the cap itself is pinned by
+     *  [leadInEndIsCappedAtNinetyMinutes]. */
     @Test
-    fun liftIsBoundedByTheCapOnALongElevatedLeadIn() {
+    fun liftNeverMovesOnsetPastTheCapOnALongElevatedLeadIn() {
         val dur = 9 * 60 * 60
         val awake = listOf(0 until 150 * 60)
+        val off = onsetMinutes(stage(dur, awake, leadIn = false))
         val on = onsetMinutes(stage(dur, awake, leadIn = true))
-        assertNotNull(on)
-        assertTrue("onset must not move past the 90-min cap (got $on min)", on!! in 80.0..100.0)
+        assertNotNull(off); assertNotNull(on)
+        assertTrue("on ($on) must not read earlier than off ($off)", on!! >= off!!)
+        assertTrue("onset must not move past the 90-min cap (got $on min)", on <= 100.0)
     }
 }

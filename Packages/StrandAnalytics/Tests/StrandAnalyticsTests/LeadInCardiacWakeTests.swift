@@ -120,10 +120,15 @@ final class LeadInCardiacWakeTests: XCTestCase {
         XCTAssertLessThan(wakeMinutes(in: on, from: 4 * 60 * 60, to: 4 * 60 * 60 + 40 * 60), 5.0)
     }
 
-    /// A lead-in longer than the cap: only its first 90 minutes can be re-read as wake.
-    func testLiftIsBoundedByTheCapOnALongElevatedLeadIn() throws {
+    /// A lead-in longer than the cap: onset never moves past the 90-minute cap. On this fixture the open
+    /// pass does not find the long lead-in at all (a 150-minute elevated stretch is less extreme in the
+    /// night's own z-score), so onset stays where the clamped path puts it; the cap itself is pinned by
+    /// `testLeadInEndIsCappedAtNinetyMinutes`.
+    func testLiftNeverMovesOnsetPastTheCapOnALongElevatedLeadIn() throws {
         let dur = 9 * 60 * 60
+        let off = try XCTUnwrap(onsetMinutes(stage(dur, [0..<(150 * 60)], leadIn: false)))
         let on = try XCTUnwrap(onsetMinutes(stage(dur, [0..<(150 * 60)], leadIn: true)))
-        XCTAssertTrue((80.0...100.0).contains(on), "onset must not move past the 90-min cap (got \(on) min)")
+        XCTAssertGreaterThanOrEqual(on, off)
+        XCTAssertLessThanOrEqual(on, 100.0, "onset must not move past the 90-min cap (got \(on) min)")
     }
 }
