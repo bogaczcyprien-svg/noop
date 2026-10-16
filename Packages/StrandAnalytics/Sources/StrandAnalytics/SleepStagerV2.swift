@@ -38,7 +38,8 @@ public enum SleepStagerV2 {
     /// consumed — respiration regularity is recovered from the R-R stream (RSA), the path available on both
     /// WHOOP 4 and 5. The recipe stages "wake" naturally (no separate pre-onset / post-wake forcing).
     public static func stageSession(start: Int, end: Int, grav: [GravitySample],
-                                    hr: [HRSample], rr: [RRInterval], resp: [RespSample]) -> [StageSegment] {
+                                    hr: [HRSample], rr: [RRInterval], resp: [RespSample],
+                                    leadInCardiacWake: Bool = true) -> [StageSegment] {
         // v7.0.2 perf (#707): stage each night AT MOST ONCE per (window, input-fingerprint). The post-sync
         // scoring loop and the self-heal restage call this with byte-identical streams across passes; without
         // the cache each call re-allocates the large per-second HR/gravity dictionaries below before
@@ -86,9 +87,11 @@ public enum SleepStagerV2 {
                 StreamFingerprint.gravityQuant(x: $0.x, y: $0.y, z: $0.z)
             }),
             hr: StreamFingerprint.of(hrW, ts: { $0.ts }, quant: { Int($0.bpm) }),
-            rr: StreamFingerprint.of(rrW, ts: { $0.ts }, quant: { Int($0.rrMs) }))
+            rr: StreamFingerprint.of(rrW, ts: { $0.ts }, quant: { Int($0.rrMs) }),
+            leadInCardiacWake: leadInCardiacWake)
         return stageCache.value(key) {
-            stageSessionUncached(start: start, end: end, grav: gravW, hr: hrW, rr: rrW, resp: resp)
+            stageSessionUncached(start: start, end: end, grav: gravW, hr: hrW, rr: rrW, resp: resp,
+                                 leadInCardiacWake: leadInCardiacWake)
         }
     }
 
@@ -122,6 +125,7 @@ public enum SleepStagerV2 {
     private struct V2Key: Hashable {
         let start: Int; let end: Int
         let grav: StreamFingerprint; let hr: StreamFingerprint; let rr: StreamFingerprint
+        let leadInCardiacWake: Bool
     }
 
     /// ≈ a couple of weeks of distinct nights (incl. re-staged edits); FIFO-evicted, result-only.
@@ -130,11 +134,12 @@ public enum SleepStagerV2 {
     /// The unchanged staging recipe. Split out verbatim from `stageSession` so the public entry can memoize
     /// in front of it; behaviour is byte-identical (a cache miss runs exactly this).
     private static func stageSessionUncached(start: Int, end: Int, grav: [GravitySample],
-                                             hr: [HRSample], rr: [RRInterval], resp: [RespSample]) -> [StageSegment] {
+                                             hr: [HRSample], rr: [RRInterval], resp: [RespSample],
+                                             leadInCardiacWake: Bool) -> [StageSegment] {
         // The public veneer has already established stable timestamp order before clipping.
         let feats = features(start: start, end: end, grav: grav, hr: hr, rr: rr)
         if feats.isEmpty { return [StageSegment(start: start, end: end, stage: "light")] }
-        let labels = stageEpochs(feats)
+        let labels = stageEpochs(feats, leadInCardiacWake: leadInCardiacWake)
 
         // Tile [start, end] with one segment per staged epoch. The first segment back-fills [start, firstEpoch)
         // and the last extends to `end`; an interior coverage gap is carried by the preceding label. "awake"
@@ -545,6 +550,35 @@ public enum SleepStagerV2 {
         return nil
     }
 
+    /// Upper bound, in window-relative minutes, on how far into a window the lead-in clamp lift may reach.
+    /// A-priori, not fit: long enough for an ordinary lie-awake-before-sleep stretch, short enough that a
+    /// night whose HR stays elevated throughout (the supplement / hot-room / alcohol case the clamp exists
+    /// for) cannot have more than its first 90 minutes re-read as wake.
+    static let leadInCardiacWakeMaxMinutes = 90.0
+
+    /// Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
+    /// `stageEpochs` holds a motionless, elevated-HR epoch out of wake all night, which is right mid-sleep but
+    /// also covers lying still AWAKE before sleep: the wrist is quiet, the heart still says awake, and the
+    /// clamp discards exactly that evidence, so the first sustained non-wake run (and with it the displayed
+    /// onset via `refinedOnsetTs`) lands early. A fork user reported onset reading early on a 5/MG after the
+    /// V1 onset knobs (`onsetHRSleepMult`, `onsetPersistEpochsForOnset`) were already at their limits.
+    ///
+    /// The rule: stage the night once with the clamp lifted everywhere and the REM-latency guard measured from
+    /// the window start (`openLabels`; see the PASS 0 note in `stageEpochs` for why), take that hypnogram's
+    /// first sustained sleep run (`sustainedSleepOnset`, the PSG-measured 5-minute rule), and lift the clamp
+    /// only for the epochs BEFORE it, capped at `leadInCardiacWakeMaxMinutes`. Every epoch from sleep onset
+    /// onward keeps the clamp unchanged. Returns the exclusive end index of the lifted lead-in; 0 (nothing
+    /// lifted) when the open pass never sustains sleep, so such a night stages exactly as it does today.
+    /// Lifting the clamp can only raise an awake emission, never lower one, so the lead-in can only lean
+    /// further toward wake. On by default at the fork owner's request; not validated against PSG, and one
+    /// wearer's perception is the only reference so far.
+    static func leadInCardiacWakeEnd(_ feats: [Epoch], openLabels: [String]) -> Int {
+        guard let onset = sustainedSleepOnset(openLabels) else { return 0 }
+        var cut = 0
+        while cut < onset, feats[cut].minutesSinceOnset <= leadInCardiacWakeMaxMinutes { cut += 1 }
+        return cut
+    }
+
     /// The SAME sustained-non-wake rule as `sustainedSleepOnset`, applied to a session's final, already
     /// MERGED `[StageSegment]` (what actually gets persisted/displayed) instead of the raw per-epoch label
     /// array — so it works regardless of which recipe staged the session, and reads real timestamps
@@ -628,7 +662,10 @@ public enum SleepStagerV2 {
     /// one Viterbi over an already-built lattice, not a second featurisation, and `stageSession` memoizes the
     /// whole thing anyway. When no sustained run exists the origin falls back to the window start, which is
     /// exactly the origin the shipped `c`-based guard used.
-    static func stageEpochs(_ feats: [Epoch]) -> [String] {
+    ///
+    /// `leadInCardiacWake` (default true; `false` is the pre-rule recipe, kept for tests) adds a PASS 0 ahead of both; see
+    /// `leadInCardiacWakeEnd`.
+    static func stageEpochs(_ feats: [Epoch], leadInCardiacWake: Bool = true) -> [String] {
         if feats.isEmpty { return [] }
 
         // Per-night z-score over the present values (population std; 0 std → 1 so a flat channel is neutral).
@@ -654,9 +691,7 @@ public enum SleepStagerV2 {
             return Double(lo) / Double(fsorted.count)
         }
 
-        var seq: [[String: Double]] = []
-        seq.reserveCapacity(feats.count)
-        for f in feats {
+        func emission(_ f: Epoch, clampQuiescentCardiac: Bool) -> [String: Double] {
             let zhrv = zhr(f.hr), zhvv = zhv(f.hrVar), zmvv = zmv(f.moveFrac)
             let gate = deepGateSlope * max(0.0, fpct(f.hrFlat11) - deepGateThresh)
             // Cardiac contribution to the AWAKE emission. On a motion-quiescent epoch the wrist did not move,
@@ -665,7 +700,8 @@ public enum SleepStagerV2 {
             // upstream's restored (post-#437) cardiac coefficients verbatim, so a night with any motion stages
             // byte-identical to upstream; the correction only ever holds a still, elevated-HR epoch.
             let awakeCardiac0 = 0.8 * zhvv + 0.4 * zhrv
-            let awakeCardiac = motionQuiescent(f) ? min(0.0, awakeCardiac0) : awakeCardiac0
+            let awakeCardiac = clampQuiescentCardiac && motionQuiescent(f)
+                ? min(0.0, awakeCardiac0) : awakeCardiac0
             var em: [String: Double] = [
                 "deep": -1.1 * zhvv - 0.5 * zmvv - gate + baseLogPrior["deep"]!,
                 "rem": 0.6 * zhvv - 0.6 * zmvv + 0.4 * zhrv + baseLogPrior["rem"]!,
@@ -677,7 +713,23 @@ public enum SleepStagerV2 {
             for s in stageNames { em[s]! += pr[s]! }
             if f.jerkMax > f.jerkScale * jerkFloorGateMult { em["awake"]! += motionGateBoost }
             if let rg = f.respReg { let z = zrg(rg); em["deep"]! += respWeight * z; em["rem"]! -= respWeight * z }
-            seq.append(em)
+            return em
+        }
+
+        var seq: [[String: Double]] = feats.map { emission($0, clampQuiescentCardiac: true) }
+
+        // PASS 0 (`leadInCardiacWake`, default on) — lift the quiescent cardiac clamp over the pre-sleep lead-in
+        // only. See `leadInCardiacWakeEnd` for the rule and its bound.
+        if leadInCardiacWake {
+            let unclamped = feats.map { emission($0, clampQuiescentCardiac: false) }
+            // The probe carries the REM-latency guard from the WINDOW START: a still, elevated-HR lead-in
+            // otherwise scores REM nearly as well as wake, and a probe that calls it REM finds "sleep" at
+            // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
+            // them against the real onset as usual.
+            var probe = unclamped
+            for i in feats.indices { probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset) }
+            let cut = leadInCardiacWakeEnd(feats, openLabels: viterbi(probe))
+            for i in 0..<cut { seq[i] = unclamped[i] }
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.
