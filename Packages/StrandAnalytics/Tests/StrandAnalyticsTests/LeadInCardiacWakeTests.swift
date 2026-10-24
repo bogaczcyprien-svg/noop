@@ -86,11 +86,14 @@ final class LeadInCardiacWakeTests: XCTestCase {
         XCTAssertEqual(SleepStagerV2.leadInCardiacWakeEnd(feats, openLabels: Array(repeating: "light", count: 100)), 0)
     }
 
-    func testLeadInEndIsCappedAtNinetyMinutes() {
-        let feats = (0..<600).map(epoch)
-        // Open-pass onset at epoch 300 (150 min): the lift stops at the last epoch centred within 90 min.
-        let labels = Array(repeating: "awake", count: 300) + Array(repeating: "light", count: 300)
-        XCTAssertEqual(SleepStagerV2.leadInCardiacWakeEnd(feats, openLabels: labels), 180)
+    func testLeadInEndIsCappedAtThreeHours() {
+        let feats = (0..<800).map(epoch)
+        // Open-pass onset at epoch 500 (250 min): the lift stops at the last epoch centred within 180 min.
+        let labels = Array(repeating: "awake", count: 500) + Array(repeating: "light", count: 300)
+        XCTAssertEqual(SleepStagerV2.leadInCardiacWakeEnd(feats, openLabels: labels), 360)
+        // A 2-hour lie-in (onset at epoch 240) is lifted whole.
+        let twoHours = Array(repeating: "awake", count: 240) + Array(repeating: "light", count: 560)
+        XCTAssertEqual(SleepStagerV2.leadInCardiacWakeEnd(feats, openLabels: twoHours), 240)
     }
 
     // MARK: - end to end through stageSession
@@ -120,15 +123,22 @@ final class LeadInCardiacWakeTests: XCTestCase {
         XCTAssertLessThan(wakeMinutes(in: on, from: 4 * 60 * 60, to: 4 * 60 * 60 + 40 * 60), 5.0)
     }
 
-    /// A lead-in longer than the cap: onset never moves past the 90-minute cap. On this fixture the open
-    /// pass does not find the long lead-in at all (a 150-minute elevated stretch is less extreme in the
-    /// night's own z-score), so onset stays where the clamped path puts it; the cap itself is pinned by
-    /// `testLeadInEndIsCappedAtNinetyMinutes`.
-    func testLiftNeverMovesOnsetPastTheCapOnALongElevatedLeadIn() throws {
+    /// The second report: two hours lying still awake, then sleep. No sleep bout may be credited inside the
+    /// lie-in, so onset lands near the 120-minute settle point.
+    func testTwoHourStillLieInIsNotCreditedAsSleep() throws {
+        let dur = 9 * 60 * 60
+        let on = try XCTUnwrap(onsetMinutes(stage(dur, [0..<(120 * 60)], leadIn: true)))
+        XCTAssertTrue((105.0...135.0).contains(on), "onset should sit near the 120-min settle point (got \(on) min)")
+    }
+
+    /// A long elevated lead-in: onset never reads earlier than the pre-rule path and never moves past the
+    /// truth (150 min) by more than a few minutes; the cap itself is pinned by
+    /// `testLeadInEndIsCappedAtThreeHours`.
+    func testLiftNeverOvershootsALongElevatedLeadIn() throws {
         let dur = 9 * 60 * 60
         let off = try XCTUnwrap(onsetMinutes(stage(dur, [0..<(150 * 60)], leadIn: false)))
         let on = try XCTUnwrap(onsetMinutes(stage(dur, [0..<(150 * 60)], leadIn: true)))
         XCTAssertGreaterThanOrEqual(on, off)
-        XCTAssertLessThanOrEqual(on, 100.0, "onset must not move past the 90-min cap (got \(on) min)")
+        XCTAssertLessThanOrEqual(on, 160.0, "onset must not move past the lead-in (got \(on) min)")
     }
 }

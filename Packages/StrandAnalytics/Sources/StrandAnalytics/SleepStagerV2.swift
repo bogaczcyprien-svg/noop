@@ -553,8 +553,23 @@ public enum SleepStagerV2 {
     /// Upper bound, in window-relative minutes, on how far into a window the lead-in clamp lift may reach.
     /// A-priori, not fit: long enough for an ordinary lie-awake-before-sleep stretch, short enough that a
     /// night whose HR stays elevated throughout (the supplement / hot-room / alcohol case the clamp exists
-    /// for) cannot have more than its first 90 minutes re-read as wake.
-    static let leadInCardiacWakeMaxMinutes = 90.0
+    /// for) cannot have more than its first 3 hours re-read as wake. Raised from 90 after a wearer reported
+    /// a false sleep bout late in a 2-hour lie-in, the part the 90-minute cap left clamped.
+    static let leadInCardiacWakeMaxMinutes = 180.0
+
+    /// Log-odds added to the open pass's AWAKE emission, so it finds onset where sleep is clearly
+    /// established rather than at the first quiet epoch. Fit on PSG (Tools/SleepPSG section 8,
+    /// sleep-accel, n = 31, with both biases gated on the cardiac vote): displayed-onset bias −8.9 → −4.6 min,
+    /// MAE 8.9 → 7.1 min, nights >10 min early 10 → 6, none >10 min late, kappa 0.374 → 0.383. Every value
+    /// from 2.0 to 4.0 stages identically there; 2.5 sits inside that plateau.
+    static let leadInProbeWakeBias = 2.5
+
+    /// Log-odds added to the AWAKE emission of the lifted lead-in epochs. Saturates at 2.0 on the same
+    /// bench (2.0 to 4.0 stage identically; 1.0 left onset about 4 minutes earlier, measured ungated).
+    static let leadInWakeBias = 2.0
+
+    /// Both biases need the epoch's HR at least this far above the night's median epoch HR.
+    static let leadInHRMarginBpm = 2.0
 
     /// Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
     /// `stageEpochs` holds a motionless, elevated-HR epoch out of wake all night, which is right mid-sleep but
@@ -569,9 +584,10 @@ public enum SleepStagerV2 {
     /// only for the epochs BEFORE it, capped at `leadInCardiacWakeMaxMinutes`. Every epoch from sleep onset
     /// onward keeps the clamp unchanged. Returns the exclusive end index of the lifted lead-in; 0 (nothing
     /// lifted) when the open pass never sustains sleep, so such a night stages exactly as it does today.
-    /// Lifting the clamp can only raise an awake emission, never lower one, so the lead-in can only lean
-    /// further toward wake. On by default at the fork owner's request; not validated against PSG, and one
-    /// wearer's perception is the only reference so far.
+    /// Lifting the clamp and adding `leadInWakeBias` can only raise an awake emission, never lower one, so
+    /// the lead-in can only lean further toward wake. On by default at the fork owner's request. The two
+    /// biases are fit on PSG (Tools/SleepPSG section 8, sleep-accel, n = 31: displayed-onset bias −8.9 →
+    /// −4.6 min); that dataset is an Apple Watch with no R-R, so it is evidence, not WHOOP validation.
     static func leadInCardiacWakeEnd(_ feats: [Epoch], openLabels: [String]) -> Int {
         guard let onset = sustainedSleepOnset(openLabels) else { return 0 }
         var cut = 0
@@ -727,9 +743,28 @@ public enum SleepStagerV2 {
             // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
             // them against the real onset as usual.
             var probe = unclamped
-            for i in feats.indices { probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset) }
+            // The probe also leans toward wake (`leadInProbeWakeBias`), and the lifted epochs carry
+            // `leadInWakeBias`; both are PSG-fit, see their declarations. Both apply only where the heart
+            // itself votes awake (the unclamped cardiac term is positive), so a still night with flat HR
+            // gains no wake from them.
+            // The night's median epoch HR stands in for its sleeping HR (most of a night is sleep); an epoch
+            // must also sit `leadInHRMarginBpm` above it, so a flat night's 1-2 bpm ripple, which the
+            // per-night z-score blows up, cannot qualify.
+            let hrSorted = feats.compactMap { $0.hr }.sorted()
+            let hrMedian = hrSorted.isEmpty ? 0.0 : hrSorted[(hrSorted.count - 1) / 2]
+            let cardiacAwake = feats.map { f -> Bool in
+                guard let h = f.hr, h >= hrMedian + leadInHRMarginBpm else { return false }
+                return 0.8 * zhv(f.hrVar) + 0.4 * zhr(f.hr) > 0.0
+            }
+            for i in feats.indices {
+                probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset)
+                if cardiacAwake[i] { probe[i]["awake"]! += leadInProbeWakeBias }
+            }
             let cut = leadInCardiacWakeEnd(feats, openLabels: viterbi(probe))
-            for i in 0..<cut { seq[i] = unclamped[i] }
+            for i in 0..<cut {
+                seq[i] = unclamped[i]
+                if cardiacAwake[i] { seq[i]["awake"]! += leadInWakeBias }
+            }
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.

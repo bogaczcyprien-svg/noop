@@ -27,7 +27,7 @@ while let k = it.next() {
     case "--seed": a.seed = UInt64(it.next() ?? "") ?? a.seed
     case "-h", "--help":
         print("""
-        usage: sleeppsg --dataset <sleep-accel root> [--section all|port|baseline|strata|rem|variants|priors]
+        usage: sleeppsg --dataset <sleep-accel root> [--section all|port|baseline|strata|rem|variants|priors|onset]
                         [--subjects N] [--csv <path>] [--seed <n>]
 
           --dataset   PhysioNet sleep-accel v1.0.0, extracted. See README.md for the download step and the
@@ -508,6 +508,81 @@ if want("priors") {
         print("    \(v.name.padding(toLength: 26, withPad: " ", startingAt: 0))\(f(mean(ps.map { $0.kappa }), 7, 3))   \(kBetter)/\(n)     "
               + "\(f(meanAbs("wake"), 5, 2)) \(f(meanAbs("deep"), 5, 2)) \(f(meanAbs("rem"), 5, 2)) \(f(meanAbs("light"), 5, 2))      "
               + "\(better("wake"))/\(n) \(better("deep"))/\(n) \(better("rem"))/\(n) \(better("light"))/\(n)")
+    }
+}
+
+if want("onset") {
+    print("""
+
+    ================================================================================
+    8. DISPLAYED SLEEP ONSET vs PSG
+    ================================================================================
+    The onset the app shows is `SleepStagerV2.refinedOnsetTs` (first non-wake run of `sustained` seconds),
+    or the window start when the hypnogram does not open on wake. Truth = first PSG-scored non-wake epoch.
+    The window opens at PSG start, so the in-bed awake lead-in is in every night. bias = pred − truth
+    (negative = onset shown too EARLY). kappa / wake recall over all scored epochs, as in section 3.
+    """)
+    func truthOnsetMin(_ s: PSGSubject) -> Double? {
+        s.truth.firstIndex(where: { $0 != nil && $0 != "wake" }).map { Double($0) * 0.5 }
+    }
+    func shownOnsetMin(_ segs: [StageSegment], _ s: PSGSubject, _ sustained: Int) -> Double {
+        // Same rule as `SleepStagerV2.refinedOnsetTs`, which is internal to StrandAnalytics.
+        var ts = s.start
+        if let first = segs.first, first.stage == "wake" {
+            var i = 0
+            search: while i < segs.count {
+                if segs[i].stage == "wake" { i += 1; continue }
+                let runStart = segs[i].start
+                var runEnd = segs[i].end
+                var j = i + 1
+                while j < segs.count, segs[j].stage != "wake" { runEnd = segs[j].end; j += 1 }
+                if runEnd - runStart >= sustained { ts = runStart; break search }
+                i = j
+            }
+        }
+        return Double(ts - s.start) / 60.0
+    }
+    var off = RecipeConfig.shipped; off.leadInCardiacWake = false
+    var rows: [(String, RecipeConfig?)] = [("shipped (lead-in on)", nil), ("lead-in off", off)]
+    var noBias = RecipeConfig.shipped; noBias.leadInProbeWakeBias = 0; noBias.leadInWakeBias = 0
+    rows.append(("lead-in, no biases (12.3.4)", noBias))
+    for m in [0.0, 1.0, 2.0, 3.0, 5.0, 8.0] {
+        var c = RecipeConfig.shipped; c.leadInHRMarginBpm = m
+        rows.append(("HR margin \(m) bpm", c))
+    }
+    for pb in [2.0, 4.0] {
+        var c = RecipeConfig.shipped; c.leadInProbeWakeBias = pb
+        rows.append(("probe +\(pb)", c))
+    }
+    let truthOn = subjects.map(truthOnsetMin)
+    print("    truth onset     median \(f(median(truthOn.compactMap { $0 }), 5, 1)) min after PSG start (n = \(truthOn.compactMap { $0 }.count))")
+    print("    variant                       sustained   bias mean  median    MAE  early>10  late>10   kappa  wakeRec")
+    for (name, cfg) in rows {
+        let segsAll: [[StageSegment]] = subjects.map { s in
+            cfg.map { stageVariant($0)(s) } ?? stageShipped(s)
+        }
+        var conf = Confusion()
+        for (s, segs) in zip(subjects, segsAll) {
+            let pred = epochLabels(segs, start: s.start, end: s.end)
+            for i in 0..<min(s.truth.count, pred.count) { if let t = s.truth[i] { conf.add(ref: t, pred: pred[i]) } }
+        }
+        for sustained in [300, 600, 900] {
+            var d: [Double] = []
+            for (k, s) in subjects.enumerated() {
+                guard let t = truthOn[k] else { continue }
+                d.append(shownOnsetMin(segsAll[k], s, sustained) - t)
+            }
+            let early = d.filter { $0 < -10 }.count, late = d.filter { $0 > 10 }.count
+            print("    \(name.padding(toLength: 30, withPad: " ", startingAt: 0))\(String(sustained).padding(toLength: 9, withPad: " ", startingAt: 0))"
+                  + "\(f(mean(d), 9, 1)) \(f(median(d), 7, 1)) \(f(mae(d), 6, 1))     \(early)/\(d.count)    \(late)/\(d.count)"
+                  + "  \(f(conf.kappa, 6, 3))  \(f(conf.prf("wake").recall * 100, 6, 1))")
+        }
+    }
+    print("\n    per subject (shipped, 300 s): id  truth  shown  bias")
+    for (k, s) in subjects.enumerated() {
+        guard let t = truthOn[k] else { continue }
+        let shown = shownOnsetMin(stageShipped(s), s, 300)
+        print("      \(s.id.padding(toLength: 10, withPad: " ", startingAt: 0)) \(f(t, 6, 1)) \(f(shown, 6, 1)) \(f(shown - t, 6, 1))")
     }
 }
 

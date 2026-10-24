@@ -89,7 +89,17 @@ struct RecipeConfig: Equatable {
     /// the unclamped pass's sleep onset, capped at `leadInCardiacWakeMaxMinutes`. Shipped on; only runs in
     /// `.gradedFromOnset`, the mode the shipped stager uses.
     var leadInCardiacWake: Bool = true
-    var leadInCardiacWakeMaxMinutes: Double = 90.0
+    var leadInCardiacWakeMaxMinutes: Double = 180.0
+    /// Shipped values of `SleepStagerV2.leadInProbeWakeBias` / `leadInWakeBias`. `leadInProbeWakeBias` is added to the probe's
+    /// awake emission (the probe then finds onset later, so more of the lead-in is lifted);
+    /// `leadInWakeBias` is added to the awake emission of the lifted epochs themselves.
+    var leadInProbeWakeBias: Double = 2.5
+    var leadInWakeBias: Double = 2.0
+    /// Shipped true: both biases apply only where the unclamped cardiac term votes awake. False is the
+    /// unconditional form, kept for the onset bench.
+    var leadInBiasNeedsCardiac: Bool = true
+    /// `SleepStagerV2.leadInHRMarginBpm`: the gate also needs epoch HR this far above the night's median.
+    var leadInHRMarginBpm: Double = 2.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
@@ -483,12 +493,25 @@ enum V2Recipe {
         if cfg.leadInCardiacWake {
             let unclamped = feats.map { emission($0, clampQuiescentCardiac: false) }
             var probe = unclamped
-            for i in feats.indices { probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg) }
+            let hrSorted = feats.compactMap { $0.hr }.sorted()
+            let hrMedian = hrSorted.isEmpty ? 0.0 : hrSorted[(hrSorted.count - 1) / 2]
+            let cardiacAwake = feats.map { f -> Bool in
+                if !cfg.leadInBiasNeedsCardiac { return true }
+                guard let h = f.hr, h >= hrMedian + cfg.leadInHRMarginBpm else { return false }
+                return cfg.awakeZhv * zhv(f.hrVar) + cfg.awakeZhr * zhr(f.hr) > 0.0
+            }
+            for i in feats.indices {
+                probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg)
+                if cardiacAwake[i] { probe[i]["awake"]! += cfg.leadInProbeWakeBias }
+            }
             var cut = 0
             if let onset = sustainedSleepOnset(viterbi(probe, cfg), cfg) {
                 while cut < onset, feats[cut].minutesSinceOnset <= cfg.leadInCardiacWakeMaxMinutes { cut += 1 }
             }
-            for i in 0..<cut { seq[i] = unclamped[i] }
+            for i in 0..<cut {
+                seq[i] = unclamped[i]
+                if cardiacAwake[i] { seq[i]["awake"]! += cfg.leadInWakeBias }
+            }
         }
 
         let provisional = viterbi(seq, cfg)
