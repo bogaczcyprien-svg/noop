@@ -553,6 +553,15 @@ object SleepStagerV2 {
      *  Mirrors Swift `SleepStagerV2.leadInCardiacWakeMaxMinutes`. */
     internal const val leadInCardiacWakeMaxMinutes = 90.0
 
+    /** Log-odds added to the open pass's AWAKE emission, so it finds onset where sleep is clearly
+     *  established rather than at the first quiet epoch. Fit on PSG (Tools/SleepPSG section 8,
+     *  sleep-accel, n = 31). Mirrors Swift `SleepStagerV2.leadInProbeWakeBias`. */
+    internal const val leadInProbeWakeBias = 1.75
+
+    /** Log-odds added to the AWAKE emission of the lifted lead-in epochs. Mirrors Swift
+     *  `SleepStagerV2.leadInWakeBias`. */
+    internal const val leadInWakeBias = 2.0
+
     /** Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
      *  [stageEpochs] holds a motionless, elevated-HR epoch out of wake all night, which also covers lying
      *  still AWAKE before sleep, so the first sustained non-wake run lands early. Stage once with the clamp
@@ -680,10 +689,16 @@ object SleepStagerV2 {
             // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
             // them against the real onset as usual. Mirrors Swift.
             val probe = unclamped.mapIndexed { i, em ->
-                HashMap(em).also { it["rem"] = it["rem"]!! - remLatencyGuard(feats[i].minutesSinceOnset) }
+                HashMap(em).also {
+                    it["rem"] = it["rem"]!! - remLatencyGuard(feats[i].minutesSinceOnset)
+                    it["awake"] = it["awake"]!! + leadInProbeWakeBias
+                }
             }
             val cut = leadInCardiacWakeEnd(feats, viterbi(probe))
-            for (i in 0 until cut) seq[i] = unclamped[i]
+            for (i in 0 until cut) {
+                seq[i] = unclamped[i]
+                seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
+            }
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.

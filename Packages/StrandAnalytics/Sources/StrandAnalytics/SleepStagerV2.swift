@@ -556,6 +556,16 @@ public enum SleepStagerV2 {
     /// for) cannot have more than its first 90 minutes re-read as wake.
     static let leadInCardiacWakeMaxMinutes = 90.0
 
+    /// Log-odds added to the open pass's AWAKE emission, so it finds onset where sleep is clearly
+    /// established rather than at the first quiet epoch. Fit on PSG (Tools/SleepPSG section 8,
+    /// sleep-accel, n = 31): displayed-onset bias −8.9 → −2.4 min, MAE 8.9 → 7.1 min, kappa 0.374 → 0.390.
+    /// Above ~2.5 the open pass stops sustaining sleep on some nights and lifts nothing, so it stays below.
+    static let leadInProbeWakeBias = 1.75
+
+    /// Log-odds added to the AWAKE emission of the lifted lead-in epochs. Saturates at 2.0 on the same
+    /// bench (2.0 to 4.0 stage identically); 1.0 left onset 4 minutes earlier.
+    static let leadInWakeBias = 2.0
+
     /// Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
     /// `stageEpochs` holds a motionless, elevated-HR epoch out of wake all night, which is right mid-sleep but
     /// also covers lying still AWAKE before sleep: the wrist is quiet, the heart still says awake, and the
@@ -569,9 +579,10 @@ public enum SleepStagerV2 {
     /// only for the epochs BEFORE it, capped at `leadInCardiacWakeMaxMinutes`. Every epoch from sleep onset
     /// onward keeps the clamp unchanged. Returns the exclusive end index of the lifted lead-in; 0 (nothing
     /// lifted) when the open pass never sustains sleep, so such a night stages exactly as it does today.
-    /// Lifting the clamp can only raise an awake emission, never lower one, so the lead-in can only lean
-    /// further toward wake. On by default at the fork owner's request; not validated against PSG, and one
-    /// wearer's perception is the only reference so far.
+    /// Lifting the clamp and adding `leadInWakeBias` can only raise an awake emission, never lower one, so
+    /// the lead-in can only lean further toward wake. On by default at the fork owner's request. The two
+    /// biases are fit on PSG (Tools/SleepPSG section 8, sleep-accel, n = 31: displayed-onset bias −8.9 →
+    /// −2.4 min); that dataset is an Apple Watch with no R-R, so it is evidence, not WHOOP validation.
     static func leadInCardiacWakeEnd(_ feats: [Epoch], openLabels: [String]) -> Int {
         guard let onset = sustainedSleepOnset(openLabels) else { return 0 }
         var cut = 0
@@ -727,9 +738,17 @@ public enum SleepStagerV2 {
             // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
             // them against the real onset as usual.
             var probe = unclamped
-            for i in feats.indices { probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset) }
+            // The probe also leans toward wake (`leadInProbeWakeBias`), and the lifted epochs carry
+            // `leadInWakeBias`; both are PSG-fit, see their declarations.
+            for i in feats.indices {
+                probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset)
+                probe[i]["awake"]! += leadInProbeWakeBias
+            }
             let cut = leadInCardiacWakeEnd(feats, openLabels: viterbi(probe))
-            for i in 0..<cut { seq[i] = unclamped[i] }
+            for i in 0..<cut {
+                seq[i] = unclamped[i]
+                seq[i]["awake"]! += leadInWakeBias
+            }
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.

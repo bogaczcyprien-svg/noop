@@ -7,7 +7,8 @@ on:
     branches: [sleep-onset-precision]
     paths:
       - 'Tools/SleepPSG/**'
-      - 'Packages/StrandAnalytics/Sources/**'
+      - 'Packages/StrandAnalytics/**'
+      - 'android/app/src/**'
       - '.github/workflows/sleep-onset-bench.yml'
 
 permissions:
@@ -30,3 +31,28 @@ jobs:
       - name: Onset report
         working-directory: Tools/SleepPSG
         run: swift run -c release sleeppsg --dataset "$RUNNER_TEMP/ds" --section onset
+
+  swift-tests:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: StrandAnalytics tests
+        working-directory: Packages/StrandAnalytics
+        run: swift test
+      - name: SleepPSG tests (port validation)
+        working-directory: Tools/SleepPSG
+        run: swift test
+
+  kotlin-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android unit tests
+        working-directory: android
+        run: ./gradlew testFullDebugUnitTest

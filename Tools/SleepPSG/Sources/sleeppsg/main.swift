@@ -544,8 +544,7 @@ if want("onset") {
     }
     var off = RecipeConfig.shipped; off.leadInCardiacWake = false
     var rows: [(String, RecipeConfig?)] = [("shipped (lead-in on)", nil), ("lead-in off", off)]
-    for (pb, wb) in [(1.25, 2.0), (1.5, 2.0), (1.75, 2.0), (2.0, 2.0), (2.25, 2.0), (2.5, 2.0),
-                     (3.0, 2.0), (4.0, 2.0), (2.0, 1.0)] {
+    for (pb, wb) in [(0.0, 0.0), (1.5, 2.0), (2.0, 2.0), (2.5, 2.0), (3.0, 2.0)] {
         var c = RecipeConfig.shipped; c.leadInProbeWakeBias = pb; c.leadInWakeBias = wb
         rows.append(("probe +\(pb) lifted +\(wb)", c))
     }

@@ -90,11 +90,11 @@ struct RecipeConfig: Equatable {
     /// `.gradedFromOnset`, the mode the shipped stager uses.
     var leadInCardiacWake: Bool = true
     var leadInCardiacWakeMaxMinutes: Double = 90.0
-    /// Onset-bench candidates, both 0 in the shipped recipe. `leadInProbeWakeBias` is added to the probe's
+    /// Shipped values of `SleepStagerV2.leadInProbeWakeBias` / `leadInWakeBias`. `leadInProbeWakeBias` is added to the probe's
     /// awake emission (the probe then finds onset later, so more of the lead-in is lifted);
     /// `leadInWakeBias` is added to the awake emission of the lifted epochs themselves.
-    var leadInProbeWakeBias: Double = 0.0
-    var leadInWakeBias: Double = 0.0
+    var leadInProbeWakeBias: Double = 1.75
+    var leadInWakeBias: Double = 2.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
