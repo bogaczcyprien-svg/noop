@@ -739,15 +739,18 @@ public enum SleepStagerV2 {
             // them against the real onset as usual.
             var probe = unclamped
             // The probe also leans toward wake (`leadInProbeWakeBias`), and the lifted epochs carry
-            // `leadInWakeBias`; both are PSG-fit, see their declarations.
+            // `leadInWakeBias`; both are PSG-fit, see their declarations. Both apply only where the heart
+            // itself votes awake (the unclamped cardiac term is positive), so a still night with flat HR
+            // gains no wake from them.
+            let cardiacAwake = feats.map { 0.8 * zhv($0.hrVar) + 0.4 * zhr($0.hr) > 0.0 }
             for i in feats.indices {
                 probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset)
-                probe[i]["awake"]! += leadInProbeWakeBias
+                if cardiacAwake[i] { probe[i]["awake"]! += leadInProbeWakeBias }
             }
             let cut = leadInCardiacWakeEnd(feats, openLabels: viterbi(probe))
             for i in 0..<cut {
                 seq[i] = unclamped[i]
-                seq[i]["awake"]! += leadInWakeBias
+                if cardiacAwake[i] { seq[i]["awake"]! += leadInWakeBias }
             }
         }
 

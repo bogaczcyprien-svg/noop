@@ -544,10 +544,12 @@ if want("onset") {
     }
     var off = RecipeConfig.shipped; off.leadInCardiacWake = false
     var rows: [(String, RecipeConfig?)] = [("shipped (lead-in on)", nil), ("lead-in off", off)]
-    for (pb, wb) in [(0.0, 0.0), (1.5, 2.0), (2.0, 2.0), (2.5, 2.0), (3.0, 2.0)] {
+    for (pb, wb) in [(0.0, 0.0), (1.5, 2.0), (2.0, 2.0), (2.5, 2.0), (3.0, 2.0), (4.0, 2.0)] {
         var c = RecipeConfig.shipped; c.leadInProbeWakeBias = pb; c.leadInWakeBias = wb
-        rows.append(("probe +\(pb) lifted +\(wb)", c))
+        rows.append(("gated probe +(pb) lifted +(wb)", c))
     }
+    var ungated = RecipeConfig.shipped; ungated.leadInBiasNeedsCardiac = false
+    rows.append(("ungated probe +1.75 lifted +2", ungated))
     let truthOn = subjects.map(truthOnsetMin)
     print("    truth onset     median \(f(median(truthOn.compactMap { $0 }), 5, 1)) min after PSG start (n = \(truthOn.compactMap { $0 }.count))")
     print("    variant                       sustained   bias mean  median    MAE  early>10  late>10   kappa  wakeRec")

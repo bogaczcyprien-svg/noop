@@ -688,16 +688,18 @@ object SleepStagerV2 {
             // otherwise scores REM nearly as well as wake, and a probe that calls it REM finds "sleep" at
             // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
             // them against the real onset as usual. Mirrors Swift.
+            // Both PSG-fit biases apply only where the unclamped cardiac term votes awake. Mirrors Swift.
+            val cardiacAwake = feats.map { 0.8 * zhv(it.hrVar) + 0.4 * zhr(it.hr) > 0.0 }
             val probe = unclamped.mapIndexed { i, em ->
                 HashMap(em).also {
                     it["rem"] = it["rem"]!! - remLatencyGuard(feats[i].minutesSinceOnset)
-                    it["awake"] = it["awake"]!! + leadInProbeWakeBias
+                    if (cardiacAwake[i]) it["awake"] = it["awake"]!! + leadInProbeWakeBias
                 }
             }
             val cut = leadInCardiacWakeEnd(feats, viterbi(probe))
             for (i in 0 until cut) {
                 seq[i] = unclamped[i]
-                seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
+                if (cardiacAwake[i]) seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
             }
         }
 

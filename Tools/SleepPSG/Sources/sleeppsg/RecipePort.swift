@@ -95,6 +95,9 @@ struct RecipeConfig: Equatable {
     /// `leadInWakeBias` is added to the awake emission of the lifted epochs themselves.
     var leadInProbeWakeBias: Double = 1.75
     var leadInWakeBias: Double = 2.0
+    /// Shipped true: both biases apply only where the unclamped cardiac term votes awake. False is the
+    /// unconditional form, kept for the onset bench.
+    var leadInBiasNeedsCardiac: Bool = true
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
@@ -488,9 +491,12 @@ enum V2Recipe {
         if cfg.leadInCardiacWake {
             let unclamped = feats.map { emission($0, clampQuiescentCardiac: false) }
             var probe = unclamped
+            let cardiacAwake = feats.map {
+                cfg.awakeZhv * zhv($0.hrVar) + cfg.awakeZhr * zhr($0.hr) > 0.0 || !cfg.leadInBiasNeedsCardiac
+            }
             for i in feats.indices {
                 probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg)
-                probe[i]["awake"]! += cfg.leadInProbeWakeBias
+                if cardiacAwake[i] { probe[i]["awake"]! += cfg.leadInProbeWakeBias }
             }
             var cut = 0
             if let onset = sustainedSleepOnset(viterbi(probe, cfg), cfg) {
@@ -498,7 +504,7 @@ enum V2Recipe {
             }
             for i in 0..<cut {
                 seq[i] = unclamped[i]
-                seq[i]["awake"]! += cfg.leadInWakeBias
+                if cardiacAwake[i] { seq[i]["awake"]! += cfg.leadInWakeBias }
             }
         }
 
