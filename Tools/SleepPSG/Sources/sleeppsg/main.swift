@@ -526,7 +526,20 @@ if want("onset") {
         s.truth.firstIndex(where: { $0 != nil && $0 != "wake" }).map { Double($0) * 0.5 }
     }
     func shownOnsetMin(_ segs: [StageSegment], _ s: PSGSubject, _ sustained: Int) -> Double {
-        let ts = SleepStagerV2.refinedOnsetTs(segs, sustainedSeconds: sustained) ?? s.start
+        // Same rule as `SleepStagerV2.refinedOnsetTs`, which is internal to StrandAnalytics.
+        var ts = s.start
+        if let first = segs.first, first.stage == "wake" {
+            var i = 0
+            search: while i < segs.count {
+                if segs[i].stage == "wake" { i += 1; continue }
+                let runStart = segs[i].start
+                var runEnd = segs[i].end
+                var j = i + 1
+                while j < segs.count, segs[j].stage != "wake" { runEnd = segs[j].end; j += 1 }
+                if runEnd - runStart >= sustained { ts = runStart; break search }
+                i = j
+            }
+        }
         return Double(ts - s.start) / 60.0
     }
     var off = RecipeConfig.shipped; off.leadInCardiacWake = false
