@@ -98,11 +98,14 @@ class LeadInCardiacWakeTest {
     }
 
     @Test
-    fun leadInEndIsCappedAtNinetyMinutes() {
-        val feats = (0 until 600).map(::epoch)
-        // Open-pass onset at epoch 300 (150 min): the lift stops at the last epoch centred within 90 min.
-        val labels = List(300) { "awake" } + List(300) { "light" }
-        assertEquals(180, SleepStagerV2.leadInCardiacWakeEnd(feats, labels))
+    fun leadInEndIsCappedAtThreeHours() {
+        val feats = (0 until 800).map(::epoch)
+        // Open-pass onset at epoch 500 (250 min): the lift stops at the last epoch centred within 180 min.
+        val labels = List(500) { "awake" } + List(300) { "light" }
+        assertEquals(360, SleepStagerV2.leadInCardiacWakeEnd(feats, labels))
+        // A 2-hour lie-in (onset at epoch 240) is lifted whole.
+        val twoHours = List(240) { "awake" } + List(560) { "light" }
+        assertEquals(240, SleepStagerV2.leadInCardiacWakeEnd(feats, twoHours))
     }
 
     // ── end to end through stageSession ───────────────────────────────────────────────────────────────
@@ -132,18 +135,28 @@ class LeadInCardiacWakeTest {
         assertTrue(wakeMinutesIn(on, 4 * 60 * 60, 4 * 60 * 60 + 40 * 60) < 5.0)
     }
 
-    /** A lead-in longer than the cap: onset never moves past the 90-minute cap. On this fixture the open
-     *  pass does not find the long lead-in at all (a 150-minute elevated stretch is less extreme in the
-     *  night's own z-score), so onset stays where the clamped path puts it; the cap itself is pinned by
-     *  [leadInEndIsCappedAtNinetyMinutes]. */
+    /** The second report: two hours lying still awake, then sleep. No sleep bout may be credited inside the
+     *  lie-in, so onset lands near the 120-minute settle point. */
     @Test
-    fun liftNeverMovesOnsetPastTheCapOnALongElevatedLeadIn() {
+    fun twoHourStillLieInIsNotCreditedAsSleep() {
+        val dur = 9 * 60 * 60
+        val awake = listOf(0 until 120 * 60)
+        val on = onsetMinutes(stage(dur, awake, leadIn = true))
+        assertNotNull(on)
+        assertTrue("onset should sit near the 120-min settle point (got $on min)", on!! in 105.0..135.0)
+    }
+
+    /** A long elevated lead-in: onset never reads earlier than the pre-rule path and never moves past the
+     *  truth (150 min) by more than a few minutes; the cap itself is pinned by
+     *  [leadInEndIsCappedAtThreeHours]. */
+    @Test
+    fun liftNeverOvershootsALongElevatedLeadIn() {
         val dur = 9 * 60 * 60
         val awake = listOf(0 until 150 * 60)
         val off = onsetMinutes(stage(dur, awake, leadIn = false))
         val on = onsetMinutes(stage(dur, awake, leadIn = true))
         assertNotNull(off); assertNotNull(on)
         assertTrue("on ($on) must not read earlier than off ($off)", on!! >= off!!)
-        assertTrue("onset must not move past the 90-min cap (got $on min)", on <= 100.0)
+        assertTrue("onset must not move past the lead-in (got $on min)", on <= 160.0)
     }
 }

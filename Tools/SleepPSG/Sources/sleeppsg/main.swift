@@ -548,11 +548,11 @@ if want("onset") {
     rows.append(("lead-in, no biases (12.3.4)", noBias))
     for m in [0.0, 1.0, 2.0, 3.0, 5.0, 8.0] {
         var c = RecipeConfig.shipped; c.leadInHRMarginBpm = m
-        rows.append(("HR margin (m) bpm", c))
+        rows.append(("HR margin \(m) bpm", c))
     }
     for pb in [2.0, 4.0] {
         var c = RecipeConfig.shipped; c.leadInProbeWakeBias = pb
-        rows.append(("probe +(pb)", c))
+        rows.append(("probe +\(pb)", c))
     }
     let truthOn = subjects.map(truthOnsetMin)
     print("    truth onset     median \(f(median(truthOn.compactMap { $0 }), 5, 1)) min after PSG start (n = \(truthOn.compactMap { $0 }.count))")

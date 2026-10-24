@@ -89,7 +89,7 @@ struct RecipeConfig: Equatable {
     /// the unclamped pass's sleep onset, capped at `leadInCardiacWakeMaxMinutes`. Shipped on; only runs in
     /// `.gradedFromOnset`, the mode the shipped stager uses.
     var leadInCardiacWake: Bool = true
-    var leadInCardiacWakeMaxMinutes: Double = 90.0
+    var leadInCardiacWakeMaxMinutes: Double = 180.0
     /// Shipped values of `SleepStagerV2.leadInProbeWakeBias` / `leadInWakeBias`. `leadInProbeWakeBias` is added to the probe's
     /// awake emission (the probe then finds onset later, so more of the lead-in is lifted);
     /// `leadInWakeBias` is added to the awake emission of the lifted epochs themselves.
@@ -99,7 +99,7 @@ struct RecipeConfig: Equatable {
     /// unconditional form, kept for the onset bench.
     var leadInBiasNeedsCardiac: Bool = true
     /// `SleepStagerV2.leadInHRMarginBpm`: the gate also needs epoch HR this far above the night's median.
-    var leadInHRMarginBpm: Double = 3.0
+    var leadInHRMarginBpm: Double = 2.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(

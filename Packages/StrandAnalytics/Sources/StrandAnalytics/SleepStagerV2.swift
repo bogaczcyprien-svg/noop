@@ -553,8 +553,9 @@ public enum SleepStagerV2 {
     /// Upper bound, in window-relative minutes, on how far into a window the lead-in clamp lift may reach.
     /// A-priori, not fit: long enough for an ordinary lie-awake-before-sleep stretch, short enough that a
     /// night whose HR stays elevated throughout (the supplement / hot-room / alcohol case the clamp exists
-    /// for) cannot have more than its first 90 minutes re-read as wake.
-    static let leadInCardiacWakeMaxMinutes = 90.0
+    /// for) cannot have more than its first 3 hours re-read as wake. Raised from 90 after a wearer reported
+    /// a false sleep bout late in a 2-hour lie-in, the part the 90-minute cap left clamped.
+    static let leadInCardiacWakeMaxMinutes = 180.0
 
     /// Log-odds added to the open pass's AWAKE emission, so it finds onset where sleep is clearly
     /// established rather than at the first quiet epoch. Fit on PSG (Tools/SleepPSG section 8,
@@ -568,7 +569,7 @@ public enum SleepStagerV2 {
     static let leadInWakeBias = 2.0
 
     /// Both biases need the epoch's HR at least this far above the night's median epoch HR.
-    static let leadInHRMarginBpm = 3.0
+    static let leadInHRMarginBpm = 2.0
 
     /// Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
     /// `stageEpochs` holds a motionless, elevated-HR epoch out of wake all night, which is right mid-sleep but
