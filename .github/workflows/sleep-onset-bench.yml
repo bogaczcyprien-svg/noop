@@ -1,0 +1,30 @@
+# TEMPORARY — onset benchmark for the sleep-onset-precision branch. Runs Tools/SleepPSG section 8
+# against PhysioNet sleep-accel (ODC-By 1.0). Removed before this branch merges.
+name: Sleep onset bench (temporary)
+
+on:
+  push:
+    branches: [sleep-onset-precision]
+    paths:
+      - 'Tools/SleepPSG/**'
+      - 'Packages/StrandAnalytics/Sources/**'
+      - '.github/workflows/sleep-onset-bench.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  onset:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download sleep-accel
+        run: |
+          mkdir -p "$RUNNER_TEMP/ds" && cd "$RUNNER_TEMP/ds"
+          curl -sSL -o sleep-accel.zip \
+            https://physionet.org/static/published-projects/sleep-accel/motion-and-heart-rate-from-a-wrist-worn-wearable-and-labeled-sleep-from-polysomnography-1.0.0.zip
+          unzip -q sleep-accel.zip
+      - name: Onset report
+        working-directory: Tools/SleepPSG
+        run: swift run -c release sleeppsg --dataset "$RUNNER_TEMP/ds" --section onset

@@ -90,6 +90,11 @@ struct RecipeConfig: Equatable {
     /// `.gradedFromOnset`, the mode the shipped stager uses.
     var leadInCardiacWake: Bool = true
     var leadInCardiacWakeMaxMinutes: Double = 90.0
+    /// Onset-bench candidates, both 0 in the shipped recipe. `leadInProbeWakeBias` is added to the probe's
+    /// awake emission (the probe then finds onset later, so more of the lead-in is lifted);
+    /// `leadInWakeBias` is added to the awake emission of the lifted epochs themselves.
+    var leadInProbeWakeBias: Double = 0.0
+    var leadInWakeBias: Double = 0.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
@@ -483,12 +488,18 @@ enum V2Recipe {
         if cfg.leadInCardiacWake {
             let unclamped = feats.map { emission($0, clampQuiescentCardiac: false) }
             var probe = unclamped
-            for i in feats.indices { probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg) }
+            for i in feats.indices {
+                probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg)
+                probe[i]["awake"]! += cfg.leadInProbeWakeBias
+            }
             var cut = 0
             if let onset = sustainedSleepOnset(viterbi(probe, cfg), cfg) {
                 while cut < onset, feats[cut].minutesSinceOnset <= cfg.leadInCardiacWakeMaxMinutes { cut += 1 }
             }
-            for i in 0..<cut { seq[i] = unclamped[i] }
+            for i in 0..<cut {
+                seq[i] = unclamped[i]
+                seq[i]["awake"]! += cfg.leadInWakeBias
+            }
         }
 
         let provisional = viterbi(seq, cfg)
