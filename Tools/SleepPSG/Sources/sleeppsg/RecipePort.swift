@@ -93,7 +93,7 @@ struct RecipeConfig: Equatable {
     /// Shipped values of `SleepStagerV2.leadInProbeWakeBias` / `leadInWakeBias`. `leadInProbeWakeBias` is added to the probe's
     /// awake emission (the probe then finds onset later, so more of the lead-in is lifted);
     /// `leadInWakeBias` is added to the awake emission of the lifted epochs themselves.
-    var leadInProbeWakeBias: Double = 1.75
+    var leadInProbeWakeBias: Double = 2.5
     var leadInWakeBias: Double = 2.0
     /// Shipped true: both biases apply only where the unclamped cardiac term votes awake. False is the
     /// unconditional form, kept for the onset bench.

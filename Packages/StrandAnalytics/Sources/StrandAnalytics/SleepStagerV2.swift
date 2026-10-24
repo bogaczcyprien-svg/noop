@@ -558,12 +558,13 @@ public enum SleepStagerV2 {
 
     /// Log-odds added to the open pass's AWAKE emission, so it finds onset where sleep is clearly
     /// established rather than at the first quiet epoch. Fit on PSG (Tools/SleepPSG section 8,
-    /// sleep-accel, n = 31): displayed-onset bias −8.9 → −2.4 min, MAE 8.9 → 7.1 min, kappa 0.374 → 0.390.
-    /// Above ~2.5 the open pass stops sustaining sleep on some nights and lifts nothing, so it stays below.
-    static let leadInProbeWakeBias = 1.75
+    /// sleep-accel, n = 31, with both biases gated on the cardiac vote): displayed-onset bias −8.9 → −4.6 min,
+    /// MAE 8.9 → 7.1 min, nights >10 min early 10 → 6, none >10 min late, kappa 0.374 → 0.383. Every value
+    /// from 2.0 to 4.0 stages identically there; 2.5 sits inside that plateau.
+    static let leadInProbeWakeBias = 2.5
 
     /// Log-odds added to the AWAKE emission of the lifted lead-in epochs. Saturates at 2.0 on the same
-    /// bench (2.0 to 4.0 stage identically); 1.0 left onset 4 minutes earlier.
+    /// bench (2.0 to 4.0 stage identically; 1.0 left onset about 4 minutes earlier, measured ungated).
     static let leadInWakeBias = 2.0
 
     /// Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
@@ -582,7 +583,7 @@ public enum SleepStagerV2 {
     /// Lifting the clamp and adding `leadInWakeBias` can only raise an awake emission, never lower one, so
     /// the lead-in can only lean further toward wake. On by default at the fork owner's request. The two
     /// biases are fit on PSG (Tools/SleepPSG section 8, sleep-accel, n = 31: displayed-onset bias −8.9 →
-    /// −2.4 min); that dataset is an Apple Watch with no R-R, so it is evidence, not WHOOP validation.
+    /// −4.6 min); that dataset is an Apple Watch with no R-R, so it is evidence, not WHOOP validation.
     static func leadInCardiacWakeEnd(_ feats: [Epoch], openLabels: [String]) -> Int {
         guard let onset = sustainedSleepOnset(openLabels) else { return 0 }
         var cut = 0

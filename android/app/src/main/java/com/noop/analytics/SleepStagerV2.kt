@@ -556,7 +556,7 @@ object SleepStagerV2 {
     /** Log-odds added to the open pass's AWAKE emission, so it finds onset where sleep is clearly
      *  established rather than at the first quiet epoch. Fit on PSG (Tools/SleepPSG section 8,
      *  sleep-accel, n = 31). Mirrors Swift `SleepStagerV2.leadInProbeWakeBias`. */
-    internal const val leadInProbeWakeBias = 1.75
+    internal const val leadInProbeWakeBias = 2.5
 
     /** Log-odds added to the AWAKE emission of the lifted lead-in epochs. Mirrors Swift
      *  `SleepStagerV2.leadInWakeBias`. */
