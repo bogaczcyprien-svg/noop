@@ -20,11 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Download sleep-accel
+        timeout-minutes: 15
         run: |
-          mkdir -p "$RUNNER_TEMP/ds" && cd "$RUNNER_TEMP/ds"
-          curl -sSL -o sleep-accel.zip \
-            https://physionet.org/static/published-projects/sleep-accel/motion-and-heart-rate-from-a-wrist-worn-wearable-and-labeled-sleep-from-polysomnography-1.0.0.zip
-          unzip -q sleep-accel.zip
+          # PhysioNet's open-data mirror on AWS; the physionet.org zip took over 30 minutes.
+          mkdir -p "$RUNNER_TEMP/ds"
+          aws s3 sync --no-sign-request --only-show-errors \
+            s3://physionet-open/sleep-accel/1.0.0/ "$RUNNER_TEMP/ds/"
+          ls "$RUNNER_TEMP/ds"
       - name: Onset report
         working-directory: Tools/SleepPSG
         run: swift run -c release sleeppsg --dataset "$RUNNER_TEMP/ds" --section onset
