@@ -98,6 +98,8 @@ struct RecipeConfig: Equatable {
     /// Shipped true: both biases apply only where the unclamped cardiac term votes awake. False is the
     /// unconditional form, kept for the onset bench.
     var leadInBiasNeedsCardiac: Bool = true
+    /// `SleepStagerV2.leadInHRMarginBpm`: the gate also needs epoch HR this far above the night's median.
+    var leadInHRMarginBpm: Double = 3.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
@@ -491,8 +493,12 @@ enum V2Recipe {
         if cfg.leadInCardiacWake {
             let unclamped = feats.map { emission($0, clampQuiescentCardiac: false) }
             var probe = unclamped
-            let cardiacAwake = feats.map {
-                cfg.awakeZhv * zhv($0.hrVar) + cfg.awakeZhr * zhr($0.hr) > 0.0 || !cfg.leadInBiasNeedsCardiac
+            let hrSorted = feats.compactMap { $0.hr }.sorted()
+            let hrMedian = hrSorted.isEmpty ? 0.0 : hrSorted[(hrSorted.count - 1) / 2]
+            let cardiacAwake = feats.map { f -> Bool in
+                if !cfg.leadInBiasNeedsCardiac { return true }
+                guard let h = f.hr, h >= hrMedian + cfg.leadInHRMarginBpm else { return false }
+                return cfg.awakeZhv * zhv(f.hrVar) + cfg.awakeZhr * zhr(f.hr) > 0.0
             }
             for i in feats.indices {
                 probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg)

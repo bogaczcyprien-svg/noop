@@ -562,6 +562,10 @@ object SleepStagerV2 {
      *  `SleepStagerV2.leadInWakeBias`. */
     internal const val leadInWakeBias = 2.0
 
+    /** Both biases need the epoch's HR at least this far above the night's median epoch HR. Mirrors Swift
+     *  `SleepStagerV2.leadInHRMarginBpm`. */
+    internal const val leadInHRMarginBpm = 3.0
+
     /** Lead-in rule (`leadInCardiacWake`, always on in the app; `false` exists for tests). The quiescent cardiac clamp in
      *  [stageEpochs] holds a motionless, elevated-HR epoch out of wake all night, which also covers lying
      *  still AWAKE before sleep, so the first sustained non-wake run lands early. Stage once with the clamp
@@ -689,7 +693,12 @@ object SleepStagerV2 {
             // epoch 0 and lifts nothing. Probe-only; `seq` gets the unguarded rows and pass 2 below guards
             // them against the real onset as usual. Mirrors Swift.
             // Both PSG-fit biases apply only where the unclamped cardiac term votes awake. Mirrors Swift.
-            val cardiacAwake = feats.map { 0.8 * zhv(it.hrVar) + 0.4 * zhr(it.hr) > 0.0 }
+            val hrSorted = feats.mapNotNull { it.hr }.sorted()
+            val hrMedian = if (hrSorted.isEmpty()) 0.0 else hrSorted[(hrSorted.size - 1) / 2]
+            val cardiacAwake = feats.map { f ->
+                val h = f.hr
+                h != null && h >= hrMedian + leadInHRMarginBpm && 0.8 * zhv(f.hrVar) + 0.4 * zhr(f.hr) > 0.0
+            }
             val probe = unclamped.mapIndexed { i, em ->
                 HashMap(em).also {
                     it["rem"] = it["rem"]!! - remLatencyGuard(feats[i].minutesSinceOnset)
