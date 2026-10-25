@@ -149,7 +149,8 @@ public enum BreathingScienceCatalog {
             howTo: "Lying or seated. Breathe calmly for 2 minutes, take one normal breath in, then hold. Tap when you breathe again. The number of rounds grows with your level. Do not hyperventilate before a hold.",
             evidence: "Repeated breath holds can raise natural EPO for a few hours (de Bruijn 2008: +24% after 15 maximal holds), but studies disagree and none shows it makes you faster in a race. Hyperventilating first adds no benefit and can make you black out without warning.",
             caution: "Never in water, in the bath, or while driving. Always lying or seated. Stop at any dizziness. Not if pregnant or with a heart condition.",
-            guidedSeconds: 15 * 60,
+            // 5 rounds × (2 min recovery + 2 min 30 s cap), the same as `BreathingProgression` level 1.
+            guidedSeconds: 5 * (120 + 150),
             drill: .breathHolds(rounds: 5, recoverySeconds: 120, maxHoldSeconds: 150)),
         BreathingExercise(
             id: respiratoryMuscleId,
