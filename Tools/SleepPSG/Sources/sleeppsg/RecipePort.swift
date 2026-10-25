@@ -104,6 +104,13 @@ struct RecipeConfig: Equatable {
     /// sleep run, capped at `leadOutCardiacWakeMaxMinutes` before the window's last epoch. Shipped on.
     var leadOutCardiacWake: Bool = true
     var leadOutCardiacWakeMaxMinutes: Double = 120.0
+    /// Bench knobs for the lead-out (the shipped values reproduce the stager): find the last sleep run on
+    /// the biased open pass (`leadOutProbeBiased`), lift the clamp (`leadOutLift`), add `leadOutWakeBias`
+    /// where HR is `leadOutHRMarginBpm` above the night's median and votes awake.
+    var leadOutProbeBiased: Bool = true
+    var leadOutLift: Bool = true
+    var leadOutWakeBias: Double = 2.0
+    var leadOutHRMarginBpm: Double = 2.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
@@ -529,14 +536,24 @@ enum V2Recipe {
             }
             // Lead-out: same as `SleepStagerV2.leadOutCardiacWakeStart`.
             if cfg.leadOutCardiacWake {
+                var outProbe = unclamped
+                for i in feats.indices {
+                    outProbe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg)
+                    if cfg.leadOutProbeBiased, cardiacAwake[i] { outProbe[i]["awake"]! += cfg.leadInProbeWakeBias }
+                }
+                let outLabels = cfg.leadOutProbeBiased ? openLabels : viterbi(outProbe, cfg)
+                let outAwake = feats.map { f -> Bool in
+                    guard let h = f.hr, h >= hrMedian + cfg.leadOutHRMarginBpm else { return false }
+                    return cfg.awakeZhv * zhv(f.hrVar) + cfg.awakeZhr * zhr(f.hr) > 0.0
+                }
                 var tail = feats.count
-                if let end = sustainedSleepEnd(openLabels, cfg), let last = feats.last {
+                if let end = sustainedSleepEnd(outLabels, cfg), let last = feats.last {
                     while tail > end, last.minutesSinceOnset - feats[tail - 1].minutesSinceOnset
                         <= cfg.leadOutCardiacWakeMaxMinutes { tail -= 1 }
                 }
                 for i in max(cut, tail)..<feats.count {
-                    seq[i] = unclamped[i]
-                    if cardiacAwake[i] { seq[i]["awake"]! += cfg.leadInWakeBias }
+                    if cfg.leadOutLift { seq[i] = unclamped[i] }
+                    if outAwake[i] { seq[i]["awake"]! += cfg.leadOutWakeBias }
                 }
             }
         }

@@ -618,9 +618,25 @@ if want("wake") {
     }
     var off = RecipeConfig.shipped; off.leadOutCardiacWake = false
     var rows: [(String, RecipeConfig?)] = [("shipped (lead-out on)", nil), ("lead-out off (12.3.5)", off)]
-    for cap in [30.0, 60.0, 240.0] {
+    for cap in [15.0, 30.0, 60.0] {
         var c = RecipeConfig.shipped; c.leadOutCardiacWakeMaxMinutes = cap
         rows.append(("lead-out cap \(Int(cap)) min", c))
+    }
+    var unbiased = RecipeConfig.shipped; unbiased.leadOutProbeBiased = false
+    rows.append(("unbiased probe", unbiased))
+    var noLift = RecipeConfig.shipped; noLift.leadOutLift = false
+    rows.append(("bias only, no lift", noLift))
+    var liftOnly = RecipeConfig.shipped; liftOnly.leadOutWakeBias = 0
+    rows.append(("lift only, no bias", liftOnly))
+    for m in [5.0, 8.0, 12.0] {
+        var c = RecipeConfig.shipped; c.leadOutHRMarginBpm = m
+        rows.append(("HR margin \(Int(m)) bpm", c))
+        var u = c; u.leadOutProbeBiased = false
+        rows.append(("HR margin \(Int(m)), unbiased", u))
+    }
+    for b in [1.0, 4.0] {
+        var c = RecipeConfig.shipped; c.leadOutWakeBias = b
+        rows.append(("bias \(b)", c))
     }
     let truthW = subjects.map(truthWakeMin)
     print("    truth tail      median \(f(median(subjects.indices.compactMap { k in truthW[k].map { Double(subjects[k].end - subjects[k].start) / 60.0 - $0 } }), 5, 1)) min of wake after the last sleep epoch")
