@@ -8,6 +8,7 @@ struct BreathingSessionView: View {
     @ObservedObject var model: BreathingSessionModel
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var motion = NoopMotionState.shared
 
     var body: some View {
         ZStack {
@@ -26,8 +27,16 @@ struct BreathingSessionView: View {
         VStack(spacing: NoopMetrics.sectionGap) {
             header
             Spacer(minLength: 0)
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { ctx in
-                circle(model.pacer(at: ctx.date))
+            // Posed still (Reduce Motion, Low Power, the in-app toggle): a fixed circle on a slow clock that
+            // only updates the countdown; the haptics still pace the breath.
+            if motion.poseStill(reduceMotion) {
+                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                    circle(model.pacer(at: ctx.date), still: true)
+                }
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { ctx in
+                    circle(model.pacer(at: ctx.date), still: false)
+                }
             }
             Spacer(minLength: 0)
             readings
@@ -65,7 +74,7 @@ struct BreathingSessionView: View {
     }
 
     @ViewBuilder
-    private func circle(_ p: BreathingSessionModel.Pacer?) -> some View {
+    private func circle(_ p: BreathingSessionModel.Pacer?, still: Bool) -> some View {
         let fill = p?.fill ?? 0.5
         let size: CGFloat = 260
         ZStack {
@@ -75,7 +84,7 @@ struct BreathingSessionView: View {
             Circle()
                 .fill(StrandPalette.accent.opacity(0.28))
                 .frame(width: size, height: size)
-                .scaleEffect(reduceMotion ? 1 : 0.4 + 0.6 * fill)
+                .scaleEffect(still ? 1 : 0.4 + 0.6 * fill)
             VStack(spacing: 6) {
                 if let p {
                     Text(verbatim: phaseWord(p)).font(StrandFont.title1).foregroundStyle(StrandPalette.textPrimary)
