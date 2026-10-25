@@ -832,12 +832,11 @@ public enum SleepStagerV2 {
                 seq[i] = unclamped[i]
                 if cardiacAwake[i] { seq[i]["awake"]! += leadInWakeBias }
             }
-            // The same lift for the morning tail (`leadOutCardiacWakeStart`), with the same gated bias.
+            // The same lift for the morning tail (`leadOutCardiacWakeStart`), without the wake bias: on PSG
+            // (Tools/SleepPSG section 9) the bias cut 3 of 31 nights more than 10 minutes early, the lift
+            // alone 1.
             let tail = max(cut, leadOutCardiacWakeStart(feats, openLabels: openLabels))
-            for i in tail..<feats.count {
-                seq[i] = unclamped[i]
-                if cardiacAwake[i] { seq[i]["awake"]! += leadInWakeBias }
-            }
+            for i in tail..<feats.count { seq[i] = unclamped[i] }
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.

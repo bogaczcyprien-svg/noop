@@ -626,8 +626,8 @@ if want("wake") {
     rows.append(("unbiased probe", unbiased))
     var noLift = RecipeConfig.shipped; noLift.leadOutLift = false
     rows.append(("bias only, no lift", noLift))
-    var liftOnly = RecipeConfig.shipped; liftOnly.leadOutWakeBias = 0
-    rows.append(("lift only, no bias", liftOnly))
+    var liftOnly = RecipeConfig.shipped; liftOnly.leadOutWakeBias = 2.0
+    rows.append(("bias 2.0 (gated)", liftOnly))
     for m in [5.0, 8.0, 12.0] {
         var c = RecipeConfig.shipped; c.leadOutHRMarginBpm = m
         rows.append(("HR margin \(Int(m)) bpm", c))
