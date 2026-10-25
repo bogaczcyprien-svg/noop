@@ -109,8 +109,8 @@ struct RecipeConfig: Equatable {
     /// where HR is `leadOutHRMarginBpm` above the night's median and votes awake.
     var leadOutProbeBiased: Bool = true
     var leadOutLift: Bool = true
-    var leadOutWakeBias: Double = 0.0
-    var leadOutHRMarginBpm: Double = 2.0
+    var leadOutWakeBias: Double = 2.0
+    var leadOutHRMarginBpm: Double = 8.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(

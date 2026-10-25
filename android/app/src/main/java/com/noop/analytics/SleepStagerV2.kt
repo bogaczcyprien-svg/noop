@@ -585,6 +585,13 @@ object SleepStagerV2 {
      *  A-priori, not fit: a morning lie-in is usually shorter than an evening one. */
     internal const val leadOutCardiacWakeMaxMinutes = 120.0
 
+    /** The lead-out's wake bias needs the epoch's HR at least this far above the night's median epoch HR.
+     *  Stricter than [leadInHRMarginBpm] because a night often ends in REM, whose HR also runs above the
+     *  median. On PSG (Tools/SleepPSG section 9, sleep-accel, n = 31) the margin-2 bias cut 3 nights more
+     *  than 10 minutes early; 8 to 12 bpm cut 1, the same as the lift with no bias at all. The lift alone
+     *  leaves a still awake tail as sleep, so the bias is what moves the wake time. */
+    internal const val leadOutHRMarginBpm = 8.0
+
     /** Exclusive end index of the LAST run of [onsetSustainedEpochs] consecutive non-"awake" labels, or null
      *  when no run is that long. The mirror of [sustainedSleepOnset], scanned from the window end. */
     internal fun sustainedSleepEnd(labels: List<String>): Int? {
@@ -741,11 +748,16 @@ object SleepStagerV2 {
                 seq[i] = unclamped[i]
                 if (cardiacAwake[i]) seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
             }
-            // The same lift for the morning tail ([leadOutCardiacWakeStart]), without the wake bias: on PSG
-            // (Tools/SleepPSG section 9) the bias cut 3 of 31 nights more than 10 minutes early, the lift
-            // alone 1.
+            // The same lift for the morning tail ([leadOutCardiacWakeStart]), with the wake bias gated on the
+            // stricter [leadOutHRMarginBpm].
             val tail = maxOf(cut, leadOutCardiacWakeStart(feats, openLabels))
-            for (i in tail until feats.size) seq[i] = unclamped[i]
+            for (i in tail until feats.size) {
+                seq[i] = unclamped[i]
+                val h = feats[i].hr
+                if (cardiacAwake[i] && h != null && h >= hrMedian + leadOutHRMarginBpm) {
+                    seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
+                }
+            }
         }
 
         // PASS 1 — stage without the REM-latency guard purely to locate sleep onset.
