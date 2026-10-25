@@ -72,6 +72,7 @@ final class BreathingSignalTests: XCTestCase {
         let ids = BreathingScienceCatalog.all.map(\.id)
         XCTAssertEqual(Set(ids).count, ids.count)
         for ex in BreathingScienceCatalog.all {
+            XCTAssertGreaterThanOrEqual(ex.benefits.count, 2, "\(ex.id) needs its benefit points")
             if case .paced = ex.drill {
                 let proto = ex.asProtocol()
                 XCTAssertNotNil(proto, ex.id)

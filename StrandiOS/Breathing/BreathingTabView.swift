@@ -152,6 +152,10 @@ struct BreathingTabView: View {
                                     .foregroundStyle(StrandPalette.textPrimary)
                                 Text(verbatim: BreathingL10n.text(ex.subtitle)).font(StrandFont.caption)
                                     .foregroundStyle(StrandPalette.textSecondary)
+                                if let first = ex.benefits.first {
+                                    Label(BreathingL10n.text(first), systemImage: "checkmark")
+                                        .font(StrandFont.caption).foregroundStyle(StrandPalette.statusPositive)
+                                }
                                 if ex.id == BreathingScienceCatalog.resonanceId, let bpm = BiofeedbackPrefs.lockedPace {
                                     Text("Your pace: \(String(format: "%.1f", bpm)) breaths/min")
                                         .font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
@@ -266,6 +270,19 @@ private struct ExerciseDetailSheet: View {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                     Text(verbatim: BreathingL10n.text(exercise.subtitle)).font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
+                    if !exercise.benefits.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("What it does for you").strandOverline()
+                            ForEach(exercise.benefits, id: \.self) { b in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(StrandPalette.statusPositive)
+                                    Text(verbatim: BreathingL10n.text(b)).font(StrandFont.body)
+                                        .foregroundStyle(StrandPalette.textPrimary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
                     section("How to do it", exercise.howTo)
                     section("What the research says", exercise.evidence)
                     if let c = exercise.caution {
