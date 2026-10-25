@@ -27,7 +27,7 @@ while let k = it.next() {
     case "--seed": a.seed = UInt64(it.next() ?? "") ?? a.seed
     case "-h", "--help":
         print("""
-        usage: sleeppsg --dataset <sleep-accel root> [--section all|port|baseline|strata|rem|variants|priors|onset]
+        usage: sleeppsg --dataset <sleep-accel root> [--section all|port|baseline|strata|rem|variants|priors|onset|wake]
                         [--subjects N] [--csv <path>] [--seed <n>]
 
           --dataset   PhysioNet sleep-accel v1.0.0, extracted. See README.md for the download step and the
@@ -582,6 +582,83 @@ if want("onset") {
     for (k, s) in subjects.enumerated() {
         guard let t = truthOn[k] else { continue }
         let shown = shownOnsetMin(stageShipped(s), s, 300)
+        print("      \(s.id.padding(toLength: 10, withPad: " ", startingAt: 0)) \(f(t, 6, 1)) \(f(shown, 6, 1)) \(f(shown - t, 6, 1))")
+    }
+}
+
+if want("wake") {
+    print("""
+
+    ================================================================================
+    9. DISPLAYED FINAL WAKE vs PSG
+    ================================================================================
+    The wake time the app shows is `SleepStagerV2.refinedWakeTs` (end of the last non-wake run of 300 s), or
+    the window end when the hypnogram does not close on wake. Truth = end of the last PSG-scored non-wake
+    epoch. bias = pred − truth (positive = wake shown too LATE), minutes.
+    """)
+    func truthWakeMin(_ s: PSGSubject) -> Double? {
+        s.truth.lastIndex(where: { $0 != nil && $0 != "wake" }).map { Double($0 + 1) * 0.5 }
+    }
+    func shownWakeMin(_ segs: [StageSegment], _ s: PSGSubject) -> Double {
+        // Same rule as `SleepStagerV2.refinedWakeTs`, which is internal to StrandAnalytics.
+        var ts = s.end
+        if let last = segs.last, last.stage == "wake" {
+            var j = segs.count - 1
+            search: while j >= 0 {
+                if segs[j].stage == "wake" { j -= 1; continue }
+                let runEnd = segs[j].end
+                var runStart = segs[j].start
+                var i = j - 1
+                while i >= 0, segs[i].stage != "wake" { runStart = segs[i].start; i -= 1 }
+                if runEnd - runStart >= 300 { ts = runEnd; break search }
+                j = i
+            }
+        }
+        return Double(ts - s.start) / 60.0
+    }
+    var off = RecipeConfig.shipped; off.leadOutCardiacWake = false
+    var rows: [(String, RecipeConfig?)] = [("shipped (lead-out on)", nil), ("lead-out off (12.3.5)", off)]
+    for cap in [15.0, 30.0, 60.0] {
+        var c = RecipeConfig.shipped; c.leadOutCardiacWakeMaxMinutes = cap
+        rows.append(("lead-out cap \(Int(cap)) min", c))
+    }
+    var unbiased = RecipeConfig.shipped; unbiased.leadOutProbeBiased = false
+    rows.append(("unbiased probe", unbiased))
+    var noLift = RecipeConfig.shipped; noLift.leadOutLift = false
+    rows.append(("bias only, no lift", noLift))
+    var liftOnly = RecipeConfig.shipped; liftOnly.leadOutWakeBias = 0
+    rows.append(("lift only, no bias", liftOnly))
+    for m in [2.0, 5.0, 12.0] {
+        var c = RecipeConfig.shipped; c.leadOutHRMarginBpm = m
+        rows.append(("HR margin \(Int(m)) bpm", c))
+        var u = c; u.leadOutProbeBiased = false
+        rows.append(("HR margin \(Int(m)), unbiased", u))
+    }
+    for b in [1.0, 4.0] {
+        var c = RecipeConfig.shipped; c.leadOutWakeBias = b
+        rows.append(("bias \(b)", c))
+    }
+    let truthW = subjects.map(truthWakeMin)
+    print("    truth tail      median \(f(median(subjects.indices.compactMap { k in truthW[k].map { Double(subjects[k].end - subjects[k].start) / 60.0 - $0 } }), 5, 1)) min of wake after the last sleep epoch")
+    print("    variant                       bias mean  median    MAE  early>10  late>10   kappa  wakeRec")
+    for (name, cfg) in rows {
+        let segsAll: [[StageSegment]] = subjects.map { s in cfg.map { stageVariant($0)(s) } ?? stageShipped(s) }
+        var conf = Confusion()
+        var d: [Double] = []
+        for (k, (s, segs)) in zip(subjects, segsAll).enumerated() {
+            let pred = epochLabels(segs, start: s.start, end: s.end)
+            for i in 0..<min(s.truth.count, pred.count) { if let t = s.truth[i] { conf.add(ref: t, pred: pred[i]) } }
+            if let t = truthW[k] { d.append(shownWakeMin(segs, s) - t) }
+        }
+        let early = d.filter { $0 < -10 }.count, late = d.filter { $0 > 10 }.count
+        print("    \(name.padding(toLength: 30, withPad: " ", startingAt: 0))"
+              + "\(f(mean(d), 9, 1)) \(f(median(d), 7, 1)) \(f(mae(d), 6, 1))     \(early)/\(d.count)    \(late)/\(d.count)"
+              + "  \(f(conf.kappa, 6, 3))  \(f(conf.prf("wake").recall * 100, 6, 1))")
+    }
+    print("\n    per subject (shipped): id  truth  shown  bias")
+    for (k, s) in subjects.enumerated() {
+        guard let t = truthW[k] else { continue }
+        let shown = shownWakeMin(stageShipped(s), s)
         print("      \(s.id.padding(toLength: 10, withPad: " ", startingAt: 0)) \(f(t, 6, 1)) \(f(shown, 6, 1)) \(f(shown - t, 6, 1))")
     }
 }

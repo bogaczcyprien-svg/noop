@@ -595,6 +595,44 @@ public enum SleepStagerV2 {
         return cut
     }
 
+    /// Upper bound, in minutes before the window's last epoch, on how far back the lead-out lift may reach.
+    /// A-priori, not fit: a morning lie-in is usually shorter than an evening one.
+    static let leadOutCardiacWakeMaxMinutes = 120.0
+
+    /// The lead-out's wake bias needs the epoch's HR at least this far above the night's median epoch HR.
+    /// Stricter than `leadInHRMarginBpm` because a night often ends in REM, whose HR also runs above the
+    /// median. On PSG (Tools/SleepPSG section 9, sleep-accel, n = 31) the margin-2 bias cut 3 nights more
+    /// than 10 minutes early; 8 to 12 bpm cut 1, the same as the lift with no bias at all. The lift alone
+    /// leaves a still awake tail as sleep, so the bias is what moves the wake time.
+    static let leadOutHRMarginBpm = 8.0
+
+    /// Exclusive end index of the LAST run of `onsetSustainedEpochs` consecutive non-"awake" labels, or nil
+    /// when no run is that long. The mirror of `sustainedSleepOnset`, scanned from the window end.
+    static func sustainedSleepEnd(_ labels: [String]) -> Int? {
+        var run = 0
+        for i in labels.indices.reversed() {
+            if labels[i] == "awake" { run = 0; continue }
+            run += 1
+            if run >= onsetSustainedEpochs { return i + onsetSustainedEpochs }
+        }
+        return nil
+    }
+
+    /// Lead-out rule, the mirror of `leadInCardiacWakeEnd` for the morning. The detected window ends when
+    /// the wrist starts moving, so lying still AWAKE after waking sits inside it, and the quiescent clamp
+    /// credits it as sleep: the final wake reads late. The clamp is lifted for the epochs AFTER the open
+    /// pass's last sustained sleep run, capped at `leadOutCardiacWakeMaxMinutes` before the last epoch.
+    /// Returns the first lifted index; `feats.count` (nothing lifted) when the open pass never sustains
+    /// sleep, so such a night stages exactly as before.
+    static func leadOutCardiacWakeStart(_ feats: [Epoch], openLabels: [String]) -> Int {
+        guard let end = sustainedSleepEnd(openLabels), let last = feats.last else { return feats.count }
+        var cut = feats.count
+        while cut > end, last.minutesSinceOnset - feats[cut - 1].minutesSinceOnset <= leadOutCardiacWakeMaxMinutes {
+            cut -= 1
+        }
+        return cut
+    }
+
     /// The SAME sustained-non-wake rule as `sustainedSleepOnset`, applied to a session's final, already
     /// MERGED `[StageSegment]` (what actually gets persisted/displayed) instead of the raw per-epoch label
     /// array — so it works regardless of which recipe staged the session, and reads real timestamps
@@ -632,6 +670,41 @@ public enum SleepStagerV2 {
             i = j   // this run was too short — skip past it and look for the next one
         }
         return nil
+    }
+
+    /// The mirror of `refinedOnsetTs` for the morning: the end of the LAST non-wake run of at least
+    /// `sustainedSeconds`, when the hypnogram closes on wake. nil when the last segment is already non-wake
+    /// (the detected end already IS the final wake) or no run is long enough. Never later than the
+    /// detected end.
+    static func refinedWakeTs(_ stages: [StageSegment], sustainedSeconds: Int = 300) -> Int? {
+        guard let last = stages.last, last.stage == "wake" else { return nil }
+        var j = stages.count - 1
+        while j >= 0 {
+            guard stages[j].stage != "wake" else { j -= 1; continue }
+            let runEnd = stages[j].end
+            var runStart = stages[j].start
+            var i = j - 1
+            while i >= 0, stages[i].stage != "wake" { runStart = stages[i].start; i -= 1 }
+            if runEnd - runStart >= sustainedSeconds { return runEnd }
+            j = i
+        }
+        return nil
+    }
+
+    /// `session` cut at `refinedWakeTs`: the trailing wake is dropped from the stages and efficiency is
+    /// recomputed over the shorter window. Start, resting HR and HRV are kept. Unchanged when there is
+    /// nothing to trim.
+    public static func trimmedToRefinedWake(_ session: SleepSession) -> SleepSession {
+        guard let wake = refinedWakeTs(session.stages), wake > session.start, wake < session.end else {
+            return session
+        }
+        let stages = session.stages.filter { $0.start < wake }.map {
+            StageSegment(start: $0.start, end: min($0.end, wake), stage: $0.stage)
+        }
+        return SleepSession(start: session.start, end: wake,
+                            efficiency: SleepStager.efficiency(start: session.start, end: wake, stages: stages),
+                            stages: stages, restingHR: session.restingHR, avgHRV: session.avgHRV,
+                            hrOnly: session.hrOnly)
     }
 
     /// Viterbi most-likely path over the per-epoch log-emissions with the sticky transition matrix and a
@@ -760,10 +833,20 @@ public enum SleepStagerV2 {
                 probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset)
                 if cardiacAwake[i] { probe[i]["awake"]! += leadInProbeWakeBias }
             }
-            let cut = leadInCardiacWakeEnd(feats, openLabels: viterbi(probe))
+            let openLabels = viterbi(probe)
+            let cut = leadInCardiacWakeEnd(feats, openLabels: openLabels)
             for i in 0..<cut {
                 seq[i] = unclamped[i]
                 if cardiacAwake[i] { seq[i]["awake"]! += leadInWakeBias }
+            }
+            // The same lift for the morning tail (`leadOutCardiacWakeStart`), with the wake bias gated on the
+            // stricter `leadOutHRMarginBpm`.
+            let tail = max(cut, leadOutCardiacWakeStart(feats, openLabels: openLabels))
+            for i in tail..<feats.count {
+                seq[i] = unclamped[i]
+                if cardiacAwake[i], let h = feats[i].hr, h >= hrMedian + leadOutHRMarginBpm {
+                    seq[i]["awake"]! += leadInWakeBias
+                }
             }
         }
 

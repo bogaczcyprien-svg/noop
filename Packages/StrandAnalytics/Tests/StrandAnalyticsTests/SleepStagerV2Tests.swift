@@ -415,7 +415,7 @@ final class SleepStagerV2Tests: XCTestCase {
         let segs = SleepStagerV2.stageSession(start: start, end: start + dur, grav: grav, hr: hr, rr: rr, resp: [])
         let golden: [(Int, Int, String)] = [
             (0, 5070, "deep"), (5070, 5310, "light"), (5310, 5550, "rem"),
-            (5550, 10740, "light"), (10740, 16290, "rem"), (16290, 21600, "wake")]
+            (5550, 10740, "light"), (10740, 16200, "rem"), (16200, 21600, "wake")]
         XCTAssertEqual(segs.count, golden.count, "segment count")
         for k in 0..<min(segs.count, golden.count) {
             XCTAssertEqual(segs[k].start, start + golden[k].0, "seg \(k) start")

@@ -577,7 +577,16 @@ public enum AnalyticsEngine {
         }
         // Sessions attributed to `day` = those whose end falls on `day` (LOCAL day, #277). `day` is
         // the caller's local-day key; attribute by the same offset so the bucket and the key agree.
-        let matched = allSessions.filter { tsInDay($0.end) }
+        // Fork addition (#wake-v2-refine), the morning mirror of #onset-v2-refine below: a V2-staged session
+        // that closes on wake is cut at the end of its last sustained sleep run
+        // (`SleepStagerV2.trimmedToRefinedWake`), so lying still awake after waking no longer pushes the
+        // wake time late. The cut runs AFTER the day attribution, so a session never changes day. Device-
+        // provided and HR-only sessions are left as they are. Not upstreamed, not ported to the Android twin.
+        let providedStarts = Set(providedSleep.map { $0.start })
+        let matched = allSessions.filter { tsInDay($0.end) }.map { s in
+            useSleepStagerV2 && !s.hrOnly && !providedStarts.contains(s.start)
+                ? SleepStagerV2.trimmedToRefinedWake(s) : s
+        }
 
         // ── The day's MAIN night (#525) ───────────────────────────────────────
         // A day can hold an overnight AND a daytime nap (both end on `day`, so both are in `matched`).

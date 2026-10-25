@@ -581,6 +581,43 @@ object SleepStagerV2 {
         return cut
     }
 
+    /** Upper bound, in minutes before the window's last epoch, on how far back the lead-out lift may reach.
+     *  A-priori, not fit: a morning lie-in is usually shorter than an evening one. */
+    internal const val leadOutCardiacWakeMaxMinutes = 120.0
+
+    /** The lead-out's wake bias needs the epoch's HR at least this far above the night's median epoch HR.
+     *  Stricter than [leadInHRMarginBpm] because a night often ends in REM, whose HR also runs above the
+     *  median. On PSG (Tools/SleepPSG section 9, sleep-accel, n = 31) the margin-2 bias cut 3 nights more
+     *  than 10 minutes early; 8 to 12 bpm cut 1, the same as the lift with no bias at all. The lift alone
+     *  leaves a still awake tail as sleep, so the bias is what moves the wake time. */
+    internal const val leadOutHRMarginBpm = 8.0
+
+    /** Exclusive end index of the LAST run of [onsetSustainedEpochs] consecutive non-"awake" labels, or null
+     *  when no run is that long. The mirror of [sustainedSleepOnset], scanned from the window end. */
+    internal fun sustainedSleepEnd(labels: List<String>): Int? {
+        var run = 0
+        for (i in labels.indices.reversed()) {
+            if (labels[i] == "awake") { run = 0; continue }
+            run++
+            if (run >= onsetSustainedEpochs) return i + onsetSustainedEpochs
+        }
+        return null
+    }
+
+    /** Lead-out rule, the mirror of [leadInCardiacWakeEnd] for the morning. The detected window ends when
+     *  the wrist starts moving, so lying still AWAKE after waking sits inside it, and the quiescent clamp
+     *  credits it as sleep: the final wake reads late. The clamp is lifted for the epochs AFTER the open
+     *  pass's last sustained sleep run, capped at [leadOutCardiacWakeMaxMinutes] before the last epoch.
+     *  Returns the first lifted index; `feats.size` (nothing lifted) when the open pass never sustains
+     *  sleep, so such a night stages exactly as before. */
+    internal fun leadOutCardiacWakeStart(feats: List<Epoch>, openLabels: List<String>): Int {
+        val end = sustainedSleepEnd(openLabels) ?: return feats.size
+        val last = feats.lastOrNull() ?: return feats.size
+        var cut = feats.size
+        while (cut > end && last.minutesSinceOnset - feats[cut - 1].minutesSinceOnset <= leadOutCardiacWakeMaxMinutes) cut--
+        return cut
+    }
+
     /** Viterbi most-likely path over the per-epoch log-emissions with the sticky transition matrix and a
      *  uniform start. Ties resolve to the earlier stage in [stageNames]. */
     private fun viterbi(emSeq: List<Map<String, Double>>): List<String> {
@@ -705,10 +742,21 @@ object SleepStagerV2 {
                     if (cardiacAwake[i]) it["awake"] = it["awake"]!! + leadInProbeWakeBias
                 }
             }
-            val cut = leadInCardiacWakeEnd(feats, viterbi(probe))
+            val openLabels = viterbi(probe)
+            val cut = leadInCardiacWakeEnd(feats, openLabels)
             for (i in 0 until cut) {
                 seq[i] = unclamped[i]
                 if (cardiacAwake[i]) seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
+            }
+            // The same lift for the morning tail ([leadOutCardiacWakeStart]), with the wake bias gated on the
+            // stricter [leadOutHRMarginBpm].
+            val tail = maxOf(cut, leadOutCardiacWakeStart(feats, openLabels))
+            for (i in tail until feats.size) {
+                seq[i] = unclamped[i]
+                val h = feats[i].hr
+                if (cardiacAwake[i] && h != null && h >= hrMedian + leadOutHRMarginBpm) {
+                    seq[i]["awake"] = seq[i]["awake"]!! + leadInWakeBias
+                }
             }
         }
 

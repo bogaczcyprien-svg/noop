@@ -278,8 +278,8 @@ class SleepStagerV2Test {
             Triple(5070L, 5310L, "light"),
             Triple(5310L, 5550L, "rem"),
             Triple(5550L, 10740L, "light"),
-            Triple(10740L, 16290L, "rem"),
-            Triple(16290L, 21600L, "wake"))
+            Triple(10740L, 16200L, "rem"),
+            Triple(16200L, 21600L, "wake"))
         assertEquals("segment count", golden.size, segs.size)
         for (k in golden.indices) {
             assertEquals("seg $k start", start + golden[k].first, segs[k].start)
