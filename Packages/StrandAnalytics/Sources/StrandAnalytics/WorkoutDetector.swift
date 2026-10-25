@@ -588,13 +588,17 @@ public enum Calories {
 
     /// Whole-day energy split. `restingKcal` is the BMR contribution over supported sample intervals;
     /// `activeKcal` is energy above that resting floor during supported high-HR intervals.
-    /// `totalKcal` is the backward-compatible value persisted in `DailyMetric.activeKcalEst`.
+    /// `lightKcal` is the awake, non-exercise energy above BMR (sitting, standing, slow walking) during
+    /// supported intervals between `dayLightHRMarginBpm` above rest and the active gate.
+    /// `totalKcal` is the backward-compatible value persisted in `DailyMetric.activeKcalEst`; it adds the
+    /// thermic effect of food (`dayThermicEffectFraction`) on top of the three.
     public struct DayEnergyEstimate: Equatable, Sendable {
         public let restingKcal: Double
+        public let lightKcal: Double
         public let activeKcal: Double
         public let observedSeconds: Double
 
-        public var totalKcal: Double { restingKcal + activeKcal }
+        public var totalKcal: Double { (restingKcal + lightKcal + activeKcal) * (1.0 + Calories.dayThermicEffectFraction) }
     }
 
     struct Coeffs {
@@ -644,6 +648,18 @@ public enum Calories {
     /// Keytel is appropriate for a real detected/manual workout — but the day path raises
     /// the gate to 50% HRR so the gross rate only applies at genuine exercise-level HR.
     static let dayActiveHRRFraction = 0.50
+    /// Light zone (`estimateDayEnergy` only). Below the active gate the day path used to credit BMR alone,
+    /// so an awake office day with a few thousand steps totalled about the sleeping BMR, several hundred
+    /// kcal under what a WHOOP and the wearer's own tests agreed on (fork report: 1500-1800 shown against
+    /// about 2300). BMR is measured lying still; sitting is about 1.3 MET and slow walking 2 to 2.5, so a
+    /// sample at least `dayLightHRMarginBpm` above resting HR earns an extra fraction of BMR rising
+    /// linearly from `dayLightExtraAtFloor` there to `dayLightExtraAtGate` at the active gate.
+    static let dayLightHRMarginBpm = 10.0
+    static let dayLightExtraAtFloor = 0.3
+    static let dayLightExtraAtGate = 1.0
+    /// Thermic effect of food: digestion costs about 10% of daily energy. Applied to the day total only;
+    /// the bout path is unchanged.
+    static let dayThermicEffectFraction = 0.10
     /// Longest gap over which one daily HR reading may carry RESTING energy.
     ///
     /// Resting metabolism continues across a dropout, so a reading may carry the BMR rate into the gap
@@ -777,7 +793,7 @@ public enum Calories {
                                          hrmax: Double?,
                                          restingHR: Double?) -> DayEnergyEstimate {
         if hrSamples.isEmpty {
-            return DayEnergyEstimate(restingKcal: 0, activeKcal: 0, observedSeconds: 0)
+            return DayEnergyEstimate(restingKcal: 0, lightKcal: 0, activeKcal: 0, observedSeconds: 0)
         }
 
         let weightKg = profile.weightKg > 0 ? profile.weightKg : 70.0
@@ -820,6 +836,8 @@ public enum Calories {
         })
         let restingKcal = restingRate * observedSeconds
 
+        let lightFloor = effResting + dayLightHRMarginBpm
+        var lightKcal = 0.0
         var activeKcal = 0.0
         for i in ordered.indices {
             let durationS: Double
@@ -836,12 +854,20 @@ public enum Calories {
                 durationS = nominalSampleS
             }
             let bpm = Double(ordered[i].bpm)
-            guard bpm >= activeThreshold else { continue }
+            guard bpm >= activeThreshold else {
+                // Light zone, carried over the same cadence-capped interval as active energy.
+                if bpm >= lightFloor, activeThreshold > lightFloor {
+                    let t = (bpm - lightFloor) / (activeThreshold - lightFloor)
+                    let extra = dayLightExtraAtFloor + (dayLightExtraAtGate - dayLightExtraAtFloor) * t
+                    lightKcal += restingRate * extra * durationS
+                }
+                continue
+            }
             let grossRate = activeKcalPerS(coeffs, hr: bpm, hrmax: effHRmax,
                                            weightKg: weightKg, age: age, vo2max: vo2max)
             activeKcal += max(0.0, grossRate - restingRate) * durationS
         }
-        return DayEnergyEstimate(restingKcal: restingKcal, activeKcal: activeKcal,
+        return DayEnergyEstimate(restingKcal: restingKcal, lightKcal: lightKcal, activeKcal: activeKcal,
                                  observedSeconds: observedSeconds)
     }
 

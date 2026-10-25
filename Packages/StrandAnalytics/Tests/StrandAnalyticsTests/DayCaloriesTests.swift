@@ -22,6 +22,7 @@ final class DayCaloriesTests: XCTestCase {
         let estimate = Calories.estimateDayEnergy([], profile: UserProfile(),
                                                   hrmax: 190.0, restingHR: 55.0)
         XCTAssertEqual(estimate.restingKcal, 0, accuracy: 1e-12)
+        XCTAssertEqual(estimate.lightKcal, 0, accuracy: 1e-12)
         XCTAssertEqual(estimate.activeKcal, 0, accuracy: 1e-12)
         XCTAssertEqual(estimate.totalKcal, 0, accuracy: 1e-12)
         XCTAssertEqual(estimate.observedSeconds, 0, accuracy: 1e-12)
@@ -30,17 +31,19 @@ final class DayCaloriesTests: XCTestCase {
     func testDayCaloriesMatchesBoutAtOneHz() {
         // At a steady 1 Hz stream the day and bout estimators agree exactly: the bout path's
         // elapsed-time weighting caps every ~1 s interval at 1 s, so it collapses to the day
-        // path's flat one-second-per-sample. They diverge on gappy streams, but not here.
+        // path's flat one-second-per-sample. They diverge on gappy streams, but not here. The day
+        // total adds the thermic effect of food; 130 bpm is above the gate, so there is no light zone.
         let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
         let hr = hrDay(bpm: 130, n: 600)  // 10 min above the active threshold, dense 1 Hz
         let day = Calories.estimateDayCalories(hr, profile: profile, hrmax: 185.0, restingHR: 55.0)
         let bout = Calories.estimateBoutCalories(hr, profile: profile, hrmax: 185.0, restingHR: 55.0).0
-        XCTAssertEqual(day, bout, accuracy: 1e-9)
+        XCTAssertEqual(day, bout * (1.0 + Calories.dayThermicEffectFraction), accuracy: 1e-9)
     }
 
     func testGaplessOneHzDayMatchesLegacyTotal() {
         // Pin the pre-change 1 Hz result so the sparse-cadence fix cannot silently move WHOOP 4
-        // totals. This mixed full day exercises both the resting floor and gross active rate.
+        // totals. This mixed full day exercises the resting floor, the light zone (the 70 bpm block)
+        // and the gross active rate.
         let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
         let block = 8 * 3_600
         let day = hrDay(bpm: 55, n: block)
@@ -48,10 +51,12 @@ final class DayCaloriesTests: XCTestCase {
             + hrDay(bpm: 70, n: block, start: 2 * block)
         let total = Calories.estimateDayCalories(day, profile: profile,
                                                  hrmax: 185.0, restingHR: 55.0)
-        // Measured from the legacy estimator on main. Its per-sample summation differs from the
-        // new R × N association by ~6.6e-9 kcal, so keep tolerance above that rounding noise.
-        XCTAssertEqual(total, 6_774.323772067612, accuracy: 1e-6,
-                       "a gapless 1 Hz day must remain equal to the legacy estimator")
+        // The legacy estimator on main measured 6774.323772067612; its per-sample summation differs
+        // from the R × N association by ~6.6e-9 kcal, so keep tolerance above that rounding noise.
+        // Plus the light zone, BMR/86400 × (0.3 + 0.7 × 5/55) × 28800 = 221.242060606, then × 1.1 for
+        // the thermic effect of food, computed by hand from the constants.
+        XCTAssertEqual(total, 7_695.122415941, accuracy: 1e-6,
+                       "a gapless 1 Hz day must equal the legacy estimator plus light zone and digestion")
     }
 
     func testDayCaloriesRestingDayIsLowerThanActiveDay() {
@@ -67,25 +72,39 @@ final class DayCaloriesTests: XCTestCase {
         XCTAssertGreaterThan(activeDay, restingDay, "active day must exceed resting day")
     }
 
-    func testSedentaryFullDayApproximatesBMR() {
-        // A full 24 h at resting HR (below the day active gate) must total ≈ the subject's BMR:
-        // the day estimator floors every sub-threshold second at the resting metabolic rate, so
-        // an all-rest day is BMR by construction. Standard male test subject's revised
-        // Harris–Benedict BMR ≈ 1825 kcal. This is an APPROXIMATE estimate, not medical advice.
+    func testFullDayAtRestingHRIsBMRPlusDigestion() {
+        // A full 24 h AT resting HR (below the light-zone floor) totals the subject's BMR plus the
+        // 10% thermic effect of food. Standard male test subject's revised Harris–Benedict BMR ≈
+        // 1825.25 kcal, so ≈ 2007.77. This is an APPROXIMATE estimate, not medical advice.
         let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
         let sedentary = hrDay(bpm: 55, n: 86_400)   // 24 h, all at resting HR
         let total = Calories.estimateDayCalories(sedentary, profile: profile,
                                                  hrmax: 185.0, restingHR: 55.0)
-        XCTAssertEqual(total, 1825.25, accuracy: 1.0,
-                       "a sedentary full day must total ≈ the subject's BMR (~1825 kcal)")
+        XCTAssertEqual(total, 2007.77, accuracy: 1.0,
+                       "a full day at resting HR must total ≈ BMR × 1.1 (~2008 kcal)")
+    }
+
+    /// The fork report: an awake office day (8 h asleep at resting HR, 16 h awake around 70-75 bpm)
+    /// read about the sleeping BMR. The awake hours now earn the light zone, so the day lands at a
+    /// sedentary PAL of about 1.4 (≈ 2537 kcal), not 1.0.
+    func testAwakeOfficeDayIsWellAboveBMR() {
+        let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
+        let block = 8 * 3_600
+        let day = hrDay(bpm: 55, n: block) + hrDay(bpm: 70, n: block, start: block)
+            + hrDay(bpm: 75, n: block, start: 2 * block)
+        let e = Calories.estimateDayEnergy(day, profile: profile, hrmax: 185.0, restingHR: 55.0)
+        XCTAssertEqual(e.restingKcal, 1825.247, accuracy: 1e-6)
+        XCTAssertGreaterThan(e.lightKcal, 400)
+        XCTAssertEqual(e.activeKcal, 0, accuracy: 1e-12)
+        XCTAssertTrue((2300.0...2600.0).contains(e.totalKcal), "office day total \(e.totalKcal)")
     }
 
     func testLightActivityDayIsFarBelowOldInflatedTotal() {
         // The bug: at the OLD 30% day gate (~94 bpm for this subject) ordinary low-intensity
         // daytime HR (~100 bpm walking/standing) was credited the FULL Keytel gross-exercise
         // rate, inflating the day total by ~1000+ kcal. The 50% day gate (120 bpm) now treats
-        // that HR as resting, so a realistic mixed light day (8 h sleep @55, 8 h sedentary @70,
-        // 8 h light activity @100) collapses toward BMR instead of the old runaway figure.
+        // that HR as light activity, so a realistic mixed light day (8 h sleep @55, 8 h sedentary
+        // @70, 8 h light activity @100) earns the light zone instead of the old runaway figure.
         let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
         let block = 8 * 3_600
         let lightDay = hrDay(bpm: 55, n: block)
@@ -93,9 +112,9 @@ final class DayCaloriesTests: XCTestCase {
             + hrDay(bpm: 100, n: block, start: 2 * block)
         let total = Calories.estimateDayCalories(lightDay, profile: profile,
                                                  hrmax: 185.0, restingHR: 55.0)
-        // NEW total ≈ 1825 kcal (every second below the 120 bpm gate → BMR floor).
-        XCTAssertEqual(total, 1825.25, accuracy: 1.0,
-                       "a light-activity day must land near BMR, not the old inflated total")
+        // (BMR 1825.247 + light 221.242 @70 + light 453.546 @100) × 1.1, by hand from the constants.
+        XCTAssertEqual(total, 2750.04, accuracy: 1.0,
+                       "a light-activity day must land at BMR plus the light zone, not the old inflated total")
         // Teeth: the OLD 30%-gate model credited the 8 h @100 bpm block at the full Keytel
         // active rate (~3551 kcal for that block alone), so the old day total was ≈ 4768 kcal.
         // Pin that we are now WELL below it (more than 2000 kcal lower).
@@ -143,14 +162,17 @@ final class DayCaloriesTests: XCTestCase {
             stride(from: 0, to: 600, by: 30).map { HRSample(ts: $0, bpm: 130) },
             [HRSample(ts: 0, bpm: 130), HRSample(ts: 3600, bpm: 130)],
         ].map { Calories.estimateDayEnergy($0, profile: profile, hrmax: 185, restingHR: 55) }
-        // Generated from the Swift implementation and copied verbatim to Android's parity test.
+        // Generated from the Swift implementation and copied verbatim to Android's parity test. None of
+        // these vectors reaches the light zone (55 is resting HR, 130 is above the gate); the totals are
+        // the old ones × 1.1 for the thermic effect of food.
         let expected: [(resting: Double, active: Double, total: Double, seconds: Double)] = [
-            (1825.247000000000, 0.000000000000, 1825.247000000000, 86_400.0),
-            (12.675326388889, 103.105766084605, 115.781092473494, 600.0),
-            (12.675326388889, 103.105766084603, 115.781092473492, 600.0),
-            (2.535065277778, 20.621153216921, 23.156218494699, 120.0),
+            (1825.247000000000, 0.000000000000, 2007.771700000000, 86_400.0),
+            (12.675326388889, 103.105766084605, 127.359201720843, 600.0),
+            (12.675326388889, 103.105766084603, 127.359201720841, 600.0),
+            (2.535065277778, 20.621153216921, 25.471840344169, 120.0),
         ]
         for (value, oracle) in zip(vectors, expected) {
+            XCTAssertEqual(value.lightKcal, 0, accuracy: 1e-12)
             XCTAssertEqual(value.restingKcal, oracle.resting, accuracy: 1e-9)
             XCTAssertEqual(value.activeKcal, oracle.active, accuracy: 1e-9)
             XCTAssertEqual(value.totalKcal, oracle.total, accuracy: 1e-9)
