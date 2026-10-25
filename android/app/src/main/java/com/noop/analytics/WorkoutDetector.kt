@@ -588,10 +588,12 @@ object Calories {
     /** Whole-day BMR + activity-above-rest split over supported sample intervals. */
     data class DayEnergyEstimate(
         val restingKcal: Double,
+        val lightKcal: Double,
         val activeKcal: Double,
         val observedSeconds: Double,
     ) {
-        val totalKcal: Double get() = restingKcal + activeKcal
+        /** Adds the thermic effect of food ([dayThermicEffectFraction]) on top of the three parts. */
+        val totalKcal: Double get() = (restingKcal + lightKcal + activeKcal) * (1.0 + dayThermicEffectFraction)
     }
 
 
@@ -650,6 +652,21 @@ object Calories {
      * gate to 50% HRR so the gross rate only applies at genuine exercise-level HR.
      */
     const val dayActiveHRRFraction: Double = 0.50
+    /**
+     * Light zone ([estimateDayEnergy] only). Below the active gate the day path used to credit BMR
+     * alone, so an awake office day with a few thousand steps totalled about the sleeping BMR, several
+     * hundred kcal under what a WHOOP and the wearer's own tests agreed on (fork report: 1500-1800
+     * shown against about 2300). BMR is measured lying still; sitting is about 1.3 MET and slow
+     * walking 2 to 2.5, so a sample at least [dayLightHRMarginBpm] above resting HR earns an extra
+     * fraction of BMR rising linearly from [dayLightExtraAtFloor] there to [dayLightExtraAtGate] at the
+     * active gate.
+     */
+    const val dayLightHRMarginBpm: Double = 10.0
+    const val dayLightExtraAtFloor: Double = 0.3
+    const val dayLightExtraAtGate: Double = 1.0
+    /** Thermic effect of food: digestion costs about 10% of daily energy. Applied to the day total
+     *  only; the bout path is unchanged. */
+    const val dayThermicEffectFraction: Double = 0.10
     /**
      * Longest gap over which one daily HR reading may carry RESTING energy.
      *
@@ -802,7 +819,7 @@ object Calories {
         hrmax: Double?,
         restingHR: Double?,
     ): DayEnergyEstimate {
-        if (hrSamples.isEmpty()) return DayEnergyEstimate(0.0, 0.0, 0.0)
+        if (hrSamples.isEmpty()) return DayEnergyEstimate(0.0, 0.0, 0.0, 0.0)
 
         val weightKg = if (profile.weightKg > 0) profile.weightKg else 70.0
         val heightCm = if (profile.heightCm > 0) profile.heightCm else 170.0
@@ -849,6 +866,8 @@ object Calories {
         )
         val restingKcal = restingRate * observedSeconds
 
+        val lightFloor = effResting + dayLightHRMarginBpm
+        var lightKcal = 0.0
         var activeKcal = 0.0
         for (i in ordered.indices) {
             // Active carry is capped at the INFERRED CADENCE, not at the wider resting cap. A 30 s
@@ -864,11 +883,19 @@ object Calories {
                 nominalSampleS
             }
             val bpm = ordered[i].bpm.toDouble()
-            if (bpm < activeThreshold) continue
+            if (bpm < activeThreshold) {
+                // Light zone, carried over the same cadence-capped interval as active energy.
+                if (bpm >= lightFloor && activeThreshold > lightFloor) {
+                    val t = (bpm - lightFloor) / (activeThreshold - lightFloor)
+                    val extra = dayLightExtraAtFloor + (dayLightExtraAtGate - dayLightExtraAtFloor) * t
+                    lightKcal += restingRate * extra * durationS
+                }
+                continue
+            }
             val grossRate = activeKcalPerS(coeffs, bpm, effHRmax, weightKg, age, vo2max)
             activeKcal += maxOf(0.0, grossRate - restingRate) * durationS
         }
-        return DayEnergyEstimate(restingKcal, activeKcal, observedSeconds)
+        return DayEnergyEstimate(restingKcal, lightKcal, activeKcal, observedSeconds)
     }
 
     /** Backward-compatible total-kcal facade for the stored daily metric. */
