@@ -159,4 +159,70 @@ class LeadInCardiacWakeTest {
         assertTrue("on ($on) must not read earlier than off ($off)", on!! >= off!!)
         assertTrue("onset must not move past the lead-in (got $on min)", on <= 160.0)
     }
+
+    // ── lead-out (the morning mirror) ──────────────────────────────────────────────────────────────────
+
+    /** Minutes from the window start to the end of the last non-wake run of at least 5 minutes. */
+    private fun finalWakeMinutes(segs: List<StageSegment>): Double? {
+        var j = segs.size - 1
+        while (j >= 0) {
+            if (segs[j].stage == "wake") { j--; continue }
+            val runEnd = segs[j].end
+            var runStart = segs[j].start
+            var i = j - 1
+            while (i >= 0 && segs[i].stage != "wake") { runStart = segs[i].start; i-- }
+            if (runEnd - runStart >= 300) return (runEnd - start) / 60.0
+            j = i
+        }
+        return null
+    }
+
+    @Test
+    fun sustainedSleepEndFindsTheLastRun() {
+        val labels = List(5) { "awake" } + List(30) { "light" } + List(4) { "awake" } + List(9) { "deep" } +
+            List(20) { "awake" }
+        // The 9-epoch run is shorter than the 5-minute rule; the 30-epoch run ends at index 35.
+        assertEquals(35, SleepStagerV2.sustainedSleepEnd(labels))
+        assertEquals(null, SleepStagerV2.sustainedSleepEnd(List(50) { "awake" }))
+        assertEquals(50, SleepStagerV2.sustainedSleepEnd(List(50) { "light" }))
+    }
+
+    @Test
+    fun leadOutStartIsCappedAtTwoHours() {
+        val feats = (0 until 800).map(::epoch)
+        // Last sustained sleep ends at epoch 300; the last epoch is centred at 399.75 min, so the lift may
+        // only reach back to the first epoch centred within 120 min of it (epoch 559).
+        assertEquals(559, SleepStagerV2.leadOutCardiacWakeStart(feats, List(300) { "light" } + List(500) { "awake" }))
+        // A 40-minute tail is lifted whole.
+        assertEquals(720, SleepStagerV2.leadOutCardiacWakeStart(feats, List(720) { "light" } + List(80) { "awake" }))
+        // No sustained sleep, or sleep to the last epoch: nothing lifted.
+        assertEquals(800, SleepStagerV2.leadOutCardiacWakeStart(feats, List(800) { "awake" }))
+        assertEquals(800, SleepStagerV2.leadOutCardiacWakeStart(feats, List(800) { "light" }))
+    }
+
+    /** The reported shape: a night of sleep, then 40 minutes lying still awake before getting up. Off, the
+     *  clamp credits the tail as sleep; on, the final wake moves to where the heart rate rose. */
+    @Test
+    fun stillAwakeTailMovesFinalWakeEarlier() {
+        val dur = 8 * 60 * 60
+        val awake = listOf((dur - 40 * 60) until dur)
+        val off = finalWakeMinutes(stage(dur, awake, leadIn = false))
+        val on = finalWakeMinutes(stage(dur, awake, leadIn = true))
+        assertNotNull(off); assertNotNull(on)
+        assertTrue("off path should still read the still tail as sleep (got $off min)", off!! > 470.0)
+        assertTrue("final wake should sit near the 440-min rise (got $on min)", on!! in 430.0..450.0)
+    }
+
+    /** A lie-in at both ends: each side moves, and the sleep between them is untouched. */
+    @Test
+    fun leadInAndLeadOutTogether() {
+        val dur = 8 * 60 * 60
+        val segs = stage(dur, listOf(0 until 30 * 60, (dur - 30 * 60) until dur), leadIn = true)
+        val on = onsetMinutes(segs)
+        val wake = finalWakeMinutes(segs)
+        assertNotNull(on); assertNotNull(wake)
+        assertTrue("onset near 30 min (got $on)", on!! in 20.0..40.0)
+        assertTrue("final wake near 450 min (got $wake)", wake!! in 440.0..460.0)
+        assertTrue(wakeMinutesIn(segs, 60 * 60, dur - 60 * 60) < 5.0)
+    }
 }

@@ -100,6 +100,10 @@ struct RecipeConfig: Equatable {
     var leadInBiasNeedsCardiac: Bool = true
     /// `SleepStagerV2.leadInHRMarginBpm`: the gate also needs epoch HR this far above the night's median.
     var leadInHRMarginBpm: Double = 2.0
+    /// Lead-out mirror (`SleepStagerV2.leadOutCardiacWakeStart`): the same lift after the last sustained
+    /// sleep run, capped at `leadOutCardiacWakeMaxMinutes` before the window's last epoch. Shipped on.
+    var leadOutCardiacWake: Bool = true
+    var leadOutCardiacWakeMaxMinutes: Double = 120.0
 
     /// The shipped recipe, as of `Packages/StrandAnalytics/Sources/StrandAnalytics/SleepStagerV2.swift`.
     static let shipped = RecipeConfig(
@@ -403,6 +407,16 @@ enum V2Recipe {
         return nil
     }
 
+    static func sustainedSleepEnd(_ labels: [String], _ cfg: RecipeConfig) -> Int? {
+        var run = 0
+        for i in labels.indices.reversed() {
+            if labels[i] == "awake" { run = 0; continue }
+            run += 1
+            if run >= cfg.onsetSustainedEpochs { return i + cfg.onsetSustainedEpochs }
+        }
+        return nil
+    }
+
     static func viterbi(_ emSeq: [[String: Double]], _ cfg: RecipeConfig) -> [String] {
         if emSeq.isEmpty { return [] }
         let logT = cfg.transition.mapValues { row in row.mapValues { log(max($0, 1e-9)) } }
@@ -504,13 +518,26 @@ enum V2Recipe {
                 probe[i]["rem"]! -= remLatencyGuard(feats[i].minutesSinceOnset, cfg)
                 if cardiacAwake[i] { probe[i]["awake"]! += cfg.leadInProbeWakeBias }
             }
+            let openLabels = viterbi(probe, cfg)
             var cut = 0
-            if let onset = sustainedSleepOnset(viterbi(probe, cfg), cfg) {
+            if let onset = sustainedSleepOnset(openLabels, cfg) {
                 while cut < onset, feats[cut].minutesSinceOnset <= cfg.leadInCardiacWakeMaxMinutes { cut += 1 }
             }
             for i in 0..<cut {
                 seq[i] = unclamped[i]
                 if cardiacAwake[i] { seq[i]["awake"]! += cfg.leadInWakeBias }
+            }
+            // Lead-out: same as `SleepStagerV2.leadOutCardiacWakeStart`.
+            if cfg.leadOutCardiacWake {
+                var tail = feats.count
+                if let end = sustainedSleepEnd(openLabels, cfg), let last = feats.last {
+                    while tail > end, last.minutesSinceOnset - feats[tail - 1].minutesSinceOnset
+                        <= cfg.leadOutCardiacWakeMaxMinutes { tail -= 1 }
+                }
+                for i in max(cut, tail)..<feats.count {
+                    seq[i] = unclamped[i]
+                    if cardiacAwake[i] { seq[i]["awake"]! += cfg.leadInWakeBias }
+                }
             }
         }
 

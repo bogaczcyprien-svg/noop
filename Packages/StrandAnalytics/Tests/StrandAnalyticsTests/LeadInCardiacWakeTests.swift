@@ -141,4 +141,91 @@ final class LeadInCardiacWakeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(on, off)
         XCTAssertLessThanOrEqual(on, 160.0, "onset must not move past the lead-in (got \(on) min)")
     }
+
+    // MARK: - lead-out (the morning mirror)
+
+    /// Minutes from the window start to the end of the last non-wake run of at least 5 minutes.
+    private func finalWakeMinutes(_ segs: [StageSegment]) -> Double? {
+        var j = segs.count - 1
+        while j >= 0 {
+            if segs[j].stage == "wake" { j -= 1; continue }
+            let runEnd = segs[j].end
+            var runStart = segs[j].start
+            var i = j - 1
+            while i >= 0, segs[i].stage != "wake" { runStart = segs[i].start; i -= 1 }
+            if runEnd - runStart >= 300 { return Double(runEnd - start) / 60.0 }
+            j = i
+        }
+        return nil
+    }
+
+    func testSustainedSleepEndFindsTheLastRun() {
+        let labels = Array(repeating: "awake", count: 5) + Array(repeating: "light", count: 30)
+            + Array(repeating: "awake", count: 4) + Array(repeating: "deep", count: 9) + Array(repeating: "awake", count: 20)
+        // The 9-epoch run is shorter than the 5-minute rule; the 30-epoch run ends at index 35.
+        XCTAssertEqual(SleepStagerV2.sustainedSleepEnd(labels), 35)
+        XCTAssertNil(SleepStagerV2.sustainedSleepEnd(Array(repeating: "awake", count: 50)))
+        XCTAssertEqual(SleepStagerV2.sustainedSleepEnd(Array(repeating: "light", count: 50)), 50)
+    }
+
+    func testLeadOutStartIsCappedAtTwoHours() {
+        let feats = (0..<800).map(epoch)
+        // Last sustained sleep ends at epoch 300; the last epoch is centred at 399.75 min, so the lift may
+        // only reach back to the first epoch centred within 120 min of it (epoch 559).
+        let labels = Array(repeating: "light", count: 300) + Array(repeating: "awake", count: 500)
+        XCTAssertEqual(SleepStagerV2.leadOutCardiacWakeStart(feats, openLabels: labels), 559)
+        // A 40-minute tail is lifted whole.
+        let short = Array(repeating: "light", count: 720) + Array(repeating: "awake", count: 80)
+        XCTAssertEqual(SleepStagerV2.leadOutCardiacWakeStart(feats, openLabels: short), 720)
+        // No sustained sleep, or sleep to the last epoch: nothing lifted.
+        XCTAssertEqual(SleepStagerV2.leadOutCardiacWakeStart(feats, openLabels: Array(repeating: "awake", count: 800)), 800)
+        XCTAssertEqual(SleepStagerV2.leadOutCardiacWakeStart(feats, openLabels: Array(repeating: "light", count: 800)), 800)
+    }
+
+    /// The reported shape: a night of sleep, then 40 minutes lying still awake before getting up. Off, the
+    /// clamp credits the tail as sleep; on, the final wake moves to where the heart rate rose.
+    func testStillAwakeTailMovesFinalWakeEarlier() throws {
+        let dur = 8 * 60 * 60
+        let awake = [(dur - 40 * 60)..<dur]
+        let off = try XCTUnwrap(finalWakeMinutes(stage(dur, awake, leadIn: false)))
+        let on = try XCTUnwrap(finalWakeMinutes(stage(dur, awake, leadIn: true)))
+        XCTAssertGreaterThan(off, 470.0, "off path should still read the still tail as sleep (got \(off) min)")
+        XCTAssertTrue((430.0...450.0).contains(on), "final wake should sit near the 440-min rise (got \(on) min)")
+        let segs = stage(dur, awake, leadIn: true)
+        XCTAssertEqual(SleepStagerV2.refinedWakeTs(segs).map { Double($0 - start) / 60.0 }, on)
+    }
+
+    /// A lie-in at both ends: each side moves, and the sleep between them is untouched.
+    func testLeadInAndLeadOutTogether() throws {
+        let dur = 8 * 60 * 60
+        let awake = [0..<(30 * 60), (dur - 30 * 60)..<dur]
+        let segs = stage(dur, awake, leadIn: true)
+        let on = try XCTUnwrap(onsetMinutes(segs))
+        let wake = try XCTUnwrap(finalWakeMinutes(segs))
+        XCTAssertTrue((20.0...40.0).contains(on), "onset near 30 min (got \(on))")
+        XCTAssertTrue((440.0...460.0).contains(wake), "final wake near 450 min (got \(wake))")
+        XCTAssertLessThan(wakeMinutes(in: segs, from: 60 * 60, to: dur - 60 * 60), 5.0)
+    }
+
+    func testTrimmedToRefinedWakeCutsTheTrailingWake() {
+        let s = SleepSession(start: start, end: start + 3_600, efficiency: 0.5,
+                             stages: [StageSegment(start: start, end: start + 600, stage: "wake"),
+                                      StageSegment(start: start + 600, end: start + 2_400, stage: "light"),
+                                      StageSegment(start: start + 2_400, end: start + 2_520, stage: "wake"),
+                                      StageSegment(start: start + 2_520, end: start + 2_640, stage: "rem"),
+                                      StageSegment(start: start + 2_640, end: start + 3_600, stage: "wake")],
+                             restingHR: 50, avgHRV: 60)
+        let t = SleepStagerV2.trimmedToRefinedWake(s)
+        // The 2-minute REM fleck is shorter than the 5-minute rule; the cut lands after the light run.
+        XCTAssertEqual(t.end, start + 2_400)
+        XCTAssertEqual(t.stages.last, StageSegment(start: start + 600, end: start + 2_400, stage: "light"))
+        XCTAssertEqual(t.efficiency, 1_800.0 / 2_400.0, accuracy: 1e-9)
+        XCTAssertEqual(t.restingHR, 50)
+        XCTAssertEqual(t.avgHRV, 60)
+        // Closing on sleep: unchanged.
+        let asleep = SleepSession(start: start, end: start + 3_600, efficiency: 1,
+                                  stages: [StageSegment(start: start, end: start + 3_600, stage: "light")],
+                                  restingHR: nil, avgHRV: nil)
+        XCTAssertEqual(SleepStagerV2.trimmedToRefinedWake(asleep), asleep)
+    }
 }
