@@ -145,3 +145,64 @@ final class BreathingSignalTests: XCTestCase {
                                                      grav: still(minutes: 15), restingHR: nil), .heartRateHigh)
     }
 }
+
+/// Levels of the training drills (`BreathingProgression`).
+final class BreathingProgressionTests: XCTestCase {
+    private let co2 = BreathingScienceCatalog.co2Id
+    private let holds = BreathingScienceCatalog.breathHoldsId
+    private let muscle = BreathingScienceCatalog.respiratoryMuscleId
+
+    func testOnlyTrainingDrillsProgress() {
+        XCTAssertTrue(BreathingProgression.isProgressive(co2))
+        XCTAssertTrue(BreathingProgression.isProgressive(holds))
+        XCTAssertTrue(BreathingProgression.isProgressive(muscle))
+        for id in [BreathingScienceCatalog.coherenceId, BreathingScienceCatalog.cyclicSighId,
+                   BreathingScienceCatalog.sleepId, BreathingScienceCatalog.boxId, BreathingScienceCatalog.airwaysId] {
+            XCTAssertFalse(BreathingProgression.isProgressive(id), id)
+            let base = BreathingScienceCatalog.exercise(id)!
+            XCTAssertEqual(BreathingProgression.exercise(base, level: 4), base)
+        }
+    }
+
+    func testLevelOneIsTheCatalogDrill() {
+        for id in [co2, holds, muscle] {
+            let base = BreathingScienceCatalog.exercise(id)!
+            XCTAssertEqual(BreathingProgression.exercise(base, level: 1), base, id)
+        }
+    }
+
+    func testDoseGrowsWithLevelAndCaps() {
+        XCTAssertEqual((1...5).map { BreathingProgression.co2HoldSeconds(level: $0) }, [10, 15, 20, 25, 30])
+        XCTAssertEqual(BreathingProgression.co2HoldSeconds(level: 9), 30)
+        XCTAssertEqual((1...6).map { BreathingProgression.breathHolds(level: $0).rounds }, [5, 7, 9, 11, 13, 15])
+        XCTAssertEqual(BreathingProgression.breathHolds(level: 6).maxHoldSeconds, 300)
+        XCTAssertEqual((1...7).map { BreathingProgression.muscleBreaths(level: $0) }, [30, 35, 40, 45, 50, 55, 60])
+        let lvl3 = BreathingProgression.exercise(BreathingScienceCatalog.exercise(co2)!, level: 3)
+        XCTAssertEqual(lvl3.asProtocol()?.cycleDurationMs, 6_000 + 6_000 + 20_000)
+        let m = BreathingProgression.exercise(BreathingScienceCatalog.exercise(muscle)!, level: 3)
+        XCTAssertEqual(m.guidedSeconds, 40 * 6)
+    }
+
+    func testOnlyFullSessionsEarnTheNextLevel() {
+        var s = BreathingProgression.State()
+        s = BreathingProgression.afterSession(s, id: co2, completedFully: false).state
+        XCTAssertEqual(s, .init(level: 1, completions: 0))
+        s = BreathingProgression.afterSession(s, id: co2, completedFully: true).state
+        s = BreathingProgression.afterSession(s, id: co2, completedFully: true).state
+        let third = BreathingProgression.afterSession(s, id: co2, completedFully: true)
+        XCTAssertTrue(third.leveledUp)
+        XCTAssertEqual(third.state, .init(level: 2, completions: 0))
+        // The top level never moves past its cap.
+        let top = BreathingProgression.afterSession(.init(level: 5, completions: 2), id: co2, completedFully: true)
+        XCTAssertFalse(top.leveledUp)
+        XCTAssertEqual(top.state.level, 5)
+        // Six sessions per level for the muscle drill.
+        XCTAssertEqual(BreathingProgression.sessionsPerLevel(muscle), 6)
+        // Stepping down restarts the count and never goes below 1.
+        XCTAssertEqual(BreathingProgression.stepDown(.init(level: 3, completions: 2), id: co2), .init(level: 2, completions: 0))
+        XCTAssertEqual(BreathingProgression.stepDown(.init(level: 1, completions: 1), id: co2).level, 1)
+        // A calming drill never counts.
+        XCTAssertFalse(BreathingProgression.afterSession(.init(), id: BreathingScienceCatalog.coherenceId,
+                                                         completedFully: true).leveledUp)
+    }
+}

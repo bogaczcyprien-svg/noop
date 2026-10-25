@@ -157,6 +157,7 @@ struct BreathingSessionView: View {
                         .font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let p = s.progression { progressionLine(p) }
                 uploadLine
                 NoopButton("Close", kind: .primary, fullWidth: true) { onClose() }
             }
@@ -185,6 +186,29 @@ struct BreathingSessionView: View {
         return diff < 0
             ? String(localized: "Your heart rate dropped by \(-diff) bpm during the exercise.")
             : String(localized: "Your heart rate stayed within \(diff) bpm of free breathing.")
+    }
+
+    private func progressionLine(_ p: BreathingSessionModel.Progression) -> some View {
+        let id = model.exercise.id
+        let text: String
+        if p.leveledUp {
+            text = String(localized: "Level up: level \(p.after.level) of \(BreathingProgression.maxLevel(id)). The next session is harder.")
+                + (id == BreathingScienceCatalog.respiratoryMuscleId
+                   ? " " + String(localized: "With an inspiratory trainer, also raise its resistance one notch.") : "")
+        } else if !p.completedFully {
+            text = String(localized: "Stopped before the end: this session does not count toward the next level.")
+        } else if p.after.level >= BreathingProgression.maxLevel(id) {
+            text = String(localized: "Top level reached. Keep it up to hold your gains.")
+        } else {
+            let left = BreathingProgression.sessionsPerLevel(id) - p.after.completions
+            text = String(localized: "\(left) more full sessions to reach level \(p.after.level + 1).")
+        }
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: p.leveledUp ? "arrow.up.circle.fill" : "chart.line.uptrend.xyaxis")
+                .foregroundStyle(p.leveledUp ? StrandPalette.statusPositive : StrandPalette.accent)
+            Text(verbatim: text).font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder

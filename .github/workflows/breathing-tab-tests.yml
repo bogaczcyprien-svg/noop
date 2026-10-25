@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: StrandAnalytics tests
         working-directory: Packages/StrandAnalytics
-        run: swift test --filter "BreathingSignalTests|BreathProtocolPlayerTests"
+        run: swift test --filter "BreathingSignalTests|BreathingProgressionTests|BreathProtocolPlayerTests"
       - name: StrandImport tests
         working-directory: Packages/StrandImport
         run: swift test

@@ -49,6 +49,15 @@ final class BreathingSessionModel: ObservableObject {
         var resonanceLocked = false
         var totalSeconds = 0
         var source: String = ""
+        /// Training drills only: the level before and after this session.
+        var progression: Progression?
+    }
+
+    struct Progression: Equatable {
+        let levelBefore: Int
+        let after: BreathingProgression.State
+        let leveledUp: Bool
+        let completedFully: Bool
     }
 
     enum Upload: Equatable {
@@ -233,7 +242,7 @@ final class BreathingSessionModel: ObservableObject {
         case .free where partElapsed >= freeSeconds:
             startGuided()
         case .guided where partElapsed >= guidedSeconds:
-            finish()
+            finish(completed: true)
         case .recovery(let round):
             if case .breathHolds(_, let recovery, _) = exercise.drill, partElapsed >= recovery { enter(.hold(round: round)) }
         case .hold(let round) where partElapsed >= holdCapSeconds:
@@ -310,11 +319,13 @@ final class BreathingSessionModel: ObservableObject {
         if case .breathHolds(let rounds, _, _) = exercise.drill, round < rounds {
             enter(.recovery(round: round + 1))
         } else {
-            finish()
+            finish(completed: true)
         }
     }
 
-    private func finish() {
+    /// `completed`: the guided part ran to its end (or every hold round was done), so the session counts
+    /// toward the next level of a training drill.
+    private func finish(completed: Bool = false) {
         guard part != .done else { return }
         ticker?.invalidate(); fastTicker?.invalidate()
         liveRRSub = nil
@@ -334,6 +345,13 @@ final class BreathingSessionModel: ObservableObject {
             s.resonanceBpm = result.lockedBpm
             s.resonanceLocked = result.didLock
             if result.didLock { BiofeedbackPrefs.saveLockedPace(result.lockedBpm, date: end) }
+        }
+        if BreathingProgression.isProgressive(exercise.id) {
+            let before = BreathingLevelStore.state(exercise.id)
+            let r = BreathingProgression.afterSession(before, id: exercise.id, completedFully: completed)
+            BreathingLevelStore.save(r.state, exercise.id)
+            s.progression = .init(levelBefore: before.level, after: r.state, leveledUp: r.leveledUp,
+                                  completedFully: completed)
         }
         summary = s
         guard s.totalSeconds >= 60 else { return }
@@ -409,6 +427,9 @@ enum BreathingSessionText {
         if !s.holdsSeconds.isEmpty {
             let list = s.holdsSeconds.map { "\($0) s" }.joined(separator: ", ")
             lines.append(String(localized: "Breath holds: \(list)"))
+        }
+        if let p = s.progression {
+            lines.append(String(localized: "Level \(p.levelBefore)"))
         }
         if let bpm = s.resonanceBpm {
             let pace = String(format: "%.1f", bpm)

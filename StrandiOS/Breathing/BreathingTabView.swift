@@ -61,7 +61,7 @@ struct BreathingTabView: View {
     }
 
     private func startSession(_ ex: BreathingExercise) {
-        let model = BreathingSessionModel(exercise: ex, freeSeconds: freeMinutes * 60, strap: strap, live: live)
+        let model = BreathingSessionModel(exercise: BreathingLevelStore.current(ex), freeSeconds: freeMinutes * 60, strap: strap, live: live)
         session = SessionHandle(model: model)
         BedtimeBreathingNudge.shared.noteSessionDone()
         model.start()
@@ -155,6 +155,12 @@ struct BreathingTabView: View {
                                 if let first = ex.benefits.first {
                                     Label(BreathingL10n.text(first), systemImage: "checkmark")
                                         .font(StrandFont.caption).foregroundStyle(StrandPalette.statusPositive)
+                                }
+                                if BreathingProgression.isProgressive(ex.id) {
+                                    let level = BreathingLevelStore.state(ex.id).level
+                                    Text(verbatim: String(localized: "Level \(level)/\(BreathingProgression.maxLevel(ex.id))")
+                                         + (BreathingLevelStore.levelDetail(ex.id, level: level).map { " · " + $0 } ?? ""))
+                                        .font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
                                 }
                                 if ex.id == BreathingScienceCatalog.resonanceId, let bpm = BiofeedbackPrefs.lockedPace {
                                     Text("Your pace: \(String(format: "%.1f", bpm)) breaths/min")
@@ -263,6 +269,36 @@ private struct ExerciseDetailSheet: View {
     let freeMinutes: Int
     let onStart: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// Training level, re-read after a step down.
+    @State private var levelState: BreathingProgression.State?
+
+    private var level: BreathingProgression.State { levelState ?? BreathingLevelStore.state(exercise.id) }
+
+    /// Level, what it asks for, how far the next one is, and the "too hard" step down.
+    private var levelCard: some View {
+        let id = exercise.id
+        let max = BreathingProgression.maxLevel(id)
+        let left = BreathingProgression.sessionsPerLevel(id) - level.completions
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Your level").strandOverline()
+            Text(verbatim: String(localized: "Level \(level.level) of \(max)"))
+                .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+            if let detail = BreathingLevelStore.levelDetail(id, level: level.level) {
+                Text(verbatim: detail).font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
+            }
+            Text(verbatim: level.level >= max
+                 ? String(localized: "Top level reached. Keep it up to hold your gains.")
+                 : String(localized: "\(left) more full sessions to reach level \(level.level + 1)."))
+                .font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
+            if level.level > 1 {
+                NoopButton("Too hard? One level down", systemImage: "arrow.down", kind: .tertiary) {
+                    let down = BreathingProgression.stepDown(level, id: id)
+                    BreathingLevelStore.save(down, id)
+                    levelState = down
+                }
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -283,6 +319,7 @@ private struct ExerciseDetailSheet: View {
                             }
                         }
                     }
+                    if BreathingProgression.isProgressive(exercise.id) { levelCard }
                     section("How to do it", exercise.howTo)
                     section("What the research says", exercise.evidence)
                     if let c = exercise.caution {
@@ -324,6 +361,44 @@ private struct ExerciseDetailSheet: View {
 enum BreathingL10n {
     static func text(_ key: String) -> String {
         Bundle.main.localizedString(forKey: key, value: key, table: nil)
+    }
+}
+#endif
+
+#if os(iOS)
+/// Per-exercise training level (`BreathingProgression.State`), kept in UserDefaults on this phone.
+enum BreathingLevelStore {
+    private static func key(_ id: String, _ part: String) -> String { "noop.breathing.\(part).\(id)" }
+
+    static func state(_ id: String) -> BreathingProgression.State {
+        let d = UserDefaults.standard
+        let level = d.object(forKey: key(id, "level")) as? Int ?? 1
+        return .init(level: level, completions: d.integer(forKey: key(id, "done")))
+    }
+
+    static func save(_ s: BreathingProgression.State, _ id: String) {
+        UserDefaults.standard.set(s.level, forKey: key(id, "level"))
+        UserDefaults.standard.set(s.completions, forKey: key(id, "done"))
+    }
+
+    /// The exercise at its current level.
+    static func current(_ base: BreathingExercise) -> BreathingExercise {
+        BreathingProgression.exercise(base, level: state(base.id).level)
+    }
+
+    /// What the current level asks for, in one line.
+    static func levelDetail(_ id: String, level: Int) -> String? {
+        switch id {
+        case BreathingScienceCatalog.co2Id:
+            return String(localized: "Hold \(BreathingProgression.co2HoldSeconds(level: level)) s after the exhale")
+        case BreathingScienceCatalog.breathHoldsId:
+            let h = BreathingProgression.breathHolds(level: level)
+            return String(localized: "\(h.rounds) holds, up to \(h.maxHoldSeconds / 60) min \(h.maxHoldSeconds % 60) s each")
+        case BreathingScienceCatalog.respiratoryMuscleId:
+            return String(localized: "\(BreathingProgression.muscleBreaths(level: level)) strong breaths")
+        default:
+            return nil
+        }
     }
 }
 #endif
