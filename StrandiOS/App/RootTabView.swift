@@ -51,12 +51,15 @@ struct RootTabView: View {
     /// root view alive, so an at-root re-tap keeps scroll position and never re-runs `.task`
     /// (#198; the #197 resetID/`.id()` rebuild reset both). Requires the tab roots' first-hop
     /// links to push `TabRoute`/`MoreDestination` VALUES — closure-destination links bypass the path.
-    @State private var tabPaths: [NavigationPath] = Array(repeating: NavigationPath(), count: 5)
+    @State private var tabPaths: [NavigationPath] = Array(repeating: NavigationPath(), count: 6)
     /// One scroll-to-top token per tab. Bumped when the user re-taps the active tab while it's ALREADY
     /// at its root — the other half of the iOS convention #197/#198 left unserved (an at-root re-tap was
     /// a no-op). Threaded into each tab's root via `\.scrollToTopSignal`; ScreenScaffold / LiquidTodayView
     /// scroll to their top anchor when their tab's token changes.
-    @State private var scrollTop: [Int] = Array(repeating: 0, count: 5)
+    @State private var scrollTop: [Int] = Array(repeating: 0, count: 6)
+    /// Tab tags in the order they sit on the bar (the swipe walks this). FORK-ONLY: Breathing (tag 5)
+    /// sits beside Nutrition, and Coach (tag 3) moved into the More list to keep the bar at five.
+    private static let barOrder = [0, 1, 5, 2, 4]
     /// Which More-tab groups are expanded (S2). Insights + Body stay open at rest; Data + App collapse to
     /// just their header until tapped. Persisted (#860 item 2): the user's open/closed choice must SURVIVE
     /// leaving and re-entering the More tab (and relaunch), not reset to the seed every visit. Backed by an
@@ -114,7 +117,8 @@ struct RootTabView: View {
                 guard selectedTab != 0 else { return }
                 let dx = v.translation.width, dy = v.translation.height
                 guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
-                let next = min(4, max(0, selectedTab + (dx < 0 ? 1 : -1)))
+                guard let at = Self.barOrder.firstIndex(of: selectedTab) else { return }
+                let next = Self.barOrder[min(Self.barOrder.count - 1, max(0, at + (dx < 0 ? 1 : -1)))]
                 if next != selectedTab {
                     withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = next }
                 }
@@ -131,6 +135,8 @@ struct RootTabView: View {
             // rarely uses Trends); Trends moves into the More list instead (see moreSection("Insights") and
             // the .trends case in MoreDestination/pillarScreen below). Same tag/array slot, no renumbering.
             tab(NutritionView(), "Nutrition", "chart.pie.fill", path: $tabPaths[1], scrollSignal: scrollTop[1]).tag(1)
+            // FORK-ONLY, not ported to Android: the Breathing tab (StrandiOS/Breathing), beside Nutrition.
+            tab(BreathingTabView(), "Breathing", "wind", path: $tabPaths[5], scrollSignal: scrollTop[5]).tag(5)
             tab(SleepView(), "Sleep", "bed.double", path: $tabPaths[2], scrollSignal: scrollTop[2]).tag(2)
             // K3: Coach promoted to a top-level tab (was behind the More list). The sparkles icon
             // matches the More-tab row and the macOS sidebar entry.
@@ -138,9 +144,10 @@ struct RootTabView: View {
             // Coach is absent: `tabPaths` and `scrollTop` are indexed by tag, and More stays tag 4 in both
             // shapes, so a wearer's More tab keeps its identity, its navigation path and its scroll
             // position across a flip instead of inheriting Coach's.
-            if coachEnabled {
-                tab(CoachView(), "Coach", "sparkles", path: $tabPaths[3], scrollSignal: scrollTop[3]).tag(3)
-            }
+            //
+            // FORK-ONLY: Coach moved into the More list to make room for Breathing beside Nutrition (an
+            // iPhone bar shows five tabs; a sixth would fold into a system "More"). It keeps tag 3 for
+            // the routes that name it and now opens as a sheet (see `.coach` below).
             moreTab(path: $tabPaths[4], scrollSignal: scrollTop[4]).tag(4)
         }
         .tint(StrandPalette.accent)
@@ -149,6 +156,10 @@ struct RootTabView: View {
         // only in that case, so a flip made from anywhere else does not move them.
         .onChangeCompat(of: coachEnabled) { enabled in
             if !enabled && selectedTab == 3 { selectedTab = 0 }
+        }
+        // FORK-ONLY: a tapped bedtime breathing nudge lands on the Breathing tab.
+        .onReceive(NotificationCenter.default.publisher(for: NotificationPresenter.openBreathingTab)) { _ in
+            selectedTab = 5
         }
         // #1841: the same "Hide bar when scrolling" preference Android drives its own bar with. Here the
         // system owns the behaviour — iOS 26's tab bar MINIMISES to a pill on scroll down rather than
@@ -228,7 +239,8 @@ struct RootTabView: View {
                     router.requestedDestination = nil
                     break
                 }
-                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 3 }
+                // FORK-ONLY: Coach left the tab bar for Breathing, so it opens as a pillar sheet.
+                routedPillar = .coach
                 router.requestedDestination = nil
             case .activeWorkout:
                 // The Today active-workout indicator opens Live through the quick-action Live sheet; once
@@ -466,7 +478,10 @@ struct RootTabView: View {
                 moreSection("Insights") {
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
-                    // K3: Coach promoted to a top-level tab — no longer listed under More.
+                    // FORK-ONLY: Coach is listed here again, its tab-bar slot taken by Breathing.
+                    if coachEnabled {
+                        MoreRow("Coach", "sparkles", .coach)
+                    }
                     MoreRow("Insights", "lightbulb.fill", .insights)
                     MoreRow("Explore", "square.grid.2x2.fill", .explore)
                     MoreRow("Compare", "rectangle.split.2x1.fill", .compare)

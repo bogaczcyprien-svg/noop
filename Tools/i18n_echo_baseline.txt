@@ -10,7 +10,7 @@ Packages/StrandDesign/Sources/StrandDesign/Resources/Localizable.xcstrings fr 1
 Packages/StrandDesign/Sources/StrandDesign/Resources/Localizable.xcstrings pt-PT 1
 Strand/Resources/Localizable.xcstrings de 16
 Strand/Resources/Localizable.xcstrings es 20
-Strand/Resources/Localizable.xcstrings fr 17
+Strand/Resources/Localizable.xcstrings fr 16
 Strand/Resources/Localizable.xcstrings it 16
 Strand/Resources/Localizable.xcstrings pl 17
 Strand/Resources/Localizable.xcstrings pt-PT 11

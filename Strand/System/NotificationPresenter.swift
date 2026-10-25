@@ -23,6 +23,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     /// root has wired it.
     var onCoachBriefTapped: (() -> Void)?
 
+    /// Posted when the bedtime breathing nudge is tapped; the iOS tab shell selects the Breathing tab.
+    static let openBreathingTab = Notification.Name("noop.openBreathingTab")
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -39,8 +42,14 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.notification.request.content.categoryIdentifier == CoachBriefScheduler.notificationCategoryId {
+        let category = response.notification.request.content.categoryIdentifier
+        if category == CoachBriefScheduler.notificationCategoryId {
             onCoachBriefTapped?()
+        }
+        // FORK-ONLY: the iOS bedtime breathing nudge (`BedtimeBreathingNudge.categoryId`, StrandiOS) opens
+        // the Breathing tab. Posted by name because this shared file cannot see the iOS-only type.
+        if category == "noop.breathing.bedtime" {
+            NotificationCenter.default.post(name: Self.openBreathingTab, object: nil)
         }
         completionHandler()
     }
