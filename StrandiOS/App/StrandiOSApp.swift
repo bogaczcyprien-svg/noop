@@ -197,6 +197,8 @@ struct StrandiOSApp: App {
             await TrendNotifier.shared.postIfDue()
             // Post-workout nutrition reminder (fork addition): off until enabled; no-ops otherwise.
             await WorkoutNutritionNotifier.shared.postIfDue()
+            // Bedtime breathing nudge (fork addition): 21:00-23:00 only, once per evening; no-ops otherwise.
+            await BedtimeBreathingNudge.shared.checkIfDue()
         }
         PushBackgroundScheduler.register()
         PushBackgroundScheduler.schedule()

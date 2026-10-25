@@ -177,6 +177,43 @@ public struct IntervalsICUClient {
         guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
     }
 
+    /// Uploads one activity file (FIT) as a new completed activity. Fork addition, one-way like
+    /// `putWellness`: used by the Breathing tab to post a session. intervals.icu checks a hash of the
+    /// file, so re-sending the same session never makes a duplicate. Returns the new activity id when
+    /// the response names one. Endpoint: POST /athlete/{id}/activities, multipart field `file`, with
+    /// `name` / `description` as query parameters (intervals.icu API cookbook).
+    @discardableResult
+    public func uploadActivity(fit: Data, filename: String, name: String, description: String) async throws -> String? {
+        var components = URLComponents(string: "https://intervals.icu/api/v1/athlete/\(athleteId)/activities")
+        components?.queryItems = [
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "description", value: description),
+        ]
+        guard let url = components?.url else { throw IntervalsICUError.invalidURL }
+
+        let boundary = "noop-\(UUID().uuidString)"
+        var body = Data()
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8))
+        body.append(Data("Content-Type: application/octet-stream\r\n\r\n".utf8))
+        body.append(fit)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let credentials = Data("API_KEY:\(apiKey)".utf8).base64EncodedString()
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw IntervalsICUError.http(0) }
+        guard (200...299).contains(http.statusCode) else { throw IntervalsICUError.http(http.statusCode) }
+        struct Created: Decodable { let id: String? }
+        return (try? JSONDecoder().decode([Created].self, from: data))?.first?.id
+    }
+
     public enum TestConnectionResult {
         case success(Int)
         case failure(String)
