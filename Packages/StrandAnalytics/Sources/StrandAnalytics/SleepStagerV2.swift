@@ -633,13 +633,22 @@ public enum SleepStagerV2 {
         return cut
     }
 
+    /// Run length, in seconds, the DISPLAYED onset asks of `refinedOnsetTs`: the first 10 minutes of
+    /// uninterrupted sleep (latency to persistent sleep), not the 5 minutes `onsetSustainedEpochs` uses
+    /// inside the recipe. A wearer reported onset shown 30 minutes early: lying still awake, the night
+    /// opened on an 8-minute still stretch the recipe scored light, then 6 minutes clearly awake (moving,
+    /// HR up 20 bpm), then the real onset; the 5-minute rule took the first stretch. Measured on PSG
+    /// (Tools/SleepPSG section 8, sleep-accel, n = 31): bias −6.5 → −5.2 min, MAE 8.1 → 7.9 min, nights
+    /// >10 min early 8 → 7, none >10 min late either way. 15 minutes gains only 0.4 min of bias more.
+    static let displayedOnsetSustainedSeconds = 600
+
     /// The SAME sustained-non-wake rule as `sustainedSleepOnset`, applied to a session's final, already
     /// MERGED `[StageSegment]` (what actually gets persisted/displayed) instead of the raw per-epoch label
     /// array — so it works regardless of which recipe staged the session, and reads real timestamps
     /// directly rather than re-deriving epoch indices. `sustainedSeconds` defaults to the SAME 5 minutes
     /// `onsetSustainedEpochs` (10 x 30s) encodes, measured against human-scored PSG (bias −3.8 min, MAE
-    /// 7.4 min — see that constant's own doc comment); kept as a parameter only so a caller can widen it
-    /// for an unusually noisy stream, never to second-guess the validated figure by default.
+    /// 7.4 min — see that constant's own doc comment); the displayed onset in `AnalyticsEngine` widens it
+    /// to `displayedOnsetSustainedSeconds`.
     ///
     /// Fork addition (#onset-v2-refine): `detectSleep`'s own window-finding (`onsetAndFinalWake`, V1,
     /// motion + a bare HR-margin threshold) sets the DETECTED window `[start, end]` that both V1 and V2

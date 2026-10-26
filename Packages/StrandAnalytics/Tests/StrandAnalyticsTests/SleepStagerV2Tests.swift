@@ -278,6 +278,26 @@ final class SleepStagerV2Tests: XCTestCase {
             [StageSegment(start: 0, end: 600, stage: "wake")]), "an all-wake window has no onset to refine")
     }
 
+    /// The reported night, as the recipe staged it (window opening 23:04): an 8-minute still stretch
+    /// scored light, 6.5 minutes clearly awake, a 9-minute light stretch, 2.5 minutes awake, then sleep
+    /// for good. The 5-minute rule shows the first stretch; the displayed 10-minute rule shows the start
+    /// of the sleep that lasted, 26 minutes later.
+    func testDisplayedOnsetSkipsShortStillStretchesBrokenByWake() {
+        let night: [StageSegment] = [
+            StageSegment(start: 0, end: 286, stage: "wake"),
+            StageSegment(start: 286, end: 766, stage: "light"),        // 8 min
+            StageSegment(start: 766, end: 1_156, stage: "wake"),       // 6.5 min awake
+            StageSegment(start: 1_156, end: 1_696, stage: "light"),    // 9 min
+            StageSegment(start: 1_696, end: 1_846, stage: "wake"),     // 2.5 min awake
+            StageSegment(start: 1_846, end: 2_476, stage: "light"),
+            StageSegment(start: 2_476, end: 3_316, stage: "deep"),
+        ]
+        XCTAssertEqual(SleepStagerV2.refinedOnsetTs(night), 286)
+        XCTAssertEqual(SleepStagerV2.refinedOnsetTs(
+            night, sustainedSeconds: SleepStagerV2.displayedOnsetSustainedSeconds), 1_846)
+        XCTAssertEqual(SleepStagerV2.displayedOnsetSustainedSeconds, 600)
+    }
+
     /// End-to-end: the same physiological night truncated to a shorter in-bed window must not shift where the
     /// REM guard stops applying. Both windows start at the same instant and share byte-identical streams, so
     /// any difference in the first ~60 min of the hypnogram would be the session-length dependence #930 is

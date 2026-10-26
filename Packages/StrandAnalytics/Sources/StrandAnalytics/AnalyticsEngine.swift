@@ -1137,7 +1137,8 @@ public enum AnalyticsEngine {
             // skipped (`useSleepStagerV2` false): V1 already FORCES its own onset index to "wake" before
             // this point, so re-deriving from its stages would at best reproduce the same timestamp.
             // Not upstreamed, not ported to the Android twin.
-            let refinedOnset = useSleepStagerV2 ? SleepStagerV2.refinedOnsetTs(s.stages) : nil
+            let refinedOnset = useSleepStagerV2
+                ? SleepStagerV2.refinedOnsetTs(s.stages, sustainedSeconds: SleepStagerV2.displayedOnsetSustainedSeconds) : nil
             return CachedSleepSession(
                 startTs: s.start, endTs: s.end,
                 efficiency: s.efficiency,
