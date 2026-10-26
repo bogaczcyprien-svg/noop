@@ -370,6 +370,11 @@ final class BreathingSessionModel: ObservableObject {
                                   completedFully: completed)
         }
         summary = s
+        BreathingHistoryStore.append(.init(
+            ts: Int(startDate.timeIntervalSince1970), exerciseId: exercise.id, guidedSeconds: s.guided.seconds,
+            avgCoherence: s.guided.avgCoherence, avgHR: s.guided.avgHR,
+            freeAvgHR: s.free.seconds > 0 ? s.free.avgHR : nil, rmssd: s.guided.rmssd,
+            breathsPerMin: s.guided.avgBreathsPerMin))
         guard s.totalSeconds >= 60 else { return }
         Task { await post(summary: s, end: end) }
     }

@@ -183,7 +183,7 @@ final class BreathingSignalTests: XCTestCase {
         let moving = (0..<900).map { GravitySample(ts: now - $0, x: $0 % 2 == 0 ? 0.3 : -0.3, y: 0, z: 0.9) }
         XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(60, from: 900, to: 0),
                                                      grav: moving, restingHR: 52), .moving)
-        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(80, from: 900, to: 0),
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(90, from: 900, to: 0),
                                                      grav: still(minutes: 15), restingHR: 52), .heartRateHigh)
         XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(60, from: 900, to: 0),
                                                      grav: still(minutes: 5), restingHR: 52), .notEnoughData)
@@ -196,6 +196,38 @@ final class BreathingSignalTests: XCTestCase {
         let flat = hr(70, from: 900, to: 0)
         XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: flat,
                                                      grav: still(minutes: 15), restingHR: nil), .heartRateHigh)
+    }
+
+    private func band(_ state: Int, from: Int, to: Int) -> [(ts: Int, state: Int)] {
+        stride(from: now - from, to: now - to, by: 1).map { (ts: $0, state: state) }
+    }
+
+    /// The reported evening: lying awake at 68–70 bpm, asleep at 57–61, resting about 50. Lying awake
+    /// nudges; a heart already at sleep level does not, so a nudge never lands on a sleeper.
+    func testLyingAwakeNudgesAndSleepLevelHeartRateDoesNot() {
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(69, from: 900, to: 0),
+                                                     grav: still(minutes: 15), restingHR: 50), .nudge)
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(53, from: 900, to: 0),
+                                                     grav: still(minutes: 15), restingHR: 50), .asleep)
+    }
+
+    /// The strap's own band state decides when it is there: "asleep" in the last 5 minutes blocks the
+    /// nudge whatever the heart rate, and mostly "still" nudges even with a heart already low.
+    func testBandStateDecidesAwakeVersusAsleep() {
+        let asleepNow = band(1, from: 600, to: 120) + band(2, from: 120, to: 0)
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(69, from: 900, to: 0),
+                                                     grav: still(minutes: 15), restingHR: 50, bandStates: asleepNow), .asleep)
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(53, from: 900, to: 0),
+                                                     grav: still(minutes: 15), restingHR: 50,
+                                                     bandStates: band(1, from: 600, to: 0)), .nudge)
+        // Band "wake" (0) while still: falls back to the heart rate.
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(69, from: 900, to: 0),
+                                                     grav: still(minutes: 15), restingHR: 50,
+                                                     bandStates: band(0, from: 600, to: 0)), .nudge)
+        // Moving still wins over any band state.
+        let moving = (0..<900).map { GravitySample(ts: now - $0, x: $0 % 2 == 0 ? 0.3 : -0.3, y: 0, z: 0.9) }
+        XCTAssertEqual(BedtimeBreathingGate.evaluate(now: now, localMinuteOfDay: 22 * 60, hr: hr(69, from: 900, to: 0),
+                                                     grav: moving, restingHR: 50, bandStates: band(1, from: 600, to: 0)), .moving)
     }
 }
 
