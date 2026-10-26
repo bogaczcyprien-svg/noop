@@ -51,6 +51,10 @@ final class BreathingSessionModel: ObservableObject {
         var source: String = ""
         /// Training drills only: the level before and after this session.
         var progression: Progression?
+        /// Internal body temperature (CORE), °C: first and last reading of the session, and the highest.
+        var coreStartC: Double?
+        var coreEndC: Double?
+        var coreMaxC: Double?
     }
 
     struct Progression: Equatable {
@@ -74,11 +78,14 @@ final class BreathingSessionModel: ObservableObject {
     @Published private(set) var breathsPerMin: Double?
     @Published private(set) var coherence: Double?
     @Published private(set) var rmssd: Double?
+    /// Internal body temperature from the CORE sensor, °C, when one is connected.
+    @Published private(set) var coreTempC: Double?
     @Published private(set) var holdsSeconds: [Int] = []
     @Published private(set) var summary: Summary?
     @Published private(set) var upload: Upload = .notConfigured
 
     private let strap: BreathingStrapLink
+    private let core: CoreTempLink
     private let live: LiveState
     private var startDate = Date()
     private var partStart = Date()
@@ -99,10 +106,11 @@ final class BreathingSessionModel: ObservableObject {
     private static let recoveryStages = [BreathStage(type: .inhale, durationMs: 4_000),
                                          BreathStage(type: .exhale, durationMs: 6_000)]
 
-    init(exercise: BreathingExercise, freeSeconds: Int, strap: BreathingStrapLink, live: LiveState) {
+    init(exercise: BreathingExercise, freeSeconds: Int, strap: BreathingStrapLink, core: CoreTempLink, live: LiveState) {
         self.exercise = exercise
         self.freeSeconds = max(0, freeSeconds)
         self.strap = strap
+        self.core = core
         self.live = live
         self.guidedProtocol = exercise.asProtocol(resonanceBpm: BiofeedbackPrefs.lockedPace)
     }
@@ -230,12 +238,13 @@ final class BreathingSessionModel: ObservableObject {
         partElapsed = Int(now.timeIntervalSince(partStart))
         takeStrapBeats()
         heartRate = strap.isConnected ? strap.heartRate : live.heartRate
+        coreTempC = core.currentCoreC(now: now)
 
         if totalElapsed % 5 == 0 { refreshReadings(now: now.timeIntervalSince1970) }
         let guided = part != .free
         var bpm = breathsPerMin
         if case .hold = part { bpm = nil } else if bpm == nil, guided { bpm = guidedPaceNow }
-        samples.append(.init(ts: Int(now.timeIntervalSince1970), hr: heartRate, breathsPerMin: bpm))
+        samples.append(.init(ts: Int(now.timeIntervalSince1970), hr: heartRate, breathsPerMin: bpm, coreTempC: coreTempC))
         sampleIsGuided.append(guided)
 
         switch part {
@@ -339,6 +348,10 @@ final class BreathingSessionModel: ObservableObject {
         var s = Summary()
         s.totalSeconds = Int(end.timeIntervalSince(startDate))
         s.holdsSeconds = holdsSeconds
+        let cores = samples.compactMap(\.coreTempC)
+        s.coreStartC = cores.first
+        s.coreEndC = cores.last
+        s.coreMaxC = cores.max()
         s.source = strap.isConnected ? (strap.strapName ?? String(localized: "Chest strap")) : "WHOOP"
         let guidedFrom = guidedStart?.timeIntervalSince1970 ?? end.timeIntervalSince1970
         s.free = stats(guided: false, beatsFrom: startDate.timeIntervalSince1970, to: guidedFrom)
@@ -434,6 +447,7 @@ enum BreathingSessionText {
         if let p = s.progression {
             lines.append(String(localized: "Level \(p.levelBefore)"))
         }
+        if let line = coreLine(s) { lines.append(line) }
         if let bpm = s.resonanceBpm {
             let pace = String(format: "%.1f", bpm)
             lines.append(s.resonanceLocked
@@ -443,6 +457,12 @@ enum BreathingSessionText {
         lines.append(String(localized: "Breathing rate is read from the heartbeat (RSA); during guided breathing, the guided pace fills gaps."))
         lines.append("NOOP")
         return lines.joined(separator: "\n")
+    }
+
+    /// "Core temperature: 36.9 °C at the start, 37.1 °C at the end", or nil without a CORE reading.
+    static func coreLine(_ s: BreathingSessionModel.Summary) -> String? {
+        guard let a = s.coreStartC, let b = s.coreEndC else { return nil }
+        return String(localized: "Core temperature: \(String(format: "%.1f", a)) °C at the start, \(String(format: "%.1f", b)) °C at the end")
     }
 
     static func partLine(_ name: String, _ p: BreathingSessionModel.PartStats) -> String {
