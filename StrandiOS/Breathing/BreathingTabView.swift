@@ -178,6 +178,12 @@ struct BreathingTabView: View {
                     } else if history.count < 2 * BreathingHistory.trendWindow {
                         Text("The trend shows after \(2 * BreathingHistory.trendWindow) sessions.")
                             .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - CORE
 
     private var coreCard: some View {
@@ -221,6 +227,8 @@ struct BreathingTabView: View {
     private func signed(_ v: Double) -> String {
         let r = Int(v.rounded())
         return r > 0 ? "+\(r)" : r < 0 ? "−\(-r)" : "0"
+    }
+
     private var coreTitle: String {
         switch core.state {
         case .connected:
