@@ -6,7 +6,7 @@ import WhoopProtocol
 import StrandAnalytics
 
 /// Evening breathing nudge (fork addition): between 21:00 and 23:00, when the WHOOP's latest data shows
-/// the wearer still and with a heart rate near resting (`BedtimeBreathingGate`), post one local
+/// the wearer lying still and not yet asleep (`BedtimeBreathingGate`), post one local
 /// notification suggesting a coherence session. At most once per evening, and not after a breathing
 /// session already done that evening.
 ///
@@ -67,13 +67,16 @@ final class BedtimeBreathingNudge {
             .filter { $0.brand.caseInsensitiveCompare("WHOOP") == .orderedSame }.map(\.id)
         var hr: [HRSample] = []
         var grav: [GravitySample] = []
+        var band: [(ts: Int, state: Int)] = []
         for id in Set(paired + [Repository.whoopSource]) {
             hr += (try? await store.hrSamples(deviceId: id, from: from, to: nowTs, limit: 5_000)) ?? []
             grav += (try? await store.gravitySamples(deviceId: id, from: from, to: nowTs, limit: 20_000)) ?? []
+            band += ((try? await store.sleepStateSamples(deviceId: id, from: from, to: nowTs, limit: 5_000)) ?? [])
+                .map { (ts: $0.ts, state: $0.state) }
         }
         let resting = await restingHR(store: store, now: now)
         guard BedtimeBreathingGate.evaluate(now: nowTs, localMinuteOfDay: minute, hr: hr, grav: grav,
-                                            restingHR: resting) == .nudge else { return }
+                                            restingHR: resting, bandStates: band) == .nudge else { return }
 
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional

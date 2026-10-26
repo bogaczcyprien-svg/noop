@@ -17,6 +17,7 @@ struct BreathingTabView: View {
     @State private var detail: BreathingExercise?
     @State private var session: SessionHandle?
     @State private var showStrapPicker = false
+    @State private var history: [BreathingHistory.Entry] = []
 
     struct SessionHandle: Identifiable {
         let id = UUID()
@@ -31,6 +32,7 @@ struct BreathingTabView: View {
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 strapCard
+                progressCard
                 freeBreathingCard
                 exercisesSection
                 moreTechniquesLink
@@ -44,6 +46,7 @@ struct BreathingTabView: View {
         }
         .onAppear {
             strap.reconnectLast()
+            history = BreathingHistoryStore.load()
             if nudgeOn { BedtimeBreathingNudge.shared.requestPermissionIfNeeded() }
         }
         .sheet(isPresented: $showStrapPicker, onDismiss: { strap.stopScan() }) {
@@ -56,7 +59,10 @@ struct BreathingTabView: View {
             }
         }
         .fullScreenCover(item: $session) { handle in
-            BreathingSessionView(model: handle.model) { session = nil }
+            BreathingSessionView(model: handle.model) {
+                session = nil
+                history = BreathingHistoryStore.load()
+            }
         }
     }
 
@@ -120,6 +126,57 @@ struct BreathingTabView: View {
         strap.isConnected
             ? String(localized: "Beat-to-beat data: breathing rate, HRV and coherence are measured live.")
             : String(localized: "Without a strap, the WHOOP's heart rate is used; it is less precise beat to beat.")
+    }
+
+    // MARK: - Progress
+
+    private var progressCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("Your progress").strandOverline()
+                if history.isEmpty {
+                    Text("Do a few sessions to see your progress here.")
+                        .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: NoopMetrics.gap) {
+                        StatTile(label: "Last 7 days", value: "\(BreathingHistory.sessionsLast7Days(history, now: Date()))",
+                                 caption: String(localized: "sessions"))
+                        StatTile(label: "Streak",
+                                 value: "\(BreathingHistory.streakDays(history, now: Date(), calendar: .current))",
+                                 caption: String(localized: "days"))
+                    }
+                    let points = history.suffix(30).compactMap { e in
+                        e.avgCoherence.map { TrendPoint(date: Date(timeIntervalSince1970: TimeInterval(e.ts)), value: $0) }
+                    }
+                    if points.count >= 2 {
+                        Text("Coherence per session").font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
+                        TrendChart(points: points, gradient: StrandPalette.recoveryGradient, valueRange: 0...100,
+                                   height: 140, accessibilityLabel: String(localized: "Coherence per session"))
+                    }
+                    if let t = BreathingHistory.trend(history, { $0.avgCoherence }) {
+                        progressLine(String(localized: "Coherence, last 7 sessions: \(Int(t.recent.rounded()))/100 (\(signed(t.recent - t.previous)) vs the 7 before)."))
+                    }
+                    if let t = BreathingHistory.trend(history, { $0.hrChange }) {
+                        progressLine(String(localized: "Heart rate during the exercise, last 7 sessions: \(signed(t.recent)) bpm vs free breathing (the 7 before: \(signed(t.previous)))."))
+                    } else if history.count < 2 * BreathingHistory.trendWindow {
+                        Text("The trend shows after \(2 * BreathingHistory.trendWindow) sessions.")
+                            .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func progressLine(_ text: String) -> some View {
+        Text(verbatim: text).font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// "+8" / "−3" / "0", whole numbers.
+    private func signed(_ v: Double) -> String {
+        let r = Int(v.rounded())
+        return r > 0 ? "+\(r)" : r < 0 ? "−\(-r)" : "0"
     }
 
     // MARK: - Free breathing
@@ -202,7 +259,7 @@ struct BreathingTabView: View {
             })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Bedtime reminder").font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
-                    Text("Between 9 and 11 pm, when the WHOOP sees you still and calm, a notification suggests cardiac coherence.")
+                    Text("Between 9 and 11 pm, when the WHOOP sees you lying still and not yet asleep, a notification suggests cardiac coherence.")
                         .font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
