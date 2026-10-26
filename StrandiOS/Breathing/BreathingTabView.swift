@@ -156,7 +156,7 @@ struct BreathingTabView: View {
                     }
                     Spacer()
                     if let c = core.currentCoreC() {
-                        Text(verbatim: String(format: "%.1f°", c))
+                        Text(c.formatted(.number.precision(.fractionLength(1))))
                             .font(StrandFont.number(28)).foregroundStyle(StrandPalette.textPrimary)
                     }
                 }
