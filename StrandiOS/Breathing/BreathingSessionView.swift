@@ -113,11 +113,22 @@ struct BreathingSessionView: View {
     }
 
     private var readings: some View {
-        HStack(spacing: NoopMetrics.gap) {
-            StatTile(label: "Heart rate", value: model.heartRate.map { "\($0)" } ?? "—", caption: "bpm")
-            StatTile(label: "Breathing", value: model.breathsPerMin.map { String(format: "%.1f", $0) } ?? "—",
-                     caption: String(localized: "/min"))
-            StatTile(label: "Coherence", value: model.coherence.map { "\(Int($0.rounded()))" } ?? "—", caption: "/100")
+        VStack(spacing: NoopMetrics.gap) {
+            HStack(spacing: NoopMetrics.gap) {
+                StatTile(label: "Heart rate", value: model.heartRate.map { "\($0)" } ?? "—", caption: "bpm")
+                StatTile(label: "Breathing", value: model.breathsPerMin.map { String(format: "%.1f", $0) } ?? "—",
+                         caption: String(localized: "/min"))
+                StatTile(label: "Coherence", value: model.coherence.map { "\(Int($0.rounded()))" } ?? "—", caption: "/100")
+            }
+            if let c = model.coreTempC {
+                Label {
+                    Text("Core temperature \(String(format: "%.1f", c)) °C")
+                } icon: {
+                    Image(systemName: "thermometer.medium")
+                }
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            }
         }
     }
 
@@ -157,6 +168,16 @@ struct BreathingSessionView: View {
                         Text("Breath holds").strandOverline()
                         Text(s.holdsSeconds.map(clock).joined(separator: " · "))
                             .font(StrandFont.bodyNumber).foregroundStyle(StrandPalette.textPrimary)
+                    }
+                }
+                if let a = s.coreStartC, let b = s.coreEndC {
+                    VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                        Text("Core temperature").strandOverline()
+                        HStack(spacing: NoopMetrics.gap) {
+                            StatTile(label: "Session start", value: String(format: "%.1f", a), caption: "°C")
+                            StatTile(label: "Session end", value: String(format: "%.1f", b), caption: "°C")
+                            StatTile(label: "Highest", value: s.coreMaxC.map { String(format: "%.1f", $0) } ?? "—", caption: "°C")
+                        }
                     }
                 }
                 if let bpm = s.resonanceBpm {

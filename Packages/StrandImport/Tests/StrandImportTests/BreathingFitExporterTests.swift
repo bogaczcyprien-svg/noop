@@ -50,4 +50,34 @@ final class BreathingFitExporterTests: XCTestCase {
         XCTAssertEqual(bytes[second + 5], 61)
         XCTAssertEqual(Array(bytes[(second + 6)...(second + 7)]), [0x71, 0x02])
     }
+
+    /// With a CORE sensor, record field 139 carries the internal temperature (°C × 100); a second
+    /// without a reading is the invalid value, and the file still decodes.
+    func testCoreTemperatureIsEncodedPerSecond() throws {
+        let samples: [BreathingFitExporter.Sample] = [
+            .init(ts: start, hr: 60, breathsPerMin: 6.0, coreTempC: 37.12),
+            .init(ts: start + 1, hr: 61, breathsPerMin: 6.0, coreTempC: nil),
+            .init(ts: start + 2, hr: 62, breathsPerMin: 6.0, coreTempC: 37.20),
+        ]
+        let data = BreathingFitExporter.build(samples: samples, rrMs: [], startTs: start, endTs: start + 3)
+        let bytes = [UInt8](data)
+        // Record definition: 6 + 4 fields × 3 = 18 bytes; the field list ends with (139, 2, 0x84).
+        let recordDef = 12 + 23
+        XCTAssertEqual(bytes[recordDef + 5], 4)
+        XCTAssertEqual(Array(bytes[(recordDef + 15)...(recordDef + 17)]), [139, 2, 0x84])
+        let first = recordDef + 18
+        // header(1) ts(4) hr(1) resp(2) core(2): 3712 = 0x0E80.
+        XCTAssertEqual(Array(bytes[(first + 8)...(first + 9)]), [0x80, 0x0E])
+        let second = first + 10
+        XCTAssertEqual(Array(bytes[(second + 8)...(second + 9)]), [0xFF, 0xFF])
+        XCTAssertNotNil(ActivityFileImporter.parse(data: data, filename: "breathing.fit").activity)
+    }
+
+    func testImplausibleCoreTemperatureIsNotWritten() {
+        let withNoise = BreathingFitExporter.build(
+            samples: [.init(ts: start, hr: 60, breathsPerMin: nil, coreTempC: 0)], rrMs: [], startTs: start, endTs: start + 1)
+        let without = BreathingFitExporter.build(
+            samples: [.init(ts: start, hr: 60, breathsPerMin: nil)], rrMs: [], startTs: start, endTs: start + 1)
+        XCTAssertEqual(withNoise, without)
+    }
 }

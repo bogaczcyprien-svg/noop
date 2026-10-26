@@ -121,6 +121,10 @@ struct IntervalsICUActivitiesSection: View {
                     if let kcal = activity.energyKcal {
                         statPair("Calories", "\(Int(kcal.rounded())) kcal")
                     }
+                    if let core = CoreTempCache.summary(activity.startTs) {
+                        statPair(String(localized: "Core temp avg / max"),
+                                 String(format: "%.1f / %.1f °C", core.avgC, core.maxC))
+                    }
                     if let sub = substrateByTs[activity.startTs] {
                         statPair("Substrat", "\(Int(sub.fatPct.rounded()))% lipides / \(Int(sub.carbPct.rounded()))% glucides")
                     }

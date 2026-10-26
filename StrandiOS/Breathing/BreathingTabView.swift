@@ -9,6 +9,7 @@ import StrandAnalytics
 struct BreathingTabView: View {
     @EnvironmentObject private var live: LiveState
     @StateObject private var strap = BreathingStrapLink()
+    @StateObject private var core = CoreTempLink()
     @ObservedObject private var intervals = IntervalsICUSettings.shared
 
     @AppStorage("noop.breathing.freeMinutes") private var freeMinutes = 10
@@ -18,6 +19,7 @@ struct BreathingTabView: View {
     @State private var session: SessionHandle?
     @State private var showStrapPicker = false
     @State private var history: [BreathingHistory.Entry] = []
+    @State private var showCorePicker = false
 
     struct SessionHandle: Identifiable {
         let id = UUID()
@@ -32,6 +34,7 @@ struct BreathingTabView: View {
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 strapCard
+                coreCard
                 progressCard
                 freeBreathingCard
                 exercisesSection
@@ -47,10 +50,22 @@ struct BreathingTabView: View {
         .onAppear {
             strap.reconnectLast()
             history = BreathingHistoryStore.load()
+            core.reconnectLast()
             if nudgeOn { BedtimeBreathingNudge.shared.requestPermissionIfNeeded() }
         }
         .sheet(isPresented: $showStrapPicker, onDismiss: { strap.stopScan() }) {
-            StrapPickerSheet(strap: strap) { showStrapPicker = false }
+            SensorPickerSheet(title: "Choose a strap", found: strap.found,
+                              bluetoothOff: strap.state == .bluetoothOff,
+                              offHint: "Turn Bluetooth on to find your strap.",
+                              searchHint: "Put the strap on (wet the sensors) and keep the phone close.",
+                              onPick: { strap.connect($0) }) { showStrapPicker = false }
+        }
+        .sheet(isPresented: $showCorePicker, onDismiss: { core.stopScan() }) {
+            SensorPickerSheet(title: "Choose a CORE", found: core.found,
+                              bluetoothOff: core.state == .bluetoothOff,
+                              offHint: "Turn Bluetooth on to find your CORE.",
+                              searchHint: "Wear the CORE and close the CORE app, which can hold the sensor's only connection.",
+                              onPick: { core.connect($0) }) { showCorePicker = false }
         }
         .sheet(item: $detail) { ex in
             ExerciseDetailSheet(exercise: ex, freeMinutes: freeMinutes) {
@@ -67,7 +82,8 @@ struct BreathingTabView: View {
     }
 
     private func startSession(_ ex: BreathingExercise) {
-        let model = BreathingSessionModel(exercise: BreathingLevelStore.current(ex), freeSeconds: freeMinutes * 60, strap: strap, live: live)
+        let model = BreathingSessionModel(exercise: BreathingLevelStore.current(ex), freeSeconds: freeMinutes * 60,
+                                          strap: strap, core: core, live: live)
         session = SessionHandle(model: model)
         BedtimeBreathingNudge.shared.noteSessionDone()
         model.start()
@@ -162,6 +178,34 @@ struct BreathingTabView: View {
                     } else if history.count < 2 * BreathingHistory.trendWindow {
                         Text("The trend shows after \(2 * BreathingHistory.trendWindow) sessions.")
                             .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+    // MARK: - CORE
+
+    private var coreCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("CORE sensor").strandOverline()
+                HStack(alignment: .center, spacing: NoopMetrics.gap) {
+                    Image(systemName: "thermometer.medium")
+                        .font(StrandFont.title2)
+                        .foregroundStyle(core.isConnected ? StrandPalette.accent : StrandPalette.textTertiary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(coreTitle).font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                        Text("Internal body temperature, shown during the exercise and sent with the activity.")
+                            .font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if let c = core.currentCoreC() {
+                        Text(c.formatted(.number.precision(.fractionLength(1))))
+                            .font(StrandFont.number(28)).foregroundStyle(StrandPalette.textPrimary)
+                    }
+                }
+                if core.isConnected {
+                    NoopButton("Disconnect", systemImage: "xmark", kind: .secondary, fullWidth: true) { core.disconnect() }
+                } else {
+                    NoopButton("Find my CORE", systemImage: "dot.radiowaves.left.and.right", kind: .primary, fullWidth: true) {
+                        core.scan()
+                        showCorePicker = true
                     }
                 }
             }
@@ -177,6 +221,17 @@ struct BreathingTabView: View {
     private func signed(_ v: Double) -> String {
         let r = Int(v.rounded())
         return r > 0 ? "+\(r)" : r < 0 ? "−\(-r)" : "0"
+    private var coreTitle: String {
+        switch core.state {
+        case .connected:
+            return core.coreC == nil
+                ? String(localized: "Connected, waiting for a reading…")
+                : (core.sensorName ?? "CORE")
+        case .connecting: return String(localized: "Connecting…")
+        case .scanning: return String(localized: "Searching…")
+        case .bluetoothOff: return String(localized: "Bluetooth is off")
+        case .idle, .disconnected: return String(localized: "No CORE connected")
+        }
     }
 
     // MARK: - Free breathing
@@ -282,26 +337,30 @@ struct BreathingTabView: View {
     }
 }
 
-/// Scan results for the chest strap.
-private struct StrapPickerSheet: View {
-    @ObservedObject var strap: BreathingStrapLink
+/// Scan results for a Breathing-tab sensor (chest strap or CORE).
+private struct SensorPickerSheet: View {
+    let title: LocalizedStringKey
+    let found: [BreathingSensorFound]
+    let bluetoothOff: Bool
+    let offHint: LocalizedStringKey
+    let searchHint: LocalizedStringKey
+    let onPick: (UUID) -> Void
     let onDone: () -> Void
 
     var body: some View {
         NavigationStack {
             List {
-                if strap.state == .bluetoothOff {
-                    Text("Turn Bluetooth on to find your strap.").foregroundStyle(StrandPalette.textSecondary)
-                } else if strap.found.isEmpty {
+                if bluetoothOff {
+                    Text(offHint).foregroundStyle(StrandPalette.textSecondary)
+                } else if found.isEmpty {
                     HStack(spacing: NoopMetrics.gap) {
                         ProgressView()
-                        Text("Put the strap on (wet the sensors) and keep the phone close.")
-                            .foregroundStyle(StrandPalette.textSecondary)
+                        Text(searchHint).foregroundStyle(StrandPalette.textSecondary)
                     }
                 }
-                ForEach(strap.found) { s in
+                ForEach(found) { s in
                     Button {
-                        strap.connect(s.id)
+                        onPick(s.id)
                         onDone()
                     } label: {
                         HStack {
@@ -312,7 +371,7 @@ private struct StrapPickerSheet: View {
                     }
                 }
             }
-            .navigationTitle("Choose a strap")
+            .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onDone() } }
             }

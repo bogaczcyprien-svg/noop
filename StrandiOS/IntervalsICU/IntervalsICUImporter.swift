@@ -2,6 +2,7 @@
 import Foundation
 import GRDB
 import WhoopStore
+import StrandAnalytics
 
 /// Imports activities from intervals.icu into `WhoopStore.workout` (its own `intervals-icu` device
 /// partition, mirroring the `apple-health` import convention) AND backfills `hrSample` rows under the
@@ -35,6 +36,7 @@ public struct IntervalsICUImporter {
         let rows = activities.compactMap(toWorkoutRow)
         let count = try await store.upsertWorkouts(rows, deviceId: deviceId)
         await backfillHR(activities: activities, client: client, store: store)
+        await fetchCoreTemps(activities: activities, client: client)
         await deduplicateTimezoneArtifacts(store: store)
         return count
     }
@@ -112,6 +114,27 @@ public struct IntervalsICUImporter {
                 await insert(flatHRRows(startTs: startTs, duration: duration, bpm: Int(avgHr.rounded())),
                            store: store)
             }
+        }
+    }
+
+    /// The internal body temperature a CORE sensor recorded during each activity (the head unit writes
+    /// it into the FIT file and intervals.icu keeps it as the `core_temperature` stream). Asked for in
+    /// its own request, so an activity without the stream never costs the heart-rate backfill above;
+    /// an activity already checked is not asked again.
+    private static func fetchCoreTemps(activities: [IntervalsICUActivity], client: IntervalsICUClient) async {
+        for a in activities {
+            guard let startTs = startTs(a), !CoreTempCache.isChecked(startTs) else { continue }
+            let streams: [IntervalsICUStream]
+            do {
+                streams = try await client.streams(activityId: a.id, types: ["core_temperature"])
+            } catch IntervalsICUError.http(404) {
+                CoreTempCache.save(nil, startTs: startTs)   // no such stream for this activity
+                continue
+            } catch {
+                continue   // network or server error: try again on the next import
+            }
+            let values = streams.first(where: { $0.type == "core_temperature" })?.data ?? []
+            CoreTempCache.save(CoreTempStats.summary(values), startTs: startTs)
         }
     }
 
