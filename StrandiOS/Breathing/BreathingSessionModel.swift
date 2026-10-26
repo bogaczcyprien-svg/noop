@@ -277,7 +277,10 @@ final class BreathingSessionModel: ObservableObject {
     }
 
     private func refreshReadings(now: Double) {
-        let window = beats.filter { $0.ts > now - 64 }.map { Double($0.rrMs) }
+        // The last 64 s, but never reaching back past the start of the guided part: a window that still
+        // holds free-breathing beats would score the free part as the exercise.
+        let from = max(now - 64, part == .free ? 0 : guidedStart?.timeIntervalSince1970 ?? 0)
+        let window = beats.filter { $0.ts > from }.map { Double($0.rrMs) }
         breathsPerMin = BreathingSignal.breathsPerMinute(rrMs: window)
         coherence = BreathingSignal.coherence(rrMs: window)
         rmssd = HRVAnalyzer.rmssdRaw(HRVAnalyzer.cleanRR(window))
