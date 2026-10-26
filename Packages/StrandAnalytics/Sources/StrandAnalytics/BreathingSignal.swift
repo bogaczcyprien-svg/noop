@@ -13,6 +13,10 @@ import Foundation
 // Coherence follows the published HeartMath definition in spirit: the share of the HRV spectrum
 // concentrated in one narrow peak in the 0.04–0.26 Hz range. A slow, regular breath near 6 per minute
 // produces one tall peak (high coherence); irregular breathing spreads the power (low coherence).
+// Unlike HeartMath, the total leaves out the very-low-frequency band (below 0.04 Hz): a 64 s window
+// holds under three cycles of it, so what lands there is slow drift in heart rate (posture, settling),
+// not breathing. Counted in, that drift cut a well-paced breath to about 55–60 while leaving irregular
+// breathing where it was; left out, paced breathing reads about 85 and irregular breathing unchanged.
 
 public enum BreathingSignal {
 
@@ -24,12 +28,12 @@ public enum BreathingSignal {
     public static let minBeats = 20
     /// Respiratory search band, Hz (3 to 30 breaths per minute).
     public static let respBandHz: ClosedRange<Double> = 0.05...0.5
+    /// Lowest frequency of the computed spectrum, Hz.
+    public static let spectrumLowHz = 0.0033
     /// Coherence peak search band and total band, Hz.
     public static let coherencePeakBandHz: ClosedRange<Double> = 0.04...0.26
-    public static let coherenceTotalBandHz: ClosedRange<Double> = 0.0033...0.4
-    /// Narrowest half-width of the coherence peak window, Hz. The window widens to the Hann main lobe
-    /// (2 / span) on short spans, so a perfectly regular breath scores near 100 instead of losing the
-    /// lobe's shoulders: on a 64 s window the lobe is ±0.031 Hz, twice this floor.
+    public static let coherenceTotalBandHz: ClosedRange<Double> = 0.04...0.4
+    /// Half-width of the coherence peak window, Hz.
     public static let coherencePeakHalfWidthHz = 0.015
     /// Frequency grid step, Hz.
     public static let gridStepHz = 0.0025
@@ -38,8 +42,6 @@ public enum BreathingSignal {
     public struct Spectrum: Equatable, Sendable {
         public let freqs: [Double]
         public let power: [Double]
-        /// Length of the resampled tachogram, seconds: it sets how wide a pure tone's peak is.
-        public let spanSeconds: Double
     }
 
     /// The spectrum of a run of consecutive R-R intervals (ms), or nil when there are too few beats.
@@ -84,7 +86,7 @@ public enum BreathingSignal {
         // Direct DFT on a fine grid; n is a few hundred, so this is cheap.
         var freqs: [Double] = []
         var power: [Double] = []
-        var f = coherenceTotalBandHz.lowerBound
+        var f = spectrumLowHz
         let top = max(respBandHz.upperBound, coherenceTotalBandHz.upperBound)
         while f <= top + 1e-12 {
             var re = 0.0, im = 0.0
@@ -97,7 +99,7 @@ public enum BreathingSignal {
             power.append((re * re + im * im) / Double(n))
             f += gridStepHz
         }
-        return Spectrum(freqs: freqs, power: power, spanSeconds: Double(n) * dt)
+        return Spectrum(freqs: freqs, power: power)
     }
 
     /// Breathing rate in breaths per minute from the respiratory peak of the R-R spectrum, or nil.
@@ -106,25 +108,17 @@ public enum BreathingSignal {
         return hz * 60.0
     }
 
-    /// Coherence score, 0–100: the share of 0.0033–0.4 Hz power within the peak window (see
-    /// `peakHalfWidthHz`) around the tallest peak in 0.04–0.26 Hz. nil when there are too few beats.
+    /// Coherence score, 0–100: the share of 0.04–0.4 Hz power within ±0.015 Hz of the tallest peak in
+    /// 0.04–0.26 Hz. nil when there are too few beats.
     public static func coherence(rrMs: [Double]) -> Double? {
         guard let s = spectrum(rrMs: rrMs), let hz = peakHz(s, in: coherencePeakBandHz) else { return nil }
-        let halfWidth = peakHalfWidthHz(spanSeconds: s.spanSeconds)
         var peak = 0.0, total = 0.0
         for (f, p) in zip(s.freqs, s.power) {
             if coherenceTotalBandHz.contains(f) { total += p }
-            if abs(f - hz) <= halfWidth { peak += p }
+            if abs(f - hz) <= coherencePeakHalfWidthHz { peak += p }
         }
         guard total > 0 else { return nil }
         return min(100.0, 100.0 * peak / total)
-    }
-
-    /// Half-width of the coherence peak window for a tachogram `spanSeconds` long: the Hann main lobe,
-    /// never narrower than `coherencePeakHalfWidthHz`.
-    public static func peakHalfWidthHz(spanSeconds: Double) -> Double {
-        guard spanSeconds > 0 else { return coherencePeakHalfWidthHz }
-        return max(coherencePeakHalfWidthHz, 2.0 / spanSeconds)
     }
 
     /// The grid frequency of the tallest peak inside `band`, refined by a parabola through its two

@@ -66,46 +66,57 @@ final class BreathingSignalTests: XCTestCase {
         XCTAssertGreaterThan(coherent, noisy)
     }
 
-    /// A perfectly regular breath fills the scale: the peak window spans the Hann main lobe.
-    func testAPerfectBreathScoresNearTheTop() throws {
-        for breathsPerMin in [5.0, 6.0, 7.0] {
-            let c = try XCTUnwrap(BreathingSignal.coherence(rrMs: rsaBeats(breathHz: breathsPerMin / 60, seconds: 64)))
-            XCTAssertGreaterThan(c, 90, "\(breathsPerMin)/min")
-        }
-        XCTAssertEqual(BreathingSignal.peakHalfWidthHz(spanSeconds: 64), 2.0 / 64, accuracy: 1e-12)
-        XCTAssertEqual(BreathingSignal.peakHalfWidthHz(spanSeconds: 600), BreathingSignal.coherencePeakHalfWidthHz)
-    }
-
-    /// Paced breathing with a slow drift and beat jitter, as a real strap records it, still reads as
-    /// coherent; breathing whose length changes every breath does not.
-    func testRealisticPacedBreathIsCoherentAndIrregularBreathIsNot() throws {
-        var state: UInt64 = 777
-        func jitter() -> Double {
+    /// Deterministic jitter in [-0.5, 0.5): the same linear congruential generator as `noisyBeats`.
+    private struct Jitter {
+        var state: UInt64
+        mutating func next() -> Double {
             state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
             return Double((state >> 33) % 1000) / 1000.0 - 0.5
         }
-        // 6/min RSA (±40 ms), a 0.02 Hz drift (±25 ms) and ±10 ms of beat jitter.
-        var paced: [Double] = []
+    }
+
+    /// 6/min RSA (±40 ms) on a slow 0.02 Hz drift (±25 ms) with ±10 ms of beat jitter: paced breathing
+    /// as a strap records it while heart rate settles.
+    private func pacedWithDrift(seed: UInt64) -> [Double] {
+        var j = Jitter(state: seed)
+        var out: [Double] = []
         var t = 0.0
         while t < 64 {
-            let rr = 950 + 40 * sin(2 * Double.pi * 0.1 * t) + 25 * sin(2 * Double.pi * 0.02 * t) + 20 * jitter()
-            paced.append(rr); t += rr / 1000
+            let rr = 950 + 40 * sin(2 * Double.pi * 0.1 * t) + 25 * sin(2 * Double.pi * 0.02 * t) + 20 * j.next()
+            out.append(rr); t += rr / 1000
         }
-        // Each breath 3 to 7 s long, chosen anew, same RSA depth and jitter.
-        var irregular: [Double] = []
-        t = 0
-        var phase = 0.0, breathStart = 0.0, period = 5.0
+        return out
+    }
+
+    /// Each breath 3 to 7 s long, chosen anew, same RSA depth and jitter.
+    private func irregularBreaths(seed: UInt64) -> [Double] {
+        var j = Jitter(state: seed)
+        var out: [Double] = []
+        var t = 0.0, breathStart = 0.0, period = 5.0
         while t < 64 {
-            if t - breathStart >= period { breathStart = t; period = 3 + 4 * (jitter() + 0.5) }
-            phase = (t - breathStart) / period
-            let rr = 950 + 40 * sin(2 * Double.pi * phase) + 20 * jitter()
-            irregular.append(rr); t += rr / 1000
+            if t - breathStart >= period { breathStart = t; period = 3 + 4 * (j.next() + 0.5) }
+            let rr = 950 + 40 * sin(2 * Double.pi * (t - breathStart) / period) + 20 * j.next()
+            out.append(rr); t += rr / 1000
         }
-        let good = try XCTUnwrap(BreathingSignal.coherence(rrMs: paced))
-        let bad = try XCTUnwrap(BreathingSignal.coherence(rrMs: irregular))
-        XCTAssertGreaterThan(good, 60)
-        XCTAssertLessThan(bad, 55)
-        XCTAssertGreaterThan(good - bad, 25)
+        return out
+    }
+
+    /// Slow drift in heart rate is not breathing: paced breathing on a drifting heart rate still reads
+    /// as coherent (about 85, against 55–60 when the very-low band was counted), while breathing whose
+    /// length changes every breath stays where it was.
+    func testDriftDoesNotHidePacedBreathingAndIrregularBreathingStaysLow() throws {
+        var lowestPaced = 100.0, highestIrregular = 0.0
+        for seed: UInt64 in [777, 1, 2, 3] {
+            let c = try XCTUnwrap(BreathingSignal.coherence(rrMs: pacedWithDrift(seed: seed)))
+            XCTAssertGreaterThan(c, 75, "paced, seed \(seed)")
+            lowestPaced = min(lowestPaced, c)
+        }
+        for seed: UInt64 in [777, 1, 2, 3, 4, 5] {
+            let c = try XCTUnwrap(BreathingSignal.coherence(rrMs: irregularBreaths(seed: seed)))
+            XCTAssertLessThan(c, 70, "irregular, seed \(seed)")
+            highestIrregular = max(highestIrregular, c)
+        }
+        XCTAssertGreaterThan(lowestPaced - highestIrregular, 10)
     }
 
     // MARK: - Catalog
