@@ -3,6 +3,13 @@ import Foundation
 import Combine
 import CoreBluetooth
 
+/// A sensor seen during a Breathing-tab scan (chest strap or CORE).
+struct BreathingSensorFound: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let rssi: Int
+}
+
 /// The chest strap of the Breathing tab (fork addition): scans for a standard Bluetooth heart-rate strap
 /// (service 0x180D), connects, and publishes its heart rate and beat-to-beat R-R intervals live.
 ///
@@ -13,11 +20,7 @@ import CoreBluetooth
 @MainActor
 final class BreathingStrapLink: NSObject, ObservableObject {
 
-    struct Found: Identifiable, Equatable {
-        let id: UUID
-        let name: String
-        let rssi: Int
-    }
+    typealias Found = BreathingSensorFound
 
     enum State: Equatable {
         case idle, bluetoothOff, scanning, connecting, connected, disconnected

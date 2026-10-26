@@ -9,17 +9,29 @@ import Foundation
 /// intervals.icu charts. Every R-R interval goes into hrv messages (global 78, field 0, seconds × 1000),
 /// which intervals.icu reads for HRV. Session (global 18) carries start, duration, sport, average and
 /// maximum heart rate.
+///
+/// When a CORE sensor was worn, the internal body temperature goes in record field 139
+/// `core_temperature` (°C × 100, uint16), and its average, minimum and maximum in the lap (158–160) and
+/// session (208–210) fields, the native FIT numbers CORE's integration notes ask for. Without any
+/// temperature the record layout is unchanged.
 public enum BreathingFitExporter {
 
-    /// One second of the session. `breathsPerMin` nil = unknown (written as the FIT invalid value); a
-    /// second with no `hr` is not written.
+    /// One second of the session. `breathsPerMin` and `coreTempC` nil = unknown (written as the FIT
+    /// invalid value); a second with no `hr` is not written.
     public struct Sample: Equatable, Sendable {
         public let ts: Int
         public let hr: Int?
         public let breathsPerMin: Double?
-        public init(ts: Int, hr: Int?, breathsPerMin: Double?) {
-            self.ts = ts; self.hr = hr; self.breathsPerMin = breathsPerMin
+        public let coreTempC: Double?
+        public init(ts: Int, hr: Int?, breathsPerMin: Double?, coreTempC: Double? = nil) {
+            self.ts = ts; self.hr = hr; self.breathsPerMin = breathsPerMin; self.coreTempC = coreTempC
         }
+    }
+
+    /// A plausible internal temperature, °C × 100, or nil.
+    static func coreCentiC(_ c: Double?) -> UInt16? {
+        guard let c, c > 25, c < 45 else { return nil }
+        return UInt16((c * 100).rounded())
     }
 
     /// FIT `sport` 10 = training (a generic session that is neither run nor ride).
@@ -33,11 +45,15 @@ public enum BreathingFitExporter {
         body.append(0)
         u8(&body, 4); u16(&body, 255); u32(&body, fitTime(startTs))
 
-        // record: timestamp, heart_rate, enhanced_respiration_rate.
-        defn(&body, local: 1, global: 20, fields: [(253, 4, 0x86), (3, 1, 0x02), (108, 2, 0x84)])
+        // record: timestamp, heart_rate, enhanced_respiration_rate (+ core_temperature with a CORE).
+        let written = samples.sorted(by: { $0.ts < $1.ts }).filter { $0.hr != nil }
+        let cores = written.compactMap { coreCentiC($0.coreTempC) }
+        var recordFields = [(253, 4, 0x86), (3, 1, 0x02), (108, 2, 0x84)]
+        if !cores.isEmpty { recordFields.append((139, 2, 0x84)) }
+        defn(&body, local: 1, global: 20, fields: recordFields)
         // A second without HR is dropped: FIT marks it 0xFF, which some readers (this repo's importer
         // included) take as a real 255 bpm.
-        for s in samples.sorted(by: { $0.ts < $1.ts }) where s.hr != nil {
+        for s in written {
             body.append(1)
             u32(&body, fitTime(s.ts))
             u8(&body, min(max(s.hr ?? 0, 1), 254))
@@ -46,7 +62,11 @@ public enum BreathingFitExporter {
             } else {
                 u16(&body, 0xFFFF)
             }
+            if !cores.isEmpty { u16(&body, coreCentiC(s.coreTempC) ?? 0xFFFF) }
         }
+        let coreStats: (avg: UInt16, min: UInt16, max: UInt16)? = cores.isEmpty ? nil : (
+            UInt16((Double(cores.reduce(0) { $0 + Int($1) }) / Double(cores.count)).rounded()),
+            cores.min()!, cores.max()!)
 
         // hrv: one R-R per message, seconds × 1000 (so the raw value is milliseconds).
         defn(&body, local: 2, global: 78, fields: [(0, 2, 0x84)])
@@ -61,9 +81,12 @@ public enum BreathingFitExporter {
         let elapsedMs = UInt32(max(0, endTs - startTs)) &* 1000
 
         // lap: one, spanning the session.
-        defn(&body, local: 3, global: 19, fields: [(253, 4, 0x86), (2, 4, 0x86), (7, 4, 0x86), (8, 4, 0x86)])
+        var lapFields = [(253, 4, 0x86), (2, 4, 0x86), (7, 4, 0x86), (8, 4, 0x86)]
+        if coreStats != nil { lapFields += [(158, 2, 0x84), (159, 2, 0x84), (160, 2, 0x84)] }
+        defn(&body, local: 3, global: 19, fields: lapFields)
         body.append(3)
         u32(&body, fitTime(endTs)); u32(&body, fitTime(startTs)); u32(&body, elapsedMs); u32(&body, elapsedMs)
+        if let c = coreStats { u16(&body, c.avg); u16(&body, c.min); u16(&body, c.max) }
 
         // session: only the fields that are known. A missing HR is omitted, never sentinelled.
         var sf: [(Int, Int, Int)] = []
@@ -75,6 +98,11 @@ public enum BreathingFitExporter {
         sf.append((5, 1, 0x00)); u8(&sd, sportTraining)
         if let avgHr { sf.append((16, 1, 0x02)); u8(&sd, min(max(avgHr, 1), 254)) }
         if let maxHr { sf.append((17, 1, 0x02)); u8(&sd, min(max(maxHr, 1), 254)) }
+        if let c = coreStats {
+            sf.append((208, 2, 0x84)); u16(&sd, c.avg)
+            sf.append((209, 2, 0x84)); u16(&sd, c.min)
+            sf.append((210, 2, 0x84)); u16(&sd, c.max)
+        }
         defn(&body, local: 4, global: 18, fields: sf)
         body.append(4)
         body.append(contentsOf: sd)
