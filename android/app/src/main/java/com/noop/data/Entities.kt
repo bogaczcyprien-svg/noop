@@ -714,7 +714,7 @@ data class PpgWaveformSampleEntity(
 
 /**
  * One flash-banked MG ECG record, kept whole (v42 / MIGRATION_41_42, #2847). Swift `ecgWaveformSample`
- * (WhoopStore Database.swift `v48-ecg-waveform`).
+ * (WhoopStore Database.swift `v50-ecg-waveform`).
  *
  * `TOGGLE_LABRADOR_RAW_SAVE(125)=1` banks an MG's ECG generation to the strap's flash as type-47 /
  * revision-16 records, which arrive in the ordinary history offload rather than on a live channel. #2839

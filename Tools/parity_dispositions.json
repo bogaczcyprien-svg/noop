@@ -395,7 +395,7 @@
       "identity": "kotlin\u0000android/app/src/main/java/com/noop/data/WhoopDatabase.kt::migrate/1#40",
       "identity_sha256": "f2fcc9a538bee8eaef0fa7a5ada1eb2eb27a1d63ddcd443355b4086ca78cbc0c",
       "platform": "kotlin",
-      "rationale": "Room Migration.migrate override of MIGRATION_41_42, the ecgWaveformSample table (#2847). GRDB registers each migration as a closure (`v48-ecg-waveform`), so there is no Swift function to pair with; the two are paired by the migration identifiers pinned in schema_oracle.json and by the resulting table shape, which both suites compare against that oracle."
+      "rationale": "Room Migration.migrate override of MIGRATION_41_42, the ecgWaveformSample table (#2847). GRDB registers each migration as a closure (`v50-ecg-waveform`), so there is no Swift function to pair with; the two are paired by the migration identifiers pinned in schema_oracle.json and by the resulting table shape, which both suites compare against that oracle."
     },
     {
       "type": "platform_specific",

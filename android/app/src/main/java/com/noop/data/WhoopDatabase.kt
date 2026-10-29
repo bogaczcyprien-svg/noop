@@ -1103,7 +1103,7 @@ abstract class WhoopDatabase : RoomDatabase() {
 
         /**
          * v41 -> v42 (#2847): ADDITIVE, adds the `ecgWaveformSample` table, the Android twin of the Swift
-         * WhoopStore `v48-ecg-waveform` GRDB migration. Durable storage for the flash-banked MG ECG record
+         * WhoopStore `v50-ecg-waveform` GRDB migration. Durable storage for the flash-banked MG ECG record
          * (type 47, data revision 16), which #2839 taught both platforms to DECODE and neither had anywhere
          * to put: layout 16 stayed out of [MAPPED_WHOOP5_HISTORICAL_VERSIONS], so every record went down the
          * unmapped route into [RawHistoryArchive] and was evicted from it. That archive is a 5 MiB ring whose
@@ -1119,7 +1119,7 @@ abstract class WhoopDatabase : RoomDatabase() {
          *
          * Retention: CAPPED at [WhoopRepository.ECG_WAVEFORM_RETENTION_ROWS] rolling rows per device, newest-N
          * and never an age cutoff. Readings are discrete events, so a wall-clock cutoff empties the table for
-         * a user who takes one a week. Swift twin: the `v48-ecg-waveform` migration note.
+         * a user who takes one a week. Swift twin: the `v50-ecg-waveform` migration note.
          *
          * CREATE TABLE only (no existing data touched), so already-offloaded raw streams survive. The SQL MUST
          * match Room's generated schema for [EcgWaveformSampleEntity] exactly: deviceId TEXT NOT NULL, ts

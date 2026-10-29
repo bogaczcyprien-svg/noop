@@ -82,33 +82,35 @@ final class RecoveryOptionalBaselineUsableTests: XCTestCase {
             }
         }
         XCTAssertEqual(cases, 625)
-        // Compiled original Swift output with only eligible states supplied, copied verbatim to Kotlin.
+        // FORK: these are the fork's own weights (wHRV 0.30 + wNightMeanHR 0.25, logisticK 1.7, iOS-only), taken
+        // from the CI run of this exact test; the Kotlin twin keeps upstream's values because Android is untuned.
+        // The relational checks above (each state scores as its eligible baseline) are unchanged.
         XCTAssertEqual(oracleLines.joined(separator: "\n"), """
-        nil/nil|4051b9be0a68921e
-        nil/calibrating|4051b9be0a68921e
-        nil/provisional|405119a83eb9de93
-        nil/trusted|405119a83eb9de93
-        nil/stale|4051b9be0a68921e
-        calibrating/nil|4051b9be0a68921e
-        calibrating/calibrating|4051b9be0a68921e
-        calibrating/provisional|405119a83eb9de93
-        calibrating/trusted|405119a83eb9de93
-        calibrating/stale|4051b9be0a68921e
-        provisional/nil|4051e5d635c94772
-        provisional/calibrating|4051e5d635c94772
-        provisional/provisional|40514d26488c9eb1
-        provisional/trusted|40514d26488c9eb1
-        provisional/stale|4051e5d635c94772
-        trusted/nil|4051e5d635c94772
-        trusted/calibrating|4051e5d635c94772
-        trusted/provisional|40514d26488c9eb1
-        trusted/trusted|40514d26488c9eb1
-        trusted/stale|4051e5d635c94772
-        stale/nil|4051b9be0a68921e
-        stale/calibrating|4051b9be0a68921e
-        stale/provisional|405119a83eb9de93
-        stale/trusted|405119a83eb9de93
-        stale/stale|4051b9be0a68921e
+        nil/nil|405198b5cedd7477
+        nil/calibrating|405198b5cedd7477
+        nil/provisional|4050bc7a873c8c84
+        nil/trusted|4050bc7a873c8c84
+        nil/stale|405198b5cedd7477
+        calibrating/nil|405198b5cedd7477
+        calibrating/calibrating|405198b5cedd7477
+        calibrating/provisional|4050bc7a873c8c84
+        calibrating/trusted|4050bc7a873c8c84
+        calibrating/stale|405198b5cedd7477
+        provisional/nil|4051dd410a9f631c
+        provisional/calibrating|4051dd410a9f631c
+        provisional/provisional|40510e35cc1a6351
+        provisional/trusted|40510e35cc1a6351
+        provisional/stale|4051dd410a9f631c
+        trusted/nil|4051dd410a9f631c
+        trusted/calibrating|4051dd410a9f631c
+        trusted/provisional|40510e35cc1a6351
+        trusted/trusted|40510e35cc1a6351
+        trusted/stale|4051dd410a9f631c
+        stale/nil|405198b5cedd7477
+        stale/calibrating|405198b5cedd7477
+        stale/provisional|4050bc7a873c8c84
+        stale/trusted|4050bc7a873c8c84
+        stale/stale|405198b5cedd7477
         """)
         XCTAssertNotEqual(optionalChargeFixture(respBase: nil)?.bitPattern,
                           optionalChargeFixture(respBase: optionalBaselineFixture(16, 2))?.bitPattern)

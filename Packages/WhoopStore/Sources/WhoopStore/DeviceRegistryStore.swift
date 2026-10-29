@@ -151,7 +151,7 @@ public struct DeviceRegistryStore: Sendable {
         // "delete all of this device's data" leaves the raw waveform behind (the same privacy defect
         // this list exists to close).
         "ppgWaveformSample",
-        // v48-ecg-waveform (#2847): the banked MG ECG records are deviceId-keyed per-second rows like
+        // v50-ecg-waveform (#2847): the banked MG ECG records are deviceId-keyed per-second rows like
         // every stream above, and they are the most personal of them, so "delete all of this device's
         // data" must clear them or a user's ECG readings survive the delete.
         "ecgWaveformSample",

@@ -10,7 +10,7 @@ import java.lang.reflect.Proxy
 
 /**
  * Guards the additive v41 -> v42 Room migration (the `ecgWaveformSample` table, #2847), the Android twin
- * of the Swift WhoopStore `v48-ecg-waveform` GRDB migration, plus the repository plumbing that banks a
+ * of the Swift WhoopStore `v50-ecg-waveform` GRDB migration, plus the repository plumbing that banks a
  * record and sweeps the table.
  *
  * This environment has no Robolectric Room, so the migration SQL is exposed as an internal constant

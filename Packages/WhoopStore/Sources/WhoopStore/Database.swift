@@ -1152,7 +1152,7 @@ extension WhoopStore {
                           columns: ["deviceId", "name"], options: [.unique, .ifNotExists])
         }
 
-        // v48 (#2847): the flash-banked MG ECG record gets somewhere to live. `TOGGLE_LABRADOR_RAW_SAVE`
+        // v50 (#2847; upstream v48, renumbered after the fork's v48/v49 meal tables): the flash-banked MG ECG record gets somewhere to live. `TOGGLE_LABRADOR_RAW_SAVE`
         // banks an ECG generation to the strap's flash as type-47 / revision-16 records, which arrive in
         // the ordinary history offload; #2839 landed the decoder for them and this is the table that decode
         // was missing. Twin of the Android `ecgWaveformSample` (MIGRATION_41_42); same column order and the
@@ -1192,7 +1192,7 @@ extension WhoopStore {
         // wording. The rows are the point, so that a later analysis, or a waveform viewer, can run over
         // the ORIGINAL samples instead of over whatever summary we would otherwise have had to invent at
         // ingest time. Do not "clean up" this table or its reader as dead code.
-        migrator.registerMigration("v48-ecg-waveform") { db in
+        migrator.registerMigration("v50-ecg-waveform") { db in
             try db.create(table: "ecgWaveformSample") { t in
                 t.column("deviceId", .text).notNull()
                 t.column("ts", .integer).notNull()
