@@ -1432,26 +1432,34 @@ struct LiquidTodayView: View {
             // `.sheet(DayMeanHRDetailView)`) — a plain, non-interactive tile (no `key:`) showing the
             // same whole-day figure, computed from the SAME `hrValues` bucket means this screen's own
             // HR curve already fetches (no second fetch, same precedent as the classic tile).
-            ktile(String(localized: "Avg HR (24h)"), icon: keyMetricIcon(metric), intText(liquidDayMeanHr), "bpm", StrandPalette.metricRose, fracOver(liquidDayMeanHr, 100))
+            ktile(String(localized: "Avg HR (24h)"), icon: keyMetricIcon(metric), intText(liquidDayMeanHr), "bpm", StrandPalette.metricRose)
         case .charge:
             // Reads the SAME resolved Charge the hero draws, not `displayDay?.recovery` raw — the tile and the
             // hero are the same number, so a carry that reached only one of them would put two answers for
             // Charge on one screen. (#543: one prior row feeds every recovery-derived read-out.) Strain below
             // stays raw, matching the Effort hero, which correctly does not carry.
-            ktile(String(localized: "Recovery"), icon: keyMetricIcon(metric), intText(chargeDisplay.pct), "%", StrandPalette.chargeColor, frac(chargeDisplay.pct), key: HeroRingMetric.charge)
+            ktile(String(localized: "Recovery"), icon: keyMetricIcon(metric), intText(chargeDisplay.pct), "%", StrandPalette.chargeColor,
+                  verdict: KeyMetricVerdict.recovery(chargeDisplay.pct), key: HeroRingMetric.charge)
         case .effort:
             // #492: Effort is a load index (0–100 NOOP / 0–21 WHOOP), NOT a percentage, and the unit was
             // wrong on either axis. Fixed on Android and in `TodayView` at the time; THIS view kept the old
             // form, so the tile also ignored the scale toggle — the hero ring above it read ~8 on the WHOOP
             // axis while this read 38. `effortText` is the same shared formatter the ring and the workout
             // rows use, so all three now agree by construction.
-            ktile(String(localized: "Strain"), icon: keyMetricIcon(metric), effortText(effortStrain(displayDay)), "", StrandPalette.effortColor, frac(effortStrain(displayDay)), key: HeroRingMetric.effort)
+            ktile(String(localized: "Strain"), icon: keyMetricIcon(metric), effortText(effortStrain(displayDay)), "", StrandPalette.effortColor,
+                  verdict: accumulatingVerdict(effortStrain(displayDay), key: "strain", minSpread: 1),
+                  usual: usualText("strain") { effortText($0) }, key: HeroRingMetric.effort)
         case .rest:
-            ktile(String(localized: "Rest"), icon: keyMetricIcon(metric), intText(restScore), "%", StrandPalette.restColor, frac(restScore), key: HeroRingMetric.rest)
+            ktile(String(localized: "Rest"), icon: keyMetricIcon(metric), intText(restScore), "%", StrandPalette.restColor,
+                  verdict: KeyMetricVerdict.rest(restScore), key: HeroRingMetric.rest)
         case .hrv:
-            ktile("HRV", icon: keyMetricIcon(metric), intText(hrv), "ms", StrandPalette.metricCyan, fracOver(hrv, 120), key: "hrv")
+            ktile("HRV", icon: keyMetricIcon(metric), intText(hrv), "ms", StrandPalette.metricCyan,
+                  verdict: relativeVerdict(hrv, key: "hrv", rule: .higherIsBetter, minSpread: 3),
+                  usual: usualText("hrv") { "\(intText($0)) ms" }, key: "hrv")
         case .restingHr:
-            ktile(String(localized: "Rest HR"), icon: keyMetricIcon(metric), intText(rhr), "bpm", StrandPalette.metricRose, fracOver(rhr, 100), key: "rhr")
+            ktile(String(localized: "Rest HR"), icon: keyMetricIcon(metric), intText(rhr), "bpm", StrandPalette.metricRose,
+                  verdict: relativeVerdict(rhr, key: "rhr", rule: .lowerIsBetter, minSpread: 1.5),
+                  usual: usualText("rhr") { "\(intText($0)) bpm" }, key: "rhr")
         case .bloodOxygen:
             // Queue 11a: the Liquid tile used to read `spo2Pct` only, with no candidate fallback at all
             // (unlike the classic `TodayView`/`VitalSignsSummary`), so an Oura-only or BLE-only WHOOP
@@ -1465,22 +1473,31 @@ struct LiquidTodayView: View {
                 ? spo2CandidateByDay[cachedDisplayDay?.day ?? selectedDayKey]
                 : nil
             let spo2 = spo2Real ?? spo2CandidateValue
-            ktile(String(localized: "Blood Oxygen"), icon: keyMetricIcon(metric), intText(spo2), "%", StrandPalette.metricCyan, fracOver(spo2, 100), key: spo2CandidateValue != nil ? "spo2_candidate" : "spo2",
+            ktile(String(localized: "Blood Oxygen"), icon: keyMetricIcon(metric), intText(spo2), "%", StrandPalette.metricCyan,
+                  verdict: relativeVerdict(spo2, key: spo2CandidateValue != nil ? "spo2_candidate" : "spo2", rule: .lowIsBad, minSpread: 1),
+                  usual: usualText(spo2CandidateValue != nil ? "spo2_candidate" : "spo2") { "\(intText($0)) %" },
+                  key: spo2CandidateValue != nil ? "spo2_candidate" : "spo2",
                   caption: spo2CandidateValue != nil ? String(localized: "strap estimate (unverified)") : nil)
         case .respiratory:
             let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm ?? respDay?.respRateBpm
-            ktile(String(localized: "Respiratory"), icon: keyMetricIcon(metric), resp.map { String(format: "%.1f", locale: AppLanguage.activeLocale, $0) } ?? "—", "rpm", StrandPalette.accent, fracOver(resp, 24), key: "resp_rate")
+            ktile(String(localized: "Respiratory"), icon: keyMetricIcon(metric), resp.map { String(format: "%.1f", locale: AppLanguage.activeLocale, $0) } ?? "—", "rpm", StrandPalette.accent,
+                  verdict: relativeVerdict(resp, key: "resp_rate", rule: .steadyIsBetter, minSpread: 0.4),
+                  usual: usualText("resp_rate") { String(format: "%.1f rpm", locale: AppLanguage.activeLocale, $0) }, key: "resp_rate")
         case .steps:
             ktile(String(localized: "Steps"), icon: keyMetricIcon(metric), stepsText, "", StrandPalette.chargeColor,
-                  fracOver(stepCount, 10000), key: stepsDetailKey, detailMetric: stepsDetailMetric)
+                  verdict: accumulatingVerdict(stepCount, key: stepsDetailKey, minSpread: 500),
+                  usual: usualText(stepsDetailKey) { Int($0.rounded()).formatted() },
+                  key: stepsDetailKey, detailMetric: stepsDetailMetric)
         case .weight:
             let (val, cap) = weightTile(weightKg)
-            ktile(String(localized: "Weight"), icon: keyMetricIcon(metric), val, "", StrandPalette.metricAmber, nil, key: "weight", caption: cap)
+            ktile(String(localized: "Weight"), icon: keyMetricIcon(metric), val, "", StrandPalette.metricAmber, key: "weight", caption: cap)
         case .calories:
             // #616: imported-first value (imported ?: activeKcalEst) + route the tap to the matching
             // detail source, so the number, its sparkline and the chart it opens all agree.
             ktile(String(localized: "Calories"), icon: keyMetricIcon(metric), intText(caloriesCount), "kcal", StrandPalette.metricAmber,
-                  fracOver(caloriesCount, 800), key: "energy_kcal", detailMetric: caloriesDetailMetric)
+                  verdict: accumulatingVerdict(caloriesCount, key: "energy_kcal", minSpread: 50),
+                  usual: usualText("energy_kcal") { "\(Int($0.rounded()).formatted()) kcal" },
+                  key: "energy_kcal", detailMetric: caloriesDetailMetric)
         case .skinTemp:
             // Added 2026-08-24 (queue 11c follow-up): first Key Metrics appearance for Skin Temp — was
             // already a "Your Cards" tile (`DashboardCard.skinTemp`), never a Key Metrics one. Same
@@ -1493,7 +1510,10 @@ struct LiquidTodayView: View {
                                                        fahrenheit: temperatureUnit == .fahrenheit)
             // The card's own unit is deliberately empty — the value carries "°C"/"Δ°F" itself, same as
             // the classic TodayView Skin Temp card.
-            ktile(String(localized: "Skin Temp"), icon: keyMetricIcon(metric), skinText, "", StrandPalette.metricAmber, nil, key: "skin_temp")
+            ktile(String(localized: "Skin Temp"), icon: keyMetricIcon(metric), skinText, "", StrandPalette.metricAmber,
+                  verdict: relativeVerdict(displayDay?.skinTempDevC ?? vitalsDay?.skinTempDevC, key: "skin_temp",
+                                           rule: .steadyIsBetter, minSpread: 0.15),
+                  key: "skin_temp")
         }
     }
 
@@ -1514,7 +1534,8 @@ struct LiquidTodayView: View {
         }
     }
 
-    private func ktile(_ label: String, icon: String, _ value: String, _ unit: String, _ tint: Color, _ frac: Double?,
+    private func ktile(_ label: String, icon: String, _ value: String, _ unit: String, _ tint: Color,
+                       verdict: KeyMetricVerdict.Reading? = nil, usual: String? = nil,
                        key: String? = nil, detailMetric: MetricDescriptor? = nil, caption: String? = nil) -> some View {
         let displayValue = Self.tileDisplayValue(value, unit: unit)
         let tile = VStack(alignment: .leading, spacing: 10) {
@@ -1545,8 +1566,26 @@ struct LiquidTodayView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            LiquidTube(frac: frac ?? 0, tint: tint, height: 9, animated: false,
-                       showsHighlight: false, usesCleanFill: true)
+            // FORK: a good-or-not verdict against the wearer's usual (or a score's fixed zones) in place of
+            // the fill bar, which only placed the number against a fixed ceiling. See `KeyMetricVerdict`.
+            if let verdict {
+                HStack(spacing: 5) {
+                    Image(systemName: Self.verdictSymbol(verdict))
+                        .font(.system(size: 10, weight: .bold))
+                    Text(Self.verdictLabel(verdict))
+                        .font(StrandFont.footnote.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .foregroundStyle(Self.verdictColor(verdict.tone))
+            }
+            if let usual {
+                Text(String(localized: "Usual: \(usual)"))
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
             // #430 parity: DETAILED tiles grow the trend graph under the bar, tinted to the metric and
             // windowed to the editor's 1-week / 2-week / 1-month choice (the Android twin). A metric with no
             // windowed series keeps a clear placeholder of the same height so every tile in a detailed row
@@ -1580,6 +1619,61 @@ struct LiquidTodayView: View {
             } else {
                 tile
             }
+        }
+    }
+
+    // MARK: - Key Metrics verdicts (fork)
+
+    /// The prior days of a Key Metrics series, the selected day itself left out so it is compared
+    /// against its own past rather than including itself.
+    private func verdictHistory(_ key: String) -> [Double] {
+        (kSparks[key] ?? []).filter { $0.0 < selectedDayKey }.map { $0.1 }
+    }
+
+    private func relativeVerdict(_ value: Double?, key: String, rule: KeyMetricVerdict.Rule,
+                                 minSpread: Double) -> KeyMetricVerdict.Reading? {
+        KeyMetricVerdict.relative(value: value, history: verdictHistory(key), rule: rule, minSpread: minSpread)
+    }
+
+    /// Steps, calories and Effort keep adding up all day, so today's running total is not compared with
+    /// finished days: today shows only the usual, a past day gets its verdict.
+    private func accumulatingVerdict(_ value: Double?, key: String, minSpread: Double) -> KeyMetricVerdict.Reading? {
+        selectedDayOffset == 0 ? nil : relativeVerdict(value, key: key, rule: .neither, minSpread: minSpread)
+    }
+
+    private func usualText(_ key: String, _ format: (Double) -> String) -> String? {
+        KeyMetricVerdict.usual(verdictHistory(key)).map(format)
+    }
+
+    private static func verdictLabel(_ r: KeyMetricVerdict.Reading) -> String {
+        if r.usual == nil {
+            switch r.tone {
+            case .good: return String(localized: "Good")
+            case .off: return String(localized: "Low")
+            default: return String(localized: "Fair")
+            }
+        }
+        switch r.direction {
+        case .inline: return String(localized: "Normal")
+        case .above: return r.strong ? String(localized: "Well above usual") : String(localized: "Above usual")
+        case .below: return r.strong ? String(localized: "Well below usual") : String(localized: "Below usual")
+        }
+    }
+
+    private static func verdictSymbol(_ r: KeyMetricVerdict.Reading) -> String {
+        switch r.direction {
+        case .above: return "arrow.up"
+        case .below: return "arrow.down"
+        case .inline: return "circle.fill"
+        }
+    }
+
+    private static func verdictColor(_ tone: KeyMetricVerdict.Tone) -> Color {
+        switch tone {
+        case .good: return StrandPalette.statusPositive
+        case .watch: return StrandPalette.statusWarning
+        case .off: return StrandPalette.statusCritical
+        case .normal, .neutral: return StrandPalette.textSecondary
         }
     }
 
