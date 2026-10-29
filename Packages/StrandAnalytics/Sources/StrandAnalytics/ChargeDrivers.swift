@@ -138,11 +138,13 @@ extension RecoveryScorer {
         // synthetic midpoint while the headline excluded it. Normalised once here so every use below,
         // score and row alike, sees the same thing. Twin of the Kotlin `rhrB`.
         let rhrB = rhrBaseline.flatMap { $0.usable ? $0 : nil }
+        // Only eligible personal baselines may appear in respiration rows or diagnostic terms.
+        let respB = respBaseline.flatMap { $0.usable ? $0 : nil }
         // FORK-ONLY: same #1988 gate for the night-mean-HR baseline.
         let nightMeanHRB = nightMeanHRBaseline.flatMap { $0.usable ? $0 : nil }
         guard let full = recovery(hrv: hrv, rhr: rhr, resp: resp,
                                   hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                  respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                  respBaseline: respB, sleepPerf: sleepPerf,
                                   skinTempDev: skinTempDev,
                                   nightMeanHR: nightMeanHR,
                                   nightMeanHRBaseline: nightMeanHRB) else {
@@ -179,7 +181,7 @@ extension RecoveryScorer {
         // Higher HRV vs baseline supports recovery. Neutral = HRV at the baseline mean.
         let hrvPoints = points(recovery(hrv: hrvBaseline.baseline, rhr: rhr, resp: resp,
                                         hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                        respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                        respBaseline: respB, sleepPerf: sleepPerf,
                                         skinTempDev: skinTempDev,
                                         nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
         drivers.append(ChargeDriver(
@@ -196,7 +198,7 @@ extension RecoveryScorer {
         if let b = rhrB {
             let rhrPoints = points(recovery(hrv: hrv, rhr: b.baseline, resp: resp,
                                             hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                            respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                            respBaseline: respB, sleepPerf: sleepPerf,
                                             skinTempDev: skinTempDev,
                                             nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
@@ -212,7 +214,7 @@ extension RecoveryScorer {
         if let b = nightMeanHRB {
             let nightMeanHRPoints = points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                                     hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                                    respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                                    respBaseline: respB, sleepPerf: sleepPerf,
                                                     skinTempDev: skinTempDev,
                                                     nightMeanHR: b.baseline, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
@@ -230,7 +232,7 @@ extension RecoveryScorer {
                 label: "Sleep quality",
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                             respBaseline: respBaseline, sleepPerf: sleepPerfCenter,
+                                             respBaseline: respB, sleepPerf: sleepPerfCenter,
                                              skinTempDev: skinTempDev,
                                              nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB)),
                 valueText: "\(Int((sp * 100).rounded()))%",
@@ -240,10 +242,10 @@ extension RecoveryScorer {
 
         // ── Respiration (lower vs baseline supports recovery) ────────────────────
         // Neutral = respiration at the baseline mean.
-        if let r = resp, let b = respBaseline {
+        if let r = resp, let b = respB {
             let respPoints = points(recovery(hrv: hrv, rhr: rhr, resp: b.baseline,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                             respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                             respBaseline: respB, sleepPerf: sleepPerf,
                                              skinTempDev: skinTempDev,
                                              nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
@@ -261,7 +263,7 @@ extension RecoveryScorer {
         if let dev = skinTempDev {
             let skinTempPoints = points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                                  hrvBaseline: hrvBaseline, rhrBaseline: rhrB,
-                                                 respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                                 respBaseline: respB, sleepPerf: sleepPerf,
                                                  skinTempDev: 0,
                                                  nightMeanHR: nightMeanHR, nightMeanHRBaseline: nightMeanHRB))
             drivers.append(ChargeDriver(
