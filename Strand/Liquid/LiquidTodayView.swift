@@ -795,13 +795,71 @@ struct LiquidTodayView: View {
             // Data-driven off the SAME @AppStorage the CUSTOMISE editor writes, so add / remove /
             // reorder in Customise reflects on the home screen live. The hydration filter mirrors classic
             // TodayView's `enabledDashboardCards` and Android's `it != HYDRATION || hydrationEnabled`.
-            ForEach(DashboardCardPrefs.decodeEnabled(dashboardCardsRaw)
-                        .filter { hydrationEnabled || $0 != .hydration }
-                        // Coach off means the AI is off, so the launcher card goes with the tab: leaving it
-                        // on Today would offer a feature the wearer has just switched off. Same gate shape
-                        // as hydration, so a card they had added keeps its place and returns on re-enable.
-                        .filter { coachEnabled || $0 != .coach }) { card in
-                liquidCard(for: card)
+            let keyMetrics = Set(enabledKeyMetrics)
+            let cards = DashboardCardPrefs.decodeEnabled(dashboardCardsRaw)
+                .filter { hydrationEnabled || $0 != .hydration }
+                // Coach off means the AI is off, so the launcher card goes with the tab: leaving it
+                // on Today would offer a feature the wearer has just switched off. Same gate shape
+                // as hydration, so a card they had added keeps its place and returns on re-enable.
+                .filter { coachEnabled || $0 != .coach }
+                // FORK: a number already on a Key Metrics tile just above is not repeated here.
+                .filter { keyMetricTwin($0).map { !keyMetrics.contains($0) } ?? true }
+            // FORK: grouped (Form, Last night, Today, shortcuts) instead of one long run of identical rows;
+            // the wearer's own order holds inside each group.
+            ForEach(CardGroup.allCases, id: \.self) { group in
+                let inGroup = cards.filter { cardGroup($0) == group }
+                if !inGroup.isEmpty {
+                    cardGroupView(group, inGroup)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cardGroupView(_ group: CardGroup, _ cards: [DashboardCard]) -> some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.gap), count: 2)
+        switch group {
+        case .fitness, .today:
+            VStack(alignment: .leading, spacing: 8) {
+                Text((group == .fitness ? String(localized: "Form") : String(localized: "Today")).uppercased())
+                    .font(StrandFont.overlineScaled(10)).tracking(1.2)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .padding(.horizontal, 2)
+                LazyVGrid(columns: columns, spacing: NoopMetrics.gap) {
+                    ForEach(cards, id: \.self) { card in
+                        if let info = cardInfo(for: card) { cardTile(info) }
+                    }
+                }
+                // The 30-day step average draws its own card, full width under the tiles.
+                if cards.contains(.stepsAverage30) {
+                    RollingStepsAverageCard(day: selectedDayKey)
+                }
+            }
+        case .night:
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "Last night").uppercased())
+                    .font(StrandFont.overlineScaled(10)).tracking(1.2)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .padding(.horizontal, 2)
+                VStack(spacing: 0) {
+                    ForEach(Array(cards.enumerated()), id: \.element) { index, card in
+                        if let info = cardInfo(for: card) {
+                            cardRow(info)
+                            if index < cards.count - 1 {
+                                Divider().overlay(StrandPalette.textTertiary.opacity(0.25))
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(NoopPanelSurface(tint: StrandPalette.restColor, cornerRadius: 18,
+                                             surfaceOpacity: cardOpacity))
+            }
+        case .shortcuts:
+            LazyVGrid(columns: columns, spacing: NoopMetrics.gap) {
+                ForEach(cards, id: \.self) { card in
+                    if let info = cardInfo(for: card) { cardShortcut(info) }
+                }
             }
         }
     }
@@ -1022,48 +1080,90 @@ struct LiquidTodayView: View {
         }
     }
 
-    /// One "Your cards" row for a given card type — honours the user's CUSTOMISE selection + order.
-    /// Wired cards show real values; the rest render "–" for now (they still appear, so add/remove/
-    /// reorder is reflected). stress → Stress screen, sleep → Sleep, everything else → Health.
-    @ViewBuilder
-    private func liquidCard(for card: DashboardCard) -> some View {
+    /// FORK: what one Your Cards entry shows — its tap target and its value — kept apart from the layout,
+    /// which groups the cards (`yourCardsSection`). nil for a card that draws its own view.
+    private struct CardInfo {
+        var route: TabRoute? = nil
+        var action: (() -> Void)? = nil
+        let title: String
+        var sub: String? = nil
+        let value: String
+        /// A coloured word after the value (the stress band).
+        var badge: (text: String, color: Color)? = nil
+        let tint: Color
+    }
+
+    /// FORK: the four groups Your Cards is laid out in, so a long run of identical rows reads as a few
+    /// labelled blocks.
+    private enum CardGroup: CaseIterable { case fitness, night, today, shortcuts }
+
+    private func cardGroup(_ card: DashboardCard) -> CardGroup {
+        switch card {
+        case .stress, .fitnessAge, .vo2max, .vitality: return .fitness
+        case .sleep, .hrv, .restingHr, .respiratory, .skinTemp, .bloodOxygen: return .night
+        case .steps, .stepsAverage30, .calories, .hydration: return .today
+        case .coupled, .coach: return .shortcuts
+        }
+    }
+
+    /// FORK: the Key Metric that already shows a card's number, so Your Cards does not repeat a tile the
+    /// wearer has on screen just above it. The 30-day step average goes with Steps: that tile's "Usual"
+    /// line already carries it.
+    private func keyMetricTwin(_ card: DashboardCard) -> KeyMetric? {
+        switch card {
+        case .hrv: return .hrv
+        case .restingHr: return .restingHr
+        case .respiratory: return .respiratory
+        case .steps, .stepsAverage30: return .steps
+        case .bloodOxygen: return .bloodOxygen
+        case .skinTemp: return .skinTemp
+        case .calories: return .calories
+        default: return nil
+        }
+    }
+
+    private func cardInfo(for card: DashboardCard) -> CardInfo? {
         switch card {
         case .stepsAverage30:
-            RollingStepsAverageCard(day: selectedDayKey)
+            return nil
         case .stress:
-            cardLink(.stress, title: card.title, sub: card.subtitle,
-                     value: stressText, tint: StrandPalette.accent, frac: fracOver(stress, 3))
+            // One decimal on WHOOP's own 0–3 scale, with the band named beside it, so a bare "2" no
+            // longer leaves the wearer guessing what it is out of.
+            return CardInfo(route: .stress, title: card.title,
+                            value: stress.map { String(format: "%.1f", locale: AppLanguage.activeLocale, $0) }
+                                ?? String(localized: "Calibrating"),
+                            badge: stress.map { Self.stressBadge(StressBand(score: $0)) },
+                            tint: StrandPalette.accent)
         case .fitnessAge:
-            cardLink(.metric("fitness_age"), title: card.title, sub: card.subtitle,
-                     // Bound symbol as on the Health hero (#2173), so a floored reading does not read
-                     // exact here and bounded there.
-                     value: fitnessAge.map { "\(fitnessAgeBoundSymbol($0))" + unitText($0, card.unit) }
-                         ?? unitText(fitnessAge, card.unit),
-                     tint: StrandPalette.chargeColor, frac: 0.5)
+            return CardInfo(route: .metric("fitness_age"), title: card.title, sub: card.subtitle,
+                            // Bound symbol as on the Health hero (#2173), so a floored reading does not read
+                            // exact here and bounded there.
+                            value: fitnessAge.map { "\(fitnessAgeBoundSymbol($0))" + unitText($0, card.unit) }
+                                ?? unitText(fitnessAge, card.unit),
+                            tint: StrandPalette.chargeColor)
         case .vo2max:
-            cardLink(.metric("vo2max_est"), title: card.title, sub: card.subtitle,
-                     value: unitText(vo2max, card.unit), tint: StrandPalette.chargeColor, frac: 0.5)
+            return CardInfo(route: .metric("vo2max_est"), title: card.title, sub: card.subtitle,
+                            value: unitText(vo2max, card.unit), tint: StrandPalette.chargeColor)
         case .vitality:
-            cardLink(.metric("vitality"), title: card.title, sub: card.subtitle,
-                     value: intText(vitality), tint: liquidPurple, frac: frac(vitality))
+            return CardInfo(route: .metric("vitality"), title: card.title, sub: card.subtitle,
+                            value: intText(vitality), tint: liquidPurple)
         case .hrv:
-            cardLink(.metric("hrv"), title: card.title, sub: card.subtitle,
-                     value: unitText(displayDay?.avgHrv, card.unit), tint: StrandPalette.metricCyan,
-                     frac: fracOver(displayDay?.avgHrv, 120))
+            return CardInfo(route: .metric("hrv"), title: card.title,
+                            value: unitText(displayDay?.avgHrv, card.unit), tint: StrandPalette.metricCyan)
         case .restingHr:
-            cardLink(.metric("rhr"), title: card.title, sub: card.subtitle,
-                     value: unitText(displayDay?.restingHr.map(Double.init), card.unit),
-                     tint: StrandPalette.metricRose, frac: fracOver(displayDay?.restingHr.map(Double.init), 100))
+            return CardInfo(route: .metric("rhr"), title: card.title,
+                            value: unitText(displayDay?.restingHr.map(Double.init), card.unit),
+                            tint: StrandPalette.metricRose)
         case .respiratory:
-            cardLink(.metric("resp_rate"), title: card.title, sub: card.subtitle,
-                     value: unitText(displayDay?.respRateBpm, card.unit, decimals: 1),
-                     tint: StrandPalette.accent, frac: fracOver(displayDay?.respRateBpm, 24))
+            return CardInfo(route: .metric("resp_rate"), title: card.title,
+                            value: unitText(displayDay?.respRateBpm, card.unit, decimals: 1),
+                            tint: StrandPalette.accent)
         case .steps:
             // Route by the EXACT (key, source) the tile chose to display — measured my-whoop, imported
             // apple-health, or the my-whoop estimate — NOT by bare key (bare "steps" resolves to
             // apple-health and would mismatch a WHOOP-measured value). Order-independent.
-            cardLink(.metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title, sub: card.subtitle,
-                     value: stepsText, tint: StrandPalette.metricCyan, frac: fracOver(stepCount, 10000))
+            return CardInfo(route: .metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title,
+                            sub: card.subtitle, value: stepsText, tint: StrandPalette.metricCyan)
         case .bloodOxygen:
             // #1627: these two were the last cards still on the "not wired yet" placeholder, so on iOS 26 —
             // where Liquid Today is the DEFAULT Today screen — Blood Oxygen and Skin Temp read "–" for
@@ -1090,102 +1190,153 @@ struct LiquidTodayView: View {
             // (unverified)" — the Key Metrics tile below, VitalSignsSummary, the classic TodayView — and
             // PuffinExperiment's own doc says the toggle surfaces it "in the Blood Oxygen tile/card,
             // labelled". An unlabelled number here would read as a measured SpO2 on the one surface that
-            // is the DEFAULT Today screen on iOS 26. The subtitle is the slot this card has.
-            cardLink(.metric("spo2"),
-                     title: card.title,
-                     sub: spo2Candidate != nil ? String(localized: "strap estimate (unverified)") : card.subtitle,
-                     // Em dash, not the en dash the stub used: the classic Blood Oxygen card and
-                     // skinTempCardValue both return "—", so the stub's "–" would have left the two
-                     // adjacent cards printing different glyphs for the same "no reading" state.
-                     value: spo2.map { String(format: "%.0f%%", locale: AppLanguage.activeLocale, $0) } ?? "—",
-                     tint: StrandPalette.metricCyan, frac: fracOver(spo2, 100))
+            // is the DEFAULT Today screen on iOS 26.
+            return CardInfo(route: .metric("spo2"), title: card.title,
+                            sub: spo2Candidate != nil ? String(localized: "strap estimate (unverified)") : nil,
+                            // Em dash, not the en dash the stub used: the classic Blood Oxygen card and
+                            // skinTempCardValue both return "—", so the stub's "–" would have left the two
+                            // adjacent cards printing different glyphs for the same "no reading" state.
+                            value: spo2.map { String(format: "%.0f%%", locale: AppLanguage.activeLocale, $0) } ?? "—",
+                            tint: StrandPalette.metricCyan)
         case .skinTemp:
-            // Skin temp has NO Key Metrics tile to mirror (KeyMetric has no skinTemp case), so this uses
-            // the classic card's extracted resolver instead — the same one TodayView calls, which is why
-            // it is a static: the formatting decision is testable without a live view.
-            //
-            // frac stays nil deliberately. A signed deviation has no natural 0–100 fill, and a ring drawn
-            // from one would imply a magnitude the number does not carry.
+            // Uses the classic card's extracted resolver — the same one TodayView calls, which is why it is a
+            // static: the formatting decision is testable without a live view.
             // #1844: lead with the night's measured ABSOLUTE when it has one; deviation nights unchanged.
             let skin = skinTempLeadReading
-            cardLink(.metric("skin_temp"), title: card.title, sub: card.subtitle,
-                     value: TodayView.skinTempCardValue(reading: skin, fahrenheit: temperatureUnit == .fahrenheit),
-                     tint: StrandPalette.metricAmber, frac: nil)
+            return CardInfo(route: .metric("skin_temp"), title: card.title,
+                            value: TodayView.skinTempCardValue(reading: skin, fahrenheit: temperatureUnit == .fahrenheit),
+                            tint: StrandPalette.metricAmber)
         case .calories:
             // #616: show the resolved imported-first value and route to the matching detail source, like
             // the Steps card — was a "–" placeholder wired to the imported-only detail.
-            cardLink(.metricSourced(key: caloriesDetailKey, source: caloriesDetailSource), title: card.title, sub: card.subtitle,
-                     value: intText(caloriesCount), tint: StrandPalette.metricAmber, frac: fracOver(caloriesCount, 800))
+            return CardInfo(route: .metricSourced(key: caloriesDetailKey, source: caloriesDetailSource),
+                            title: card.title, sub: card.subtitle, value: intText(caloriesCount),
+                            tint: StrandPalette.metricAmber)
         case .sleep:
-            cardLink(.sleep, title: card.title, sub: card.subtitle,
-                     value: sleepText, tint: StrandPalette.restColor, frac: fracOver(displayDay?.totalSleepMin, 480))
+            return CardInfo(route: .sleep, title: card.title, value: sleepText, tint: StrandPalette.restColor)
         case .hydration:
             // #989: was hardcoded "–". `HydrationGoal.cardValueString` is unit-tested and byte-identical to
             // the Android twin, but classic TodayView was its only caller — so on the DEFAULT screen a
-            // logged drink never appeared. Same "<total> / <goal> L" string and the same goal fraction on
-            // the ring as classic; "—" only when the goal is genuinely underivable.
-            cardLink(.hydration, title: card.title, sub: card.subtitle,
-                     value: hydrationGoalML.map {
-                         HydrationGoal.cardValueString(totalML: hydrationTotalML ?? 0, goalML: $0)
-                     } ?? "—",
-                     tint: StrandPalette.metricCyan,
-                     frac: hydrationGoalML.map {
-                         HydrationGoal.fraction(totalML: hydrationTotalML ?? 0, goalML: $0)
-                     })
+            // logged drink never appeared. Same "<total> / <goal> L" string as classic; "—" only when the
+            // goal is genuinely underivable.
+            return CardInfo(route: .hydration, title: card.title, sub: card.subtitle,
+                            value: hydrationGoalML.map {
+                                HydrationGoal.cardValueString(totalML: hydrationTotalML ?? 0, goalML: $0)
+                            } ?? "—",
+                            tint: StrandPalette.metricCyan)
         case .coupled:
             // A tap-through to the full Coupled day screen. No value.
-            cardLink(.coupled, title: card.title, sub: card.subtitle,
-                     value: "", tint: StrandPalette.chargeColor, frac: 0.6)
+            return CardInfo(route: .coupled, title: card.title, value: "", tint: StrandPalette.chargeColor)
         case .coach:
             // #1862: a sheet rather than a push — the point of the card is to try Coach WITHOUT
             // leaving Today.
-            cardAction(title: card.title, sub: card.subtitle, value: "",
-                       tint: StrandPalette.accent, frac: 0.5) { showCoachLauncher = true }
+            return CardInfo(action: { showCoachLauncher = true }, title: card.title, value: "",
+                            tint: StrandPalette.accent)
         }
     }
 
-    /// One card row pushing its `TabRoute` by value — the first hop off the Today root must ride
-    /// the tab's `NavigationPath` so a re-tap of the Today tab can pop it (#198; see TabRoute.swift).
-    private func cardLink(_ route: TabRoute, title: String, sub: String,
-                          value: String, tint: Color, frac: Double?) -> some View {
-        NavigationLink(value: route) {
-            cardLinkBody(title: title, sub: sub, value: value, tint: tint, frac: frac)
+    private static func stressBadge(_ band: StressBand) -> (text: String, color: Color) {
+        let color: Color
+        switch band {
+        case .low: color = StrandPalette.statusPositive
+        case .medium: color = StrandPalette.statusWarning
+        case .high: color = StrandPalette.statusCritical
         }
-        .buttonStyle(LiquidPressStyle())
+        return (band.title.localizedCapitalized, color)
     }
 
-    /// The same row, running `action` instead of pushing (#1862). Coach is the one dashboard card that
-    /// opens a SHEET, so it cannot ride `NavigationLink`; sharing `cardLinkBody` keeps the two kinds of
-    /// row from drifting apart visually.
-    private func cardAction(title: String, sub: String, value: String, tint: Color, frac: Double?,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            cardLinkBody(title: title, sub: sub, value: value, tint: tint, frac: frac)
-        }
-        .buttonStyle(LiquidPressStyle())
-    }
-
+    /// The tap wrapper every card shares: a push by value for a route — the first hop off the Today root
+    /// must ride the tab's `NavigationPath` so a re-tap of the Today tab can pop it (#198; see
+    /// TabRoute.swift) — or a plain button for Coach's sheet (#1862).
     @ViewBuilder
-    private func cardLinkBody(title: String, sub: String, value: String,
-                              tint: Color, frac: Double?) -> some View {
-        HStack(spacing: 12) {
-                // tapPassesThrough: the vessel's splash gesture would otherwise swallow the enclosing
-                // Button's tap, leaving a dead 30pt disc on the leading edge of a tappable card row.
-                LiquidVessel(value: frac, tint: tint, animated: false, tapPassesThrough: true)
-                    .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(1.0)
+    private func cardTap<Label: View>(_ info: CardInfo, @ViewBuilder label: () -> Label) -> some View {
+        if let route = info.route {
+            NavigationLink(value: route) { label() }
+                .buttonStyle(LiquidPressStyle())
+        } else if let action = info.action {
+            Button(action: action) { label() }
+                .buttonStyle(LiquidPressStyle())
+        } else {
+            label()
+        }
+    }
+
+    /// A compact tile for the Fitness and Today groups: label, value, one short line.
+    private func cardTile(_ info: CardInfo) -> some View {
+        cardTap(info) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(info.title.uppercased())
+                    .font(StrandFont.overlineScaled(10)).tracking(1.0)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(info.value)
+                        .font(StrandFont.number(22))
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text(sub).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    if let badge = info.badge {
+                        Text(badge.text)
+                            .font(StrandFont.footnote.weight(.semibold))
+                            .foregroundStyle(badge.color)
+                            .lineLimit(1)
+                    }
+                }
+                if let sub = info.sub {
+                    Text(sub)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+            .background(NoopPanelSurface(tint: info.tint, cornerRadius: 18, surfaceOpacity: cardOpacity))
+        }
+    }
+
+    /// One row of the Night group's single list card.
+    private func cardRow(_ info: CardInfo) -> some View {
+        cardTap(info) {
+            HStack(spacing: 10) {
+                Circle().fill(info.tint).frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(info.title)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    if let sub = info.sub {
+                        Text(sub).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
                 }
                 Spacer(minLength: 8)
-                Text(value).font(StrandFont.number(17)).foregroundStyle(StrandPalette.textPrimary)
+                Text(info.value).font(StrandFont.number(17)).foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(1)
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StrandPalette.textTertiary)
             }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+    }
+
+    /// A small shortcut button (Coupled view, Coach): the title alone, no value.
+    private func cardShortcut(_ info: CardInfo) -> some View {
+        cardTap(info) {
+            HStack(spacing: 8) {
+                Circle().fill(info.tint).frame(width: 8, height: 8)
+                Text(info.title)
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
             .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-        .background(NoopPanelSurface(tint: tint, cornerRadius: 20, surfaceOpacity: cardOpacity))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(NoopPanelSurface(tint: info.tint, cornerRadius: 16, surfaceOpacity: cardOpacity))
+        }
     }
 
     // MARK: - Synthesis (greeting + readiness pills + one-liner)
@@ -1305,7 +1456,7 @@ struct LiquidTodayView: View {
                 }
                 // #706/#684: the same trends the HRV / Resting HR / Respiratory dashboard cards push. These
                 // rows show the SAME three vitals and had no way through, so this card was the one place on
-                // Today where a metric was a dead end. Routes taken from `liquidCard`'s own cases so the two
+                // Today where a metric was a dead end. Routes taken from `cardInfo`'s own cases so the two
                 // surfaces cannot send the same vital to different trends.
                 vitalRow(String(localized: "Heart-rate variability"), unitText(hrv, "ms"),
                          StrandPalette.metricCyan, fracOver(hrv, 120), route: .metric("hrv"))
@@ -1337,7 +1488,7 @@ struct LiquidTodayView: View {
     private func vitalRowBody(_ label: String, _ value: String, _ tint: Color, _ frac: Double?,
                               linked: Bool) -> some View {
         HStack(spacing: 12) {
-            // Same as cardLinkBody: without this the disc eats the row's NavigationLink tap.
+            // Without this the disc eats the row's NavigationLink tap.
             LiquidVessel(value: frac, tint: tint, animated: false, tapPassesThrough: true)
                 .frame(width: 26, height: 26)
             Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
