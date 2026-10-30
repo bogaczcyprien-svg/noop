@@ -1093,10 +1093,21 @@ public final class BLEManager: NSObject, ObservableObject {
     /// Structural-triage hits: the empirical search for the packet TYPE these records arrive under.
     private var ecgProbeCandidates: [String] = []
     private var ecgProbePacketsSeen = 0
-    /// Non-nil while the listen window is open; drives `ecgProbeArmed`.
+    /// Non-nil while the listen window is open; drives `ecgProbeArmed`. A MARKER, not a deadline:
+    /// nothing compares the stamp to the clock, and the window's length lives only in the verdict
+    /// timer, so do not start reading this as the moment a run ends.
     private var ecgProbeDeadline: Date?
     /// Supersedes a previous run's pending verdict timer when the user taps again.
     private var ecgProbeRunToken = 0
+    /// When the run in flight began, so the report states the time actually listened rather than the
+    /// window asked for. A terminal frame ends a run early (`Whoop5EcgProbe.terminalGraceSeconds`), so
+    /// those two stopped being the same number.
+    private var ecgProbeStartedAt: Date?
+    /// Whether this run already pushed its deadline out on a terminal frame. Once only, or a terminal
+    /// stream would postpone the verdict forever.
+    private var ecgProbeTerminalExtended = false
+    /// How many TERMINAL candidate lines this run has kept, against the reserve the cap holds back.
+    private var ecgProbeTerminalLinesKept = 0
     private var clockRequested = false
     /// #700: retry count for GET_CLOCK when no correlation establishes before backfill. Capped at 3.
     private var clockRetries = 0
@@ -2244,12 +2255,33 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     /// Stop a realtime IMU producer left armed after a crash, lost stop write, or another client.
+    ///
+    /// A live MG ECG record is EXEMPT (#2846). Type 43 is `REALTIME_RAW_DATA`, which is also the type an
+    /// MG emits during an ECG capture: an R17 record is type 43, revision 17. Nothing else in this guard
+    /// knows a capture exists, so before the exemption the fail-safe fired every 30 s for as long as
+    /// generation ran — 49 unrequested `stopRawData` + `toggleIMUMode` pairs measured in one 25-minute
+    /// session (#891). The recording survived it; the app was still telling the strap to stop a producer
+    /// it had started itself.
+    ///
+    /// The exemption keys on the FRAME, not on probe state, and that is the load-bearing choice. Neither
+    /// flag describes generation's lifetime: `ecgProbeArmed` covers only the listen window while
+    /// generation runs to the strap's own 10-minute limit, so a state-keyed carve-out would go quiet for
+    /// a minute and then resume writing into the rest of the recording. `ecgMayBeRunning` does outlive
+    /// the window, and is the worse choice for the opposite reason: it stays latched until a completed
+    /// stop, so keying on it would disarm the fail-safe for exactly the abandoned sessions it exists to
+    /// recover. Per-frame keeps that recovery intact, because an orphaned IMU producer streaming
+    /// alongside a capture emits frames that do not decode as R17.
+    ///
+    /// `r17FromFrame` is the same predicate `noteEcgProbeCandidate` counts a packet with, so the probe
+    /// and this guard cannot disagree about whether a frame is ECG. It is last in the guard because it is
+    /// the only clause that walks the body: the state and rate-limit checks short-circuit ahead of it.
     private func stopUnexpectedRealtimeImu(_ frame: [UInt8], isOffload: Bool, now: Date = Date()) {
         guard selectedModel.deviceFamily == .whoop5, !isOffload, frame.count > 8,
               frame[8] == 43 || frame[8] == 51,
               !rawCaptureInFlight, !UserDefaults.standard.bool(forKey: "enableRawCapture"),
               now.timeIntervalSince(rawCaptureStoppedAt) >= 3,
-              now.timeIntervalSince(unexpectedImuStopAt) >= 30 else { return }
+              now.timeIntervalSince(unexpectedImuStopAt) >= 30,
+              Whoop5Ecg.r17FromFrame(frame) == nil else { return }
         unexpectedImuStopAt = now
         send(.stopRawData, payload: [0x01], writeType: .withResponse)
         send(.toggleIMUMode, payload: [0x01, 0x00], writeType: .withResponse)
@@ -4299,10 +4331,12 @@ public final class BLEManager: NSObject, ObservableObject {
 
     /// Sentinel shown while a probe run is in flight (twin of the #592/#690 constants).
     public static let ecgProbeWaiting = "__waiting__"
-    /// How long the probe listens for ECG-shaped packets before rendering its verdict.
-    private static let ecgProbeWindow: TimeInterval = 30
-    /// Cap on recorded candidate-frame lines, so a chatty stream can't grow the report without bound.
-    private static let ecgProbeMaxCandidates = 12
+    /// How long a run that is waiting on a COMMAND_RESPONSE listens before rendering its verdict.
+    /// Derived from `Whoop5EcgProbe.Window` so the two platforms cannot hold different numbers: that
+    /// they both held 30 independently is how the window outlived the evidence against it (#891).
+    private static let ecgProbeWindow = TimeInterval(Whoop5EcgProbe.Window.selectOrStop)
+    /// The CAPTURE run's window. Longer, because a reading's terminal frame lands at 38 to 39 s.
+    private static let ecgProbeCaptureWindow = TimeInterval(Whoop5EcgProbe.Window.capture)
     /// Cap on recorded steps. A run sends at most three, so the headroom is for UNSOLICITED replies —
     /// which are inbound-driven and therefore need the same bound as the candidate list.
     private static let ecgProbeMaxSteps = 12
@@ -4452,7 +4486,7 @@ public final class BLEManager: NSObject, ObservableObject {
         sendEcgCommand(.toggleLabradorRawSave, arg: 1)
         ecgSendAbortHistorical()
         sendEcgCommand(.toggleLabradorDataGeneration, arg: Whoop5Ecg.ControlSignal.start.rawValue)
-        scheduleEcgProbeVerdict()
+        scheduleEcgProbeVerdict(after: BLEManager.ecgProbeCaptureWindow)
     }
 
     /// The START list's first member: ABORT_HISTORICAL_TRANSMITS (20), immediately ahead of `124`.
@@ -4511,7 +4545,15 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         ecgStopOverride = true
         defer { ecgStopOverride = false }
-        if reportsResult { beginEcgProbeRun(clearingSteps: true) } else { ecgProbeSteps = [] }
+        // Read BEFORE the run is re-armed: an open window means the capture's verdict has not rendered
+        // yet, so its evidence has never been reported and must survive into this run. Once the verdict
+        // has rendered the lines are already out, and a later stop is a genuinely separate run.
+        let captureStillListening = ecgProbeArmed
+        if reportsResult {
+            beginEcgProbeRun(clearingSteps: true, keepingEvidence: captureStillListening)
+        } else {
+            ecgProbeSteps = []
+        }
         log("ECG probe: stopping ECG data generation and both streams")
         sendEcgCommand(.toggleLabradorDataGeneration, arg: Whoop5Ecg.ControlSignal.stop.rawValue)
         sendEcgCommand(.toggleLabradorRawSave, arg: 0)
@@ -4523,28 +4565,55 @@ public final class BLEManager: NSObject, ObservableObject {
     /// Clear the probe result (dialog dismissed).
     public func clearEcgProbe() { state.ecgProbe = nil }
 
-    private func beginEcgProbeRun(clearingSteps: Bool) {
+    /// `keepingEvidence` carries a capture's collected R17 lines, packet count and start time into the
+    /// STOP run that follows it, instead of clearing them with the steps.
+    ///
+    /// Without it the stop discards exactly what this probe exists to retain. The reading completes at
+    /// 38 to 39 s (#891) while the sheet still reads "waiting", so the natural next action is to stop a
+    /// session the user can tell has finished — and that wiped every candidate line, the terminal frame
+    /// among them. The 30 s window hid this by rendering the verdict before most people got there.
+    ///
+    /// The START TIME travels with the packets on purpose. The report states "packets seen in Ns", so
+    /// keeping a count from a 47 s capture under a 30 s stop window would attribute those packets to a
+    /// span that did not collect them.
+    private func beginEcgProbeRun(clearingSteps: Bool, keepingEvidence: Bool = false) {
         if clearingSteps {
             ecgProbeSteps = []
-            ecgProbeCandidates = []
-            ecgProbePacketsSeen = 0
+            if !keepingEvidence {
+                ecgProbeCandidates = []
+                ecgProbePacketsSeen = 0
+            }
         }
         ecgProbeRunToken &+= 1
-        ecgProbeDeadline = Date().addingTimeInterval(BLEManager.ecgProbeWindow)
+        if !keepingEvidence { ecgProbeStartedAt = Date() }
+        ecgProbeTerminalExtended = false
+        ecgProbeTerminalLinesKept = 0
+        // Armed from HERE rather than from `scheduleEcgProbeVerdict`, because the sends in between can
+        // draw a COMMAND_RESPONSE and the triage is gated on this. The VALUE is a marker only: nothing
+        // compares it to the clock, and the length of the window lives in the verdict timer alone, so
+        // there is one number to get right instead of two that can disagree.
+        ecgProbeDeadline = Date()
         state.ecgProbe = BLEManager.ecgProbeWaiting
     }
 
     /// Render the verdict once the listen window closes. BLE callbacks and this timer both run on the
     /// main queue, so the token check is race-free without a lock.
-    private func scheduleEcgProbeVerdict() {
+    private func scheduleEcgProbeVerdict(after window: TimeInterval = BLEManager.ecgProbeWindow) {
+        // Renews the armed marker as well as the timer: a terminal frame re-arms through here, and the
+        // two must not be able to drift apart.
+        ecgProbeDeadline = Date()
         let token = ecgProbeRunToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + BLEManager.ecgProbeWindow) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + window) { [weak self] in
             guard let self, self.ecgProbeRunToken == token else { return }
             self.ecgProbeDeadline = nil
+            // The time LISTENED, not the window asked for. A terminal frame cuts a run short, and the
+            // verdict text quotes this number ("no ECG packet arrived in Ns"), so quoting the request
+            // would have the report claim a window it did not run.
+            let listened = Int((Date().timeIntervalSince(self.ecgProbeStartedAt ?? Date())).rounded())
             let text = Whoop5EcgProbe.report(steps: self.ecgProbeSteps,
                                              ecgPacketsSeen: self.ecgProbePacketsSeen,
                                              candidateFrames: self.ecgProbeCandidates,
-                                             windowSeconds: Int(BLEManager.ecgProbeWindow))
+                                             windowSeconds: listened)
             self.log("ECG probe:\n\(text)")
             self.state.ecgProbe = text
         }
@@ -4617,7 +4686,25 @@ public final class BLEManager: NSObject, ObservableObject {
     private func noteEcgProbeCandidate(_ frame: [UInt8]) {
         guard frame.count >= 12, let packet = Whoop5Ecg.r17FromFrame(frame) else { return }
         ecgProbePacketsSeen += 1
-        guard ecgProbeCandidates.count < BLEManager.ecgProbeMaxCandidates else { return }
+        // A TERMINAL frame is kept even past the cap, and ends the run on a grace period rather than on
+        // the frame itself. Both halves come from #891: the result, average HR and reason mask populate
+        // only on that frame, so the old flat cap kept seconds 1 to 12 and discarded the one frame that
+        // carried the answer; and the variability field reads 0xffff for several seconds after it, so
+        // stopping on the frame would pin the unset value as the reading's own.
+        if let grace = Whoop5EcgProbe.terminalGraceSeconds(isTerminal: packet.isTerminal,
+                                                           alreadyExtended: ecgProbeTerminalExtended) {
+            ecgProbeTerminalExtended = true
+            // Re-arm rather than cancel: bumping the token strands the pending verdict timer, which is
+            // the same mechanism a second user tap already uses.
+            ecgProbeRunToken &+= 1
+            log("ECG probe: terminal frame (state=\(packet.classifierState) progress="
+                + "\(packet.progress.raw)) — listening \(grace)s more before the verdict")
+            scheduleEcgProbeVerdict(after: TimeInterval(grace))
+        }
+        guard Whoop5EcgProbe.retainsCandidate(linesKept: ecgProbeCandidates.count,
+                                              terminalLinesKept: ecgProbeTerminalLinesKept,
+                                              isTerminal: packet.isTerminal) else { return }
+        if packet.isTerminal { ecgProbeTerminalLinesKept += 1 }
         // The classifier byte is logged as a NUMBER, never as its token name: a strap log is a shareable
         // artefact, and no line in it should read like a clinical finding. The decoder maps the value
         // offline; the raw byte is lossless.
@@ -6192,6 +6279,9 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         ecgProbeSteps = []
         ecgProbeCandidates = []
         ecgProbePacketsSeen = 0
+        ecgProbeStartedAt = nil
+        ecgProbeTerminalExtended = false
+        ecgProbeTerminalLinesKept = 0
         // The DIS strings belong to the link that just dropped; a stale variant must not keep an MG-only
         // capability unlocked for whatever connects next.
         state.whoop5Variant = nil
@@ -6807,12 +6897,15 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 // Declining must not be silent — see `ClientHelloOutcome.declinedLine`.
                 log(ClientHelloOutcome.declinedLine(charUuid: characteristic.uuid.uuidString, status: nil))
             }
-            if ClientHelloOutcome.isAck(
+            switch ClientHelloOutcome.classify(
                 isHelloChar: isHelloChar,
                 helloOutstanding: helloOutstanding,
                 alreadyBonded: didBond,
+                encryptedBond: state.encryptedBond,
+                samePeripheralAsBond: lastBondedPeripheralUUID == peripheral.identifier,
                 isWhoop5: true
             ) {
+            case .firstBond:
                 didBond = true
                 // #1635: the handshake demonstrably works on this strap - drop the latch so a later
                 // transient failure starts from a clean slate rather than inheriting an old verdict.
@@ -6837,6 +6930,25 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 if let elapsed = helloElapsedMs, let timingLine = ClientHelloOutcome.unverifiedBondTimingLine(elapsedMs: elapsed) {
                     log(timingLine)
                 }
+            case .reprove:
+                // #2716's WHOOP 4.0 case on the other family: `didConnect` re-entered a live link with no
+                // disconnect before it (a Bluetooth power cycle) and cleared the flag, and this hello's own
+                // completion is the same proof the first bond recorded. Restore the flag ONLY. `didBond`,
+                // `bondedAt`, the suppression latch and the give-up counters all describe a bond this link
+                // already made, so re-running them would restart the bond-loop stopwatch and the #982
+                // never-bonded detector on a bond that never lapsed. See `ClientHelloOutcome.HelloAck`.
+                state.encryptedBond = true
+                noteGenuineBond(of: peripheral)
+                emitConnectionBondState("encryptedBond family=whoop5 (CLIENT_HELLO acked, re-entered link)")
+                log("WHOOP 5/MG: CLIENT_HELLO acked again on a re-entered link — encrypted bond restored.")
+                // The #1883 timing tell still applies: a re-entered link is no more able to verify the
+                // completion came from the strap than the first one was, and dropping the line here would
+                // leave the one tell Apple has missing from exactly the path that re-grants the bond.
+                if let elapsed = helloElapsedMs, let timingLine = ClientHelloOutcome.unverifiedBondTimingLine(elapsedMs: elapsed) {
+                    log(timingLine)
+                }
+            case .alreadyProven, .notAnAck:
+                break
             }
             for c in whoop5NotifyCharacteristics where !c.isNotifying || restoreNeedsResubscribe {
                 requestNotify(c, on: peripheral, reason: "post-bond puffin")   // #613: force re-arm on restore
@@ -6904,7 +7016,10 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             return
         }
 
-        if !didBond {
+        switch Whoop4BondAck.classify(didBond: didBond,
+                                      encryptedBond: state.encryptedBond,
+                                      samePeripheralAsBond: lastBondedPeripheralUUID == peripheral.identifier) {
+        case .firstBond:
             didBond = true
             state.bonded = true
             state.encryptedBond = true   // WHOOP 4 confirmed-write bond is always genuine — #69
@@ -6912,6 +7027,15 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             noteGenuineBond(of: peripheral)   // #52: this strap bonds fine; clears any pin-refusal streak
             emitConnectionBondState("encryptedBond family=whoop4 (confirmed write acked)")
             log("BONDED (confirmed write acknowledged) — custom channels should now flow")
+        case .reprove:
+            // didConnect re-entered with no disconnect before it (a Bluetooth power cycle) and cleared the
+            // flag; this ack is the same proof the first bond recorded. See `Whoop4BondAck`.
+            state.encryptedBond = true
+            noteGenuineBond(of: peripheral)
+            emitConnectionBondState("encryptedBond family=whoop4 (confirmed write acked, re-entered link)")
+            log("BONDED again (confirmed write acknowledged on a re-entered link)")
+        case .alreadyProven:
+            break
         }
         // Run the connect handshake EXACTLY ONCE per connection. didWriteValueFor re-fires on EVERY
         // .withResponse write — the bond write, every SEND_HISTORICAL, every HISTORY_END ack. Without
