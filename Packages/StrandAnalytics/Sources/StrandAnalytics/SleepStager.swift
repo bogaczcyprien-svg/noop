@@ -6,7 +6,11 @@ import WhoopProtocol
 // Ported from server/ingest/app/analysis/sleep.py and sleep_features.py.
 //
 // HONEST HEDGING: these stages are APPROXIMATIONS, not PSG-validated, not medical
-// advice. The EEG-free 4-class ceiling is ~65–73% epoch agreement (Walch 2019).
+// advice. No four-class ceiling is quoted here, and the reason is a correction (#2835): this line used
+// to cite "~65–73% epoch agreement (Walch 2019)" for one, but Walch et al. (2019) report a THREE-class
+// task (wake/NREM/REM, about 72%) and a separate two-class sleep/wake result near 90%, attempting no
+// light/deep separation at all. The four classes staged below are a harder problem than the three that
+// number came from, so it is an upper bound from an easier task rather than a ceiling for this one.
 // Light/deep separation is the weakest link — deep-minute estimates are the least
 // reliable output.
 //
@@ -2124,6 +2128,31 @@ public enum SleepStager {
     static let rsaMinBreathIntervalS = 2.5   // 24 bpm
     static let rsaMaxBreathIntervalS = 10.0  // 6 bpm
 
+    /// Half-width, as a fraction of the window's median breath interval, of the intervals averaged into
+    /// that window's rate (`rsaAnchoredMeanInterval`).
+    static let rsaIntervalBand = 0.4
+
+    /// One window's breath interval: the MEAN of the intervals within ±`rsaIntervalBand` of their median.
+    ///
+    /// Peak positions sit on the 0.25 s resample grid and, on a piecewise-linear tachogram, near beat
+    /// times, so single intervals come in coarse steps. The median of such values is itself one of those
+    /// steps, which left the nightly rate on a handful of values (60/4.25 = 14.12 for every true rate
+    /// from about 13.3 to 15.0 in a 7 h synthetic replay). Averaging the ~60 intervals of a window
+    /// cancels the grid jitter; anchoring on the median keeps the #958 protection, since a missed
+    /// breath (≈2× the median) or a split one (≈0.5×) falls outside the band and is not averaged in.
+    /// Replay over 11–17 bpm, three nights each: mean absolute error 0.63 → 0.06 bpm.
+    static func rsaAnchoredMeanInterval(_ intervals: [Double]) -> Double {
+        let med = HRVAnalyzer.median(intervals)
+        guard med > 0.0 else { return med }
+        var sum = 0.0
+        var count = 0
+        for iv in intervals where abs(iv - med) <= rsaIntervalBand * med {
+            sum += iv
+            count += 1
+        }
+        return count > 0 ? sum / Double(count) : med
+    }
+
     /// THE canonical plausible sleeping-respiratory-rate band (bpm). The RSA peak-pick below can
     /// yield 6–8 bpm at its noise floor, but every consumer (illness/readiness gates) only acts on
     /// 8–25 — so respRateFromRR clamps its output to this band (NaN outside it) and the stored
@@ -2295,8 +2324,8 @@ public enum SleepStager {
                         }
                     }
                     if intervals.count >= 2 {
-                        let med = HRVAnalyzer.median(intervals)
-                        if med > 0.0 { perWindowRates.append(60.0 / med) }
+                        let mean = rsaAnchoredMeanInterval(intervals)
+                        if mean > 0.0 { perWindowRates.append(60.0 / mean) }
                     }
                 }
             }

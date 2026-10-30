@@ -216,4 +216,32 @@ class RespRateRsaTest {
         assertTrue(SleepStager.respRateFromRR(rows, start, start + 10).isNaN())
         assertTrue(SleepStager.respRateFromRR(emptyList(), start, start + 10).isNaN())
     }
+
+    /**
+     * The per-window median of grid-quantised intervals stepped in coarse values (13.5 bpm read 14.12,
+     * 14.0 and 14.5 both read 15.0). Three planted rates half a breath apart must now each read back to
+     * within 0.1 bpm, so neighbouring nights are told apart. Mirrors the Swift vectors.
+     */
+    @Test
+    fun respRateFromRR_resolvesRatesHalfABreathApart() {
+        val start = 1_700_000_000L
+        for (bpm in listOf(13.5, 14.0, 14.5)) {
+            val rows = ArrayList<RrInterval>()
+            var tSec = 0.0
+            while (tSec < 1200.0) {
+                val rrMs = 1000.0 + 40.0 * Math.sin(2.0 * Math.PI * (bpm / 60.0) * tSec)
+                tSec += rrMs / 1000.0
+                rows.add(RrInterval(deviceId = "test", ts = start + tSec.toLong(), rrMs = rrMs.toInt()))
+            }
+            val est = SleepStager.respRateFromRR(rows, start, start + tSec.toLong())
+            assertEquals("planted $bpm bpm", bpm, est, 0.1)
+        }
+    }
+
+    /** A missed breath (about twice the median) and a split one (about half) stay out of the average. */
+    @Test
+    fun anchoredMeanInterval_ignoresMissedAndSplitBreaths() {
+        assertEquals(4.25, SleepStager.rsaAnchoredMeanInterval(listOf(4.0, 4.25, 4.25, 4.5, 8.5, 2.0)), 1e-12)
+        assertEquals(4.25, SleepStager.rsaAnchoredMeanInterval(listOf(4.0, 4.5)), 1e-12)
+    }
 }
