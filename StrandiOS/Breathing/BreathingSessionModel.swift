@@ -452,7 +452,6 @@ enum BreathingSessionText {
         if let p = s.progression {
             lines.append(String(localized: "Level \(p.levelBefore)"))
         }
-        if let line = coreLine(s) { lines.append(line) }
         if let bpm = s.resonanceBpm {
             let pace = String(format: "%.1f", bpm)
             lines.append(s.resonanceLocked
@@ -462,12 +461,6 @@ enum BreathingSessionText {
         lines.append(String(localized: "Breathing rate is read from the heartbeat (RSA); during guided breathing, the guided pace fills gaps."))
         lines.append("NOOP")
         return lines.joined(separator: "\n")
-    }
-
-    /// "Core temperature: 36.9 °C at the start, 37.1 °C at the end", or nil without a CORE reading.
-    static func coreLine(_ s: BreathingSessionModel.Summary) -> String? {
-        guard let a = s.coreStartC, let b = s.coreEndC else { return nil }
-        return String(localized: "Core temperature: \(String(format: "%.1f", a)) °C at the start, \(String(format: "%.1f", b)) °C at the end")
     }
 
     static func partLine(_ name: String, _ p: BreathingSessionModel.PartStats) -> String {
