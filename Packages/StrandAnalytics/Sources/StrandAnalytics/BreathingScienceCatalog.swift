@@ -46,11 +46,13 @@ public struct BreathingExercise: Equatable, Sendable, Identifiable {
     public var pacedBreathsPerMinute: Double? {
         guard case .paced(let stages) = drill else { return nil }
         let cycleMs = stages.reduce(0) { $0 + $1.durationMs }
-        let breaths = stages.filter { $0.type == .inhale }.count
+        // Back-to-back inhale stages (the cyclic sigh's sniff, the full-lungs three steps) are one breath:
+        // count an inhale only when the stage before it, wrapping round the cycle, is not one.
+        let breaths = stages.indices.filter { i in
+            stages[i].type == .inhale && stages[(i + stages.count - 1) % stages.count].type != .inhale
+        }.count
         guard cycleMs > 0, breaths > 0 else { return nil }
-        // A double inhale (the cyclic sigh) is still one breath.
-        let perCycle = id == BreathingScienceCatalog.cyclicSighId ? 1 : breaths
-        return Double(perCycle) * 60_000.0 / Double(cycleMs)
+        return Double(breaths) * 60_000.0 / Double(cycleMs)
     }
 
     /// The same exercise as a `BreathProtocol`, so `BreathProtocolPlayer` can schedule its cues.
@@ -81,7 +83,9 @@ public enum BreathingScienceCatalog {
     public static let co2Id = "science_6_6_10"
     public static let breathHoldsId = "science_breath_holds"
     public static let respiratoryMuscleId = "science_respiratory_muscle"
+    public static let fullLungsId = "science_full_lungs"
     public static let airwaysId = "science_airways_humming"
+    public static let asthmaExhaleId = "science_asthma_exhale"
     public static let sleepId = "science_sleep_4_8"
     public static let boxId = "science_box_4_4_4_4"
 
@@ -114,7 +118,7 @@ public enum BreathingScienceCatalog {
             title: "Coherence at my pace",
             subtitle: "Your resonance pace · 5 min",
             benefits: ["The strongest calming effect, at your own pace", "Trains the reflex that steadies blood pressure (baroreflex)", "Same benefits as cardiac coherence, a bit stronger"],
-            howTo: "Equal breaths in and out at the pace your resonance test found. Until you take the test, it uses 5.5 per minute.",
+            howTo: "Equal breaths in and out at the pace your resonance test found.",
             evidence: "Same evidence as cardiac coherence, at the pace that gives you the biggest effect.",
             guidedSeconds: 5 * 60,
             drill: .resonancePaced),
@@ -164,6 +168,20 @@ public enum BreathingScienceCatalog {
             drill: .paced([BreathStage(type: .inhale, durationMs: 2_000, label: "Strong in"),
                            BreathStage(type: .exhale, durationMs: 4_000, label: "Slow out")])),
         BreathingExercise(
+            id: fullLungsId,
+            title: "Full lungs",
+            subtitle: "Belly · ribs · chest · hold · slow out",
+            benefits: ["Uses all of your lungs, from bottom to top", "Loosens the rib cage and the breathing muscles", "Over the weeks, deep breaths feel easier", "Lung size itself does not grow in adults"],
+            howTo: "Seated or standing tall. Breathe in through the nose in three steps: fill the belly, then widen the ribs, then lift the upper chest. Hold full for 3 seconds without straining, then breathe out slowly through the mouth until empty.",
+            evidence: "In adults, training does not make the lungs bigger. What deep breathing can improve is how much of them you use: small, mostly low-quality trials of yogic deep breathing (pranayama) report modest gains in chest expansion and in vital capacity, the volume you can breathe out. Stronger breathing muscles come from respiratory muscle training.",
+            caution: "Stop if you feel dizzy. Never strain during the hold.",
+            guidedSeconds: 5 * 60,
+            drill: .paced([BreathStage(type: .inhale, durationMs: 2_000, label: "Fill the belly"),
+                           BreathStage(type: .inhale, durationMs: 2_000, label: "Widen the ribs"),
+                           BreathStage(type: .inhale, durationMs: 2_000, label: "Upper chest"),
+                           BreathStage(type: .hold, durationMs: 3_000, label: "Hold full"),
+                           BreathStage(type: .exhale, durationMs: 7_000, label: "Slow out")])),
+        BreathingExercise(
             id: airwaysId,
             title: "Open the airways",
             subtitle: "Nose in · humming out · lips pursed",
@@ -177,6 +195,18 @@ public enum BreathingScienceCatalog {
                            BreathStage(type: .inhale, durationMs: 4_000), BreathStage(type: .exhale, durationMs: 8_000, label: "Hum out"),
                            BreathStage(type: .inhale, durationMs: 5_000, label: "Deep in"),
                            BreathStage(type: .exhale, durationMs: 8_000, label: "Pursed lips out")])),
+        BreathingExercise(
+            id: asthmaExhaleId,
+            title: "Breathe out better (asthma)",
+            subtitle: "Nose in 3 s · soft out 6 s · pause 2 s",
+            benefits: ["Learn to empty your lungs without forcing", "Belly breathing instead of upper-chest breathing", "May ease asthma symptoms and improve daily life", "Not a treatment: keep your inhaler"],
+            howTo: "Seated, one hand on the belly. Breathe in gently through the nose for 3 seconds, belly rising. Breathe out through pursed lips for 6 seconds, softly, as if cooling a spoonful of soup: never push the air out hard. Then rest 2 seconds before the next breath. If you feel tightness or the urge to cough, go back to normal breathing.",
+            evidence: "Breathing retraining (nose and belly breathing, a slow and soft exhale, as in the Papworth method) improved asthma quality of life in randomised trials (Thomas 2009; Bruton 2018, the BREATHE trial). A Cochrane review (Santino 2020) finds breathing exercises may improve quality of life and symptoms, with low to moderate certainty, and little change in lung-function tests. Pursed lips keep the airways open longer while you breathe out; forcing the exhale can narrow them, so softness matters.",
+            caution: "Not during an asthma attack: use your reliever inhaler. Keep your treatment; this does not replace it.",
+            guidedSeconds: 5 * 60,
+            drill: .paced([BreathStage(type: .inhale, durationMs: 3_000, label: "Nose in"),
+                           BreathStage(type: .exhale, durationMs: 6_000, label: "Soft out, pursed lips"),
+                           BreathStage(type: .hold, durationMs: 2_000, label: "Relaxed pause")])),
         BreathingExercise(
             id: sleepId,
             title: "Fall asleep 4-8",

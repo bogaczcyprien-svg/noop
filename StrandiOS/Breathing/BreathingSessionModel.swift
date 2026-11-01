@@ -47,6 +47,8 @@ final class BreathingSessionModel: ObservableObject {
         var holdsSeconds: [Int] = []
         var resonanceBpm: Double?
         var resonanceLocked = false
+        /// Resonance test only: how many of the swept paces had enough clean beats to be scored.
+        var resonanceScoredPaces = 0
         var totalSeconds = 0
         var source: String = ""
         /// Training drills only: the level before and after this session.
@@ -360,6 +362,7 @@ final class BreathingSessionModel: ObservableObject {
             let result = sweepResult(guidedStart: g.timeIntervalSince1970, perPace: perPace)
             s.resonanceBpm = result.lockedBpm
             s.resonanceLocked = result.didLock
+            s.resonanceScoredPaces = result.scores.filter(\.scored).count
             if result.didLock { BiofeedbackPrefs.saveLockedPace(result.lockedBpm, date: end) }
         }
         if BreathingProgression.isProgressive(exercise.id) {

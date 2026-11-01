@@ -445,6 +445,7 @@ private struct ExerciseDetailSheet: View {
                     }
                     if BreathingProgression.isProgressive(exercise.id) { levelCard }
                     section("How to do it", exercise.howTo)
+                    if exercise.id == BreathingScienceCatalog.resonanceId { resonancePaceStatus }
                     section("What the research says", exercise.evidence)
                     if let c = exercise.caution {
                         HStack(alignment: .top, spacing: 8) {
@@ -467,6 +468,21 @@ private struct ExerciseDetailSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
         }
+    }
+
+    /// Which pace "Coherence at my pace" will use: the saved test result with its date, or the default.
+    private var resonancePaceStatus: some View {
+        let text: String
+        if let bpm = BiofeedbackPrefs.lockedPace {
+            let pace = String(format: "%.1f", bpm)
+            let date = (BiofeedbackPrefs.lockedPaceDate ?? Date()).formatted(date: .abbreviated, time: .omitted)
+            text = String(localized: "Your resonance pace: \(pace) breaths/min, found on \(date).")
+        } else {
+            let pace = String(format: "%.1f", ResonanceEngine.fallbackBpm)
+            text = String(localized: "No resonance pace saved yet, so it uses \(pace) breaths/min. Take the resonance test to find yours.")
+        }
+        return Text(verbatim: text).font(StrandFont.body).foregroundStyle(StrandPalette.accent)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func section(_ title: LocalizedStringKey, _ body: String) -> some View {
