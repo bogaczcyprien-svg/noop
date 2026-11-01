@@ -118,7 +118,7 @@ public enum BreathingScienceCatalog {
             title: "Coherence at my pace",
             subtitle: "Your resonance pace · 5 min",
             benefits: ["The strongest calming effect, at your own pace", "Trains the reflex that steadies blood pressure (baroreflex)", "Same benefits as cardiac coherence, a bit stronger"],
-            howTo: "Equal breaths in and out at the pace your resonance test found. Until you take the test, it uses 5.5 per minute.",
+            howTo: "Equal breaths in and out at the pace your resonance test found.",
             evidence: "Same evidence as cardiac coherence, at the pace that gives you the biggest effect.",
             guidedSeconds: 5 * 60,
             drill: .resonancePaced),
