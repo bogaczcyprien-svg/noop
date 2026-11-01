@@ -143,6 +143,11 @@ final class BreathingSignalTests: XCTestCase {
         XCTAssertEqual(try rate(BreathingScienceCatalog.co2Id), 60.0 / 22.0, accuracy: 1e-9)
         // The double inhale of the cyclic sigh is one breath: 9 s per breath.
         XCTAssertEqual(try rate(BreathingScienceCatalog.cyclicSighId), 60.0 / 9.0, accuracy: 1e-9)
+        // Belly, ribs, chest is one breath in three steps: 16 s per breath.
+        XCTAssertEqual(try rate(BreathingScienceCatalog.fullLungsId), 60.0 / 16.0, accuracy: 1e-9)
+        XCTAssertEqual(try rate(BreathingScienceCatalog.asthmaExhaleId), 60.0 / 11.0, accuracy: 1e-9)
+        // Four separate breaths in one 52 s cycle.
+        XCTAssertEqual(try rate(BreathingScienceCatalog.airwaysId), 4.0 * 60.0 / 52.0, accuracy: 1e-9)
     }
 
     func testResonancePacedUsesTheLockedPace() throws {

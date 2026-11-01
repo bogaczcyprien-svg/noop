@@ -183,7 +183,7 @@ struct BreathingSessionView: View {
                 if let bpm = s.resonanceBpm {
                     Text(s.resonanceLocked
                          ? String(localized: "Your resonance pace: \(String(format: "%.1f", bpm)) breaths/min. \"Coherence at my pace\" now uses it.")
-                         : String(localized: "No clear resonance pace this time (too few clean beats). Try again with the chest strap."))
+                         : String(localized: "No resonance pace saved: only \(s.resonanceScoredPaces) of \(ResonanceEngine.fullSweepPaces.count) paces had enough clean heartbeats, and at least \(ResonanceEngine.minScoredPaces) are needed. Go to the end of the test, stay still, and wear the chest strap if you have one (or the WHOOP snug on the wrist)."))
                         .font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
