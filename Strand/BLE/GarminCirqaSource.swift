@@ -367,6 +367,10 @@ extension GarminCirqaSource: @preconcurrency CBCentralManagerDelegate {
         if let id = pendingConnectID {
             pendingConnectID = nil
             connect(id)
+        } else if feedsLive, let p = peripheral, p.state == .disconnected {
+            // Bluetooth came back after a toggle: the reconnect that failed while it was off is not retried.
+            log("Garmin: Bluetooth back on - reconnecting")
+            connect(p.identifier)
         } else if scanning {
             scan()
         }
