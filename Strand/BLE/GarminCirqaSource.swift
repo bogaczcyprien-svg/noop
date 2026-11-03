@@ -61,6 +61,9 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
     /// Consecutive pairing refusals ("encryption insufficient"): the band wants a bonded link first. Each one
     /// pushes the next reconnect further out so iOS has room to run its pairing prompt.
     private var encryptionFailures = 0
+    private var pairingProbeDone = false
+    private var probingPairing = false
+    private static let mlControl = CBUUID(string: "6A4E2803-667B-11E3-949A-0800200C9A66")
 
     /// The in-flight directory download (index 0), if any.
     private struct Download {
@@ -495,6 +498,15 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
             }
             return
         }
+        if probingPairing {
+            probingPairing = false
+            if let c = chars.first(where: { $0.uuid == Self.mlControl }), c.properties.contains(.read) {
+                peripheral.readValue(for: c)
+            } else {
+                log("Garmin: pairing probe - control characteristic not readable, skipped")
+            }
+            return
+        }
         log("Garmin: characteristics " + chars.map { "\($0.uuid.uuidString.prefix(8))[\($0.properties.rawValue)]" }
             .joined(separator: " "))
         // First complete notify/write pair (notify 0x2810+i, write 0x2820+i).
@@ -521,6 +533,14 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
             // keep the working standard-HR link instead of losing it again on every reconnect.
             if error == nil, encryptionFailures >= 2 {
                 log("Garmin: multi-link refused \(encryptionFailures)x - staying on standard heart rate only")
+                // One probe per app run: a plain READ of the multi-link control characteristic, to see whether
+                // a read (rather than a subscribe) gets iOS to start pairing. The outcome is logged either way.
+                if !pairingProbeDone {
+                    pairingProbeDone = true
+                    probingPairing = true
+                    log("Garmin: pairing probe - reading the multi-link control characteristic")
+                    discoverMultiLink(peripheral)
+                }
                 return
             }
             discoverMultiLink(peripheral)
@@ -549,6 +569,11 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        if characteristic.uuid == Self.mlControl {
+            log(error.map { "Garmin: pairing probe read FAILED - \($0.localizedDescription)" }
+                ?? "Garmin: pairing probe read OK - \(characteristic.value?.count ?? 0) byte(s)")
+            return
+        }
         guard error == nil, let value = characteristic.value else { return }
         if characteristic.uuid == Self.stdHRMeasurement {
             handleStandardHR([UInt8](value))
