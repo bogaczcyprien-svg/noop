@@ -68,7 +68,11 @@ final class GarminGFDITests: XCTestCase {
 
     func testDeviceInformationParseAndReply() {
         var p: [UInt8] = [0x96, 0x00, 0x9B, 0x13, 0x01, 0x02, 0x03, 0x04, 0x40, 0x01, 0x77, 0x01]
-        p += [5] + Array("CIRQA".utf8) + [5] + Array("CIRQA".utf8) + [3] + Array("abc".utf8)
+        let cirqa: [UInt8] = Array("CIRQA".utf8)
+        let model: [UInt8] = Array("abc".utf8)
+        p.append(5); p.append(contentsOf: cirqa)
+        p.append(5); p.append(contentsOf: cirqa)
+        p.append(3); p.append(contentsOf: model)
         let info = GarminGFDI.parseDeviceInformation(p)
         XCTAssertEqual(info?.protocolVersion, 150)
         XCTAssertEqual(info?.productNumber, 5019)
