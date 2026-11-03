@@ -30,6 +30,8 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
     }
 
     private static let mlService = CBUUID(string: GarminGFDI.multiLinkService)
+    private static let stdHRService = CBUUID(string: "180D")
+    private static let stdHRMeasurement = CBUUID(string: "2A37")
 
     // MARK: - Dependencies
 
@@ -70,7 +72,9 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
 
     // MARK: - Sample buffer (same batching as StandardHRSource)
 
-    private var buffer: [(hr: Int, ts: Int)] = []
+    private var buffer: [(hr: Int, rr: [Int], ts: Int)] = []
+    /// True once the standard 0x2A37 stream delivers; the multi-link realtime-HR copy is then ignored.
+    private var standardHRFlowing = false
     private var lastFlush = Date()
 
     public init(live: LiveState,
@@ -101,7 +105,8 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
         }
         // A band already connected to this iPhone (paired in Settings, or held by another app) stops
         // advertising, so a scan alone never sees it: list the system-connected ones too.
-        for p in central.retrieveConnectedPeripherals(withServices: [Self.mlService]) {
+        // Name-filtered: iOS can hand back unrelated connected peripherals here (a WHOOP was listed once).
+        for p in central.retrieveConnectedPeripherals(withServices: [Self.mlService]) where Self.isCirqa(name: p.name) {
             log("Garmin: found \(LiveState.logSafeDeviceName(p.name ?? "Garmin")) already connected to the system")
             seenPeripherals[p.identifier] = p
             discovered = StandardHRSource.upsertByProximity(
@@ -153,6 +158,7 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
         gfdiAssembler.reset()
         handshakeDone = false
         loggedFirstHR = false
+        standardHRFlowing = false
         download = nil
     }
 
@@ -344,21 +350,35 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
     }
 
     private func handleRealtimeHR(_ body: [UInt8]) {
-        guard let r = GarminGFDI.parseRealtimeHR(body) else { return }
+        guard !standardHRFlowing, let r = GarminGFDI.parseRealtimeHR(body) else { return }
         if !loggedFirstHR {
             loggedFirstHR = true
-            log("Garmin: live heart rate flowing - first sample \(r.hr) bpm (resting \(r.resting))")
+            log("Garmin: live heart rate flowing (multi-link) - first sample \(r.hr) bpm (resting \(r.resting))")
         }
+        ingest(hr: r.hr, rr: [])
+    }
+
+    /// Standard 0x2A37 Heart Rate Measurement (with RR intervals when the band includes them).
+    private func handleStandardHR(_ bytes: [UInt8]) {
+        guard let m = StandardHeartRate.parse(bytes), m.hr > 0 else { return }
+        if !standardHRFlowing {
+            standardHRFlowing = true
+            log("Garmin: live heart rate flowing (standard 0x2A37) - first sample \(m.hr) bpm, rr=\(m.rr.count)")
+        }
+        ingest(hr: m.hr, rr: m.rr)
+    }
+
+    private func ingest(hr: Int, rr: [Int]) {
         guard feedsLive else { return }
-        live.heartRate = r.hr
+        live.heartRate = hr
         live.connected = true
-        buffer.append((hr: r.hr, ts: Int(Date().timeIntervalSince1970)))
+        buffer.append((hr: hr, rr: rr, ts: Int(Date().timeIntervalSince1970)))
         if buffer.count >= 30 || Date().timeIntervalSince(lastFlush) >= 30 { flush() }
     }
 
     private func flush() {
         guard feedsLive, !buffer.isEmpty else { lastFlush = Date(); return }
-        for s in buffer { persist(StandardHRMapping.samples(fromHR: s.hr, rr: [], at: s.ts)) }
+        for s in buffer { persist(StandardHRMapping.samples(fromHR: s.hr, rr: s.rr, at: s.ts)) }
         buffer.removeAll()
         lastFlush = Date()
     }
@@ -442,7 +462,17 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
         }
         let services = peripheral.services ?? []
         log("Garmin: services " + services.map { $0.uuid.uuidString }.joined(separator: ", "))
-        guard let ml = services.first(where: { $0.uuid == Self.mlService }) else {
+        // Standard heart rate first: it may not need a paired link, so live HR can flow even while the
+        // multi-link channel is refused. The multi-link step starts once that subscription settles.
+        if let hr = services.first(where: { $0.uuid == Self.stdHRService }) {
+            peripheral.discoverCharacteristics([Self.stdHRMeasurement], for: hr)
+        } else {
+            discoverMultiLink(peripheral)
+        }
+    }
+
+    private func discoverMultiLink(_ peripheral: CBPeripheral) {
+        guard let ml = peripheral.services?.first(where: { $0.uuid == Self.mlService }) else {
             log("Garmin: multi-link service NOT FOUND - this band does not expose the V2 protocol")
             return
         }
@@ -456,6 +486,15 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
             return
         }
         let chars = service.characteristics ?? []
+        if service.uuid == Self.stdHRService {
+            if let m = chars.first(where: { $0.uuid == Self.stdHRMeasurement }) {
+                log("Garmin: enabling standard heart rate (0x2A37)")
+                peripheral.setNotifyValue(true, for: m)
+            } else {
+                discoverMultiLink(peripheral)
+            }
+            return
+        }
         log("Garmin: characteristics " + chars.map { "\($0.uuid.uuidString.prefix(8))[\($0.properties.rawValue)]" }
             .joined(separator: " "))
         // First complete notify/write pair (notify 0x2810+i, write 0x2820+i).
@@ -475,6 +514,18 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic,
                            error: Error?) {
+        if characteristic.uuid == Self.stdHRMeasurement {
+            log(error.map { "Garmin: standard heart rate FAILED - \($0.localizedDescription)" }
+                ?? "Garmin: standard heart rate on")
+            // The band drops the whole link when it refuses the multi-link channel. After two refusals,
+            // keep the working standard-HR link instead of losing it again on every reconnect.
+            if error == nil, encryptionFailures >= 2 {
+                log("Garmin: multi-link refused \(encryptionFailures)x - staying on standard heart rate only")
+                return
+            }
+            discoverMultiLink(peripheral)
+            return
+        }
         guard characteristic.uuid == notifyChar?.uuid else { return }
         if let error {
             log("Garmin: enabling notifications FAILED - \(error.localizedDescription)")
@@ -498,8 +549,12 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?) {
-        guard error == nil, characteristic.uuid == notifyChar?.uuid, let value = characteristic.value else { return }
-        handleNotify([UInt8](value))
+        guard error == nil, let value = characteristic.value else { return }
+        if characteristic.uuid == Self.stdHRMeasurement {
+            handleStandardHR([UInt8](value))
+        } else if characteristic.uuid == notifyChar?.uuid {
+            handleNotify([UInt8](value))
+        }
     }
 }
 
