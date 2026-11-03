@@ -56,6 +56,9 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
     private var maxPacketSize = 375
     private var handshakeDone = false
     private var loggedFirstHR = false
+    /// Consecutive pairing refusals ("encryption insufficient"): the band wants a bonded link first. Each one
+    /// pushes the next reconnect further out so iOS has room to run its pairing prompt.
+    private var encryptionFailures = 0
 
     /// The in-flight directory download (index 0), if any.
     private struct Download {
@@ -405,8 +408,14 @@ extension GarminCirqaSource: @preconcurrency CBCentralManagerDelegate {
         if feedsLive { live.connected = false }
         // Reconnect while this source is the active one (a stop() clears `peripheral` first).
         if self.peripheral?.identifier == peripheral.identifier, feedsLive {
-            log("Garmin: reconnecting")
-            central.connect(peripheral, options: nil)
+            // Back off after pairing refusals (5 s, 10 s … capped at 60 s) instead of reconnecting every second.
+            let delay = encryptionFailures == 0 ? 0 : min(60, 5 * encryptionFailures)
+            log(delay == 0 ? "Garmin: reconnecting" : "Garmin: reconnecting in \(delay) s")
+            Task { @MainActor [weak self] in
+                if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000) }
+                guard let self, self.peripheral?.identifier == peripheral.identifier else { return }
+                self.central.connect(peripheral, options: nil)
+            }
         }
     }
 }
@@ -457,8 +466,15 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
         guard characteristic.uuid == notifyChar?.uuid else { return }
         if let error {
             log("Garmin: enabling notifications FAILED - \(error.localizedDescription)")
+            if let att = error as? CBATTError,
+               att.code == .insufficientEncryption || att.code == .insufficientAuthentication {
+                encryptionFailures += 1
+                // Only what was observed: the band refused an unencrypted link. Why iOS did not pair is unknown here.
+                log("Garmin: band requires a paired (encrypted) link - refusal #\(encryptionFailures)")
+            }
             return
         }
+        encryptionFailures = 0
         log("Garmin: notifications on - resetting the multi-link session")
         writeRaw(GarminGFDI.closeAllRequest())
     }
