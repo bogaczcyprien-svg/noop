@@ -99,6 +99,14 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
             log("Garmin: Bluetooth not powered on (state=\(central.state.rawValue)) - scan deferred")
             return
         }
+        // A band already connected to this iPhone (paired in Settings, or held by another app) stops
+        // advertising, so a scan alone never sees it: list the system-connected ones too.
+        for p in central.retrieveConnectedPeripherals(withServices: [Self.mlService]) {
+            log("Garmin: found \(LiveState.logSafeDeviceName(p.name ?? "Garmin")) already connected to the system")
+            seenPeripherals[p.identifier] = p
+            discovered = StandardHRSource.upsertByProximity(
+                discovered, DiscoveredBand(id: p.identifier, name: p.name ?? "CIRQA Smart Band", rssi: -50))
+        }
         central.scanForPeripherals(withServices: nil,
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
