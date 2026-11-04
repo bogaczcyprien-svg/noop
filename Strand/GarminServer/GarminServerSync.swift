@@ -196,8 +196,9 @@ final class GarminServerSync: ObservableObject {
 
         let deep = Self.num(sleep["deep_minutes"]), light = Self.num(sleep["light_minutes"])
         let rem = Self.num(sleep["rem_minutes"])
-        let total = Self.num(t["sleep_duration_minutes"])
-            ?? ([deep, light, rem].allSatisfy { $0 != nil } ? deep! + light! + rem! : nil)
+        // 0 min means Garmin recorded no night, not a night of zero sleep.
+        let total = (Self.num(t["sleep_duration_minutes"])
+            ?? ([deep, light, rem].allSatisfy { $0 != nil } ? deep! + light! + rem! : nil)).flatMap { $0 > 0 ? $0 : nil }
         let rhr = Self.num(t["resting_heart_rate"]).map { Int($0.rounded()) }
         let nightHRV = Self.points((try? await client.get("night-hrv", ["date": day])) as? [String: Any])
         let hrv = Self.num(t["avg_overnight_hrv"])
@@ -223,9 +224,17 @@ final class GarminServerSync: ObservableObject {
         }
 
         // Night window: Garmin's own bed/wake times and its per-segment hypnogram (deep/light/rem/awake,
-        // stored with the canonical segment spelling "wake"). Older server builds without them fall back
-        // to the in-sleep HR span with no stage JSON (never a synthesized hypnogram).
+        // stored with the canonical segment spelling "wake"). A day Garmin recorded no sleep for writes no
+        // session: the night-HR series of such a day is daytime HR, and a span built from it showed up as a
+        // stage-less "night" over a midday workout. Earlier builds stored exactly that, so stage-less
+        // sessions of this source inside the day's window are removed first.
         var wroteSleep = false
+        if let dayStart = Self.dayFmt.date(from: day).map({ Int($0.timeIntervalSince1970) }) {
+            for s in try await store.sleepSessions(deviceId: Self.deviceId, from: dayStart - 43_200,
+                                                   to: dayStart + 86_400, limit: 20) where s.stagesJSON == nil {
+                _ = try await store.deleteSleepSession(deviceId: Self.deviceId, startTs: s.startTs)
+            }
+        }
         let levels: [[String: Any]] = (sleep["levels"] as? [[String: Any]] ?? []).compactMap { l in
             guard let s = Self.num(l["start_ms"]), let e = Self.num(l["end_ms"]), e > s,
                   let raw = (l["stage"] as? String)?.lowercased() else { return nil }
@@ -239,9 +248,9 @@ final class GarminServerSync: ObservableObject {
         }
         let stagesJSON = levels.isEmpty ? nil
             : (try? JSONSerialization.data(withJSONObject: levels)).flatMap { String(data: $0, encoding: .utf8) }
-        let start = Self.num(sleep["sleep_start"]).map { Int($0 / 1000) } ?? nightHR.first?.ts
-        let end = Self.num(sleep["sleep_end"]).map { Int($0 / 1000) } ?? nightHR.last?.ts
-        if let start, let end, end - start >= 3_600 {
+        let start = Self.num(sleep["sleep_start"]).map { Int($0 / 1000) }
+        let end = Self.num(sleep["sleep_end"]).map { Int($0 / 1000) }
+        if let start, let end, end - start >= 3_600, (total ?? 0) > 0 {
             let lowest = nightHR.map(\.bpm).min()
             _ = try await store.upsertSleepSessions([CachedSleepSession(
                 startTs: start, endTs: end, efficiency: eff,
