@@ -280,7 +280,14 @@ final class Repository: ObservableObject {
         let registeredWhoops = paired.filter {
             $0.brand.caseInsensitiveCompare("WHOOP") == .orderedSame
         }.map(\.id)
-        return Self.rawWhoopSourceIds(activeDeviceId: deviceId, registeredWhoopIds: registeredWhoops)
+        var ids = Self.rawWhoopSourceIds(activeDeviceId: deviceId, registeredWhoopIds: registeredWhoops)
+        // Fork addition: the Garmin server source holds the CIRQA's heart rate (the live 1 Hz lane and the
+        // server's ~60 s series both write there), so the Today curve and day mean read it right after the
+        // active strap.
+        if paired.contains(where: { $0.id == GarminServerSync.deviceId }), !ids.contains(GarminServerSync.deviceId) {
+            ids.insert(GarminServerSync.deviceId, at: min(1, ids.count))
+        }
+        return ids
     }
 
     /// Every namespace the Workouts list reads a row out of, in read order, duplicates collapsed.
