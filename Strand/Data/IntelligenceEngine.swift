@@ -1473,9 +1473,9 @@ final class IntelligenceEngine: ObservableObject {
                 // sustained cycling HR, so a ride with a known imported `energyKcal` (intervals.icu's own
                 // power/speed-based number) has its HR-estimated span replaced by that number instead.
                 // Only rides with a positive imported kcal qualify — one with none keeps using the HR
-                // estimate for its window exactly as before.
+                // estimate for its window exactly as before. Every intervals.icu session qualifies, not only
+                // non-ambulatory ones: its calories are the single source of truth for training energy.
                 let excludedCalorieWindows: [(start: Int, end: Int, kcal: Double)] = intervalsRides
-                    .filter { IntelligenceEngine.isNonAmbulatorySport($0.sport) }
                     .compactMap { ride in
                         guard let kcal = ride.energyKcal, kcal > 0 else { return nil }
                         return (start: ride.startTs, end: ride.endTs, kcal: kcal)
