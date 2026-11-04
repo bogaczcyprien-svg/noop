@@ -7,15 +7,25 @@
 name: Build iOS .ipa (dev)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner image (macos-15 falls back to its newest Xcode 26 when macos-26 has no capacity)"
+        default: macos-26
 
 jobs:
   ios:
     # iOS 26 Liquid Glass (glassEffect) needs the iOS 26 SDK -> Xcode 26 -> macos-26.
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
+
+      - name: Select Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          test -n "$X" || { echo "no Xcode 26 on this runner"; exit 1; }
+          sudo xcode-select -s "$X" && xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen

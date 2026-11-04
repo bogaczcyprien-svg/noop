@@ -390,6 +390,8 @@ struct StrandiOSApp: App {
                 // timer or an incidental reconnect. Floored at 90s and never clock/empty-streak-suppressed
                 // (BackfillPolicy.shouldRun's .foreground case), so this is a safe no-op on rapid re-opens.
                 model.ble.requestSync(.foreground)
+                // Garmin server source: pull fresh days on open (throttled to every 15 min inside).
+                GarminServerSync.shared.syncIfDue(repo: model.repo)
                 // #1538: settle a re-score an earlier background attempt could not finish, rather than
                 // waiting on the 15-minute idle tick now that there is a foreground with no suspension
                 // deadline. A no-op unless one is genuinely outstanding.

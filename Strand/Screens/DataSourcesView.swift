@@ -34,6 +34,10 @@ struct DataSourcesView: View {
     @State private var wearableImporting = false
     @State private var wearableSummary: String?
     @State private var wearableFailed = false
+    // Garmin server sign-in (the password is never stored; only the server token, in the Keychain).
+    @ObservedObject private var garminServer = GarminServerSync.shared
+    @State private var garminEmail = GarminServerTokenStore.email ?? ""
+    @State private var garminPassword = ""
     #if OURA_CLOUD_IMPORT
     // Oura history import (compiled in ONLY with OURA_CLOUD_IMPORT): a one-time, user-initiated,
     // foreground OAuth + backfill of the user's own history over the Oura API, as an alternative to
@@ -98,6 +102,7 @@ struct DataSourcesView: View {
                 liftingCard.staggeredAppear(index: 4)
                 activityFileCard.staggeredAppear(index: 5)
                 wearableCard.staggeredAppear(index: 6)
+                garminServerCard.staggeredAppear(index: 7)
                 #if OURA_CLOUD_IMPORT
                 ouraCloudCard.staggeredAppear(index: 7)
                 #endif
@@ -292,6 +297,58 @@ struct DataSourcesView: View {
             if let s = wearableSummary {
                 Text(s).font(StrandFont.subhead)
                     .foregroundStyle(wearableFailed ? StrandPalette.statusWarning : StrandPalette.statusPositive)
+            }
+        }
+    }
+
+    /// Garmin server: signs in to the user's own Garmin collection server and pulls its history into the
+    /// `garmin-import` source, then keeps it fresh on every app open (throttled in GarminServerSync).
+    private var garminServerCard: some View {
+        card(title: String(localized: "Garmin server"), icon: "server.rack",
+             tint: StrandPalette.metricPurple,
+             subtitle: String(localized: "Pulls your Garmin data (heart rate, HRV, sleep, SpO2, steps, workouts) from your own server. NOOP computes its own scores from it.")) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                if garminServer.isConnected {
+                    if let email = garminServer.accountEmail {
+                        Text(email).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    HStack(spacing: NoopMetrics.space3) {
+                        Button { garminServer.syncNow(repo: repo) } label: {
+                            Label(garminServer.busy ? "Syncing…" : "Sync now", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(NoopButtonStyle(.primary))
+                        Button(role: .destructive) { garminServer.disconnect(repo: repo) } label: {
+                            Label("Disconnect", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(NoopButtonStyle(.destructive))
+                    }
+                    .disabled(garminServer.busy)
+                } else {
+                    TextField("Email", text: $garminEmail)
+                        .textContentType(.username)
+                        #if os(iOS)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("Password", text: $garminPassword)
+                        .textContentType(.password)
+                        .textFieldStyle(.roundedBorder)
+                    Button {
+                        garminServer.connect(email: garminEmail, password: garminPassword, repo: repo)
+                        garminPassword = ""
+                    } label: {
+                        Label(garminServer.busy ? "Connecting…" : "Connect", systemImage: "link")
+                    }
+                    .buttonStyle(NoopButtonStyle(.primary))
+                    .disabled(garminServer.busy || garminEmail.isEmpty || garminPassword.isEmpty)
+                }
+                if garminServer.busy { ProgressView().controlSize(.small) }
+                if let s = garminServer.statusText {
+                    Text(s).font(StrandFont.subhead)
+                        .foregroundStyle(garminServer.failed ? StrandPalette.statusWarning : StrandPalette.textSecondary)
+                }
             }
         }
     }
