@@ -109,6 +109,7 @@ final class GarminServerSync: ObservableObject {
                 // Checkpoint after every day so an interruption never re-pulls finished days.
                 UserDefaults.standard.set(day, forKey: Self.lastDayKey)
             }
+            totals.hr += try await upgradeCoarseDays(client: client, store: store, skip: Set(days))
 
             await repo.refresh()
             let now = Date()
@@ -120,6 +121,38 @@ final class GarminServerSync: ObservableObject {
             await repo.refresh()   // show whatever landed before the failure
             report(error)
         }
+    }
+
+    /// The ~60 s series for `day`, or nil when the server couldn't serve it in time (not cached yet).
+    /// A cached day with no wear returns an empty array, which is final, not a retry.
+    private func fetchRawHR(_ day: String, client: GarminServerClient, timeout: TimeInterval) async -> [(ts: Int, bpm: Int)]? {
+        guard let obj = (try? await client.get("heart-rate-raw", ["date": day], timeout: timeout)) as? [String: Any] else { return nil }
+        return Self.points(obj)
+    }
+
+    private static let coarseKey = "garminServer.coarseHRDays"
+    private func markCoarse(_ day: String, _ coarse: Bool) {
+        var set = Set(UserDefaults.standard.stringArray(forKey: Self.coarseKey) ?? [])
+        if coarse { set.insert(day) } else { set.remove(day) }
+        UserDefaults.standard.set(Array(set).sorted(), forKey: Self.coarseKey)
+    }
+
+    /// Re-fetch up to `limit` days that only got the 2-min series, now that the server has likely cached
+    /// their ~60 s series (it fills about one past day per 15 minutes). Newest first.
+    private func upgradeCoarseDays(client: GarminServerClient, store: WhoopStore, skip: Set<String>,
+                                   limit: Int = 30) async throws -> Int {
+        let pending = (UserDefaults.standard.stringArray(forKey: Self.coarseKey) ?? [])
+            .filter { !skip.contains($0) }.sorted(by: >).prefix(limit)
+        var added = 0
+        for day in pending {
+            guard let pts = await fetchRawHR(day, client: client, timeout: 8) else { continue }
+            if !pts.isEmpty {
+                added += try await store.insert(Streams(hr: pts.map { HRSample(ts: $0.ts, bpm: $0.bpm) }),
+                                                deviceId: Self.deviceId).hr
+            }
+            markCoarse(day, false)
+        }
+        return added
     }
 
     private func registerSource(_ store: WhoopStore) throws {
@@ -135,16 +168,16 @@ final class GarminServerSync: ObservableObject {
         let t = try await client.get("today", ["date": day]) as? [String: Any] ?? [:]
         let sleep = (try? await client.get("sleep-detail", ["date": day])) as? [String: Any] ?? [:]
         let nightHR = Self.points((try? await client.get("night-heart-rate", ["date": day])) as? [String: Any])
-        // Recent days: the raw wellness FIT series (~60 s, decoded on the server per call, ~20 s), falling
-        // back to the 2-min summary series. Older days use the summary only, to spare Garmin.
-        var dayHR: [(ts: Int, bpm: Int)] = []
-        if recent {
-            statusText = String(localized: "Fetching detailed heart rate for \(day)…")
-            dayHR = Self.points((try? await client.get("heart-rate-raw", ["date": day], timeout: 90)) as? [String: Any])
-        }
+        // Day heart rate: the server's ~60 s wellness-FIT series. It is cached server-side (instant); an
+        // uncached day is decoded on demand (~20 s), which only the two most recent days wait for. Older
+        // uncached days fall back to the 2-min summary and are upgraded on a later sync (see upgradeCoarseDays).
+        if recent { statusText = String(localized: "Fetching detailed heart rate for \(day)…") }
+        let raw = await fetchRawHR(day, client: client, timeout: recent ? 90 : 8)
+        var dayHR = raw ?? []
         if dayHR.isEmpty {
             dayHR = Self.points((try? await client.get("heart-rate-intraday", ["date": day])) as? [String: Any])
         }
+        markCoarse(day, raw == nil)
 
         let deep = Self.num(sleep["deep_minutes"]), light = Self.num(sleep["light_minutes"])
         let rem = Self.num(sleep["rem_minutes"])
