@@ -35,6 +35,10 @@ final class GarminServerSync: ObservableObject {
 
     var accountEmail: String? { GarminServerTokenStore.email }
 
+    /// The app's live state, set at launch, so the Today header shows this sync like a strap offload
+    /// (pulsing sync dot while it runs, then "last synced" or the error).
+    weak var live: LiveState?
+
     // MARK: - Actions
 
     func connect(email: String, password: String, repo: Repository) {
@@ -97,6 +101,8 @@ final class GarminServerSync: ObservableObject {
             return max(Self.historyStart, Self.dayFmt.string(from: back))
         }()
         let days = Self.days(from: from, to: today)
+        live?.backfilling = true
+        defer { live?.backfilling = false }
 
         do {
             // Register once (first backfill): re-adding would reset a status the user changed in Devices.
@@ -115,6 +121,8 @@ final class GarminServerSync: ObservableObject {
             let now = Date()
             lastRunAt = now
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastRunKey)
+            live?.lastSyncedAt = now.timeIntervalSince1970
+            live?.lastSyncError = nil
             failed = false
             statusText = String(localized: "Up to date · \(totals.days) days · \(totals.sleeps) nights · \(totals.hr) heart-rate points")
         } catch {
@@ -278,6 +286,7 @@ final class GarminServerSync: ObservableObject {
             GarminServerTokenStore.clear(); isConnected = false
         }
         statusText = message ?? (error as? LocalizedError)?.errorDescription ?? error?.localizedDescription
+        live?.lastSyncError = statusText
     }
 
     /// Busy also keeps the screen awake on iOS so a long first backfill isn't frozen by auto-lock.
