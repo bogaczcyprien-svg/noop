@@ -307,14 +307,15 @@ final class SourceCoordinator: ObservableObject {
         }
     }
 
-    /// Build the EXPERIMENTAL Garmin CIRQA source for `id` (own central, never the WHOOP path). Live HR rides
-    /// the same `LiveState` + persist channels as a generic strap.
+    /// Build the EXPERIMENTAL Garmin CIRQA source for `id` (own central, never the WHOOP path). Its 1 Hz live
+    /// heart rate is stored under the Garmin server source id, beside the server's ~60 s series, so one
+    /// owner holds every heart-rate sample: seconds while the phone is near, minutes from the server otherwise.
     private func makeGarminCirqaSource(id: String) -> any LiveHRSource {
         GarminCirqaSource(
             live: live,
             deviceId: id,
             persist: { [storeHandle] streams in
-                Task { if let store = await storeHandle() { _ = try? await store.insert(streams, deviceId: id) } }
+                Task { if let store = await storeHandle() { _ = try? await store.insert(streams, deviceId: GarminServerSync.deviceId) } }
             },
             log: straplog)
     }

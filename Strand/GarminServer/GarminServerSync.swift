@@ -17,7 +17,7 @@ import UIKit
 final class GarminServerSync: ObservableObject {
     static let shared = GarminServerSync()
 
-    static let deviceId = "garmin-import"
+    nonisolated static let deviceId = "garmin-import"
     private static let historyStart = "2026-08-15"
     private static let lastDayKey = "garminServer.lastSyncedDay.v2"
     private static let lastRunKey = "garminServer.lastRunAt"

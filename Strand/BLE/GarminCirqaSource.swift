@@ -61,7 +61,6 @@ public final class GarminCirqaSource: NSObject, ObservableObject {
     /// Consecutive pairing refusals ("encryption insufficient"): the band wants a bonded link first. Each one
     /// pushes the next reconnect further out so iOS has room to run its pairing prompt.
     private var encryptionFailures = 0
-    private var pairingProbeDone = false
     private var probingPairing = false
     private static let mlControl = CBUUID(string: "6A4E2803-667B-11E3-949A-0800200C9A66")
 
@@ -529,21 +528,10 @@ extension GarminCirqaSource: @preconcurrency CBPeripheralDelegate {
         if characteristic.uuid == Self.stdHRMeasurement {
             log(error.map { "Garmin: standard heart rate FAILED - \($0.localizedDescription)" }
                 ?? "Garmin: standard heart rate on")
-            // The band drops the whole link when it refuses the multi-link channel. After two refusals,
-            // keep the working standard-HR link instead of losing it again on every reconnect.
-            if error == nil, encryptionFailures >= 2 {
-                log("Garmin: multi-link refused \(encryptionFailures)x - staying on standard heart rate only")
-                // One probe per app run: a plain READ of the multi-link control characteristic, to see whether
-                // a read (rather than a subscribe) gets iOS to start pairing. The outcome is logged either way.
-                if !pairingProbeDone {
-                    pairingProbeDone = true
-                    probingPairing = true
-                    log("Garmin: pairing probe - reading the multi-link control characteristic")
-                    discoverMultiLink(peripheral)
-                }
-                return
-            }
-            discoverMultiLink(peripheral)
+            // Standard heart rate is the whole live lane: the band refuses the multi-link channel on iOS and
+            // drops the link when asked, and history comes from the Garmin server source instead. Only a
+            // failed subscription falls through to the multi-link attempt.
+            if error != nil { discoverMultiLink(peripheral) }
             return
         }
         guard characteristic.uuid == notifyChar?.uuid else { return }
