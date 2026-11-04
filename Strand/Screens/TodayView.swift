@@ -3024,6 +3024,11 @@ struct TodayView: View {
             let est = stepsEstByDay[selectedDayKey].map { intString(Double($0)) }
             return real ?? est ?? "—"
         case .calories:
+            // Fork: without an Apple Health import, fall back to the selected day's on-device estimate
+            // (heart-rate calories, with intervals.icu session calories in place of their span).
+            if let kcal = d?.activeKcalEst, appleDays.last?.activeKcal == nil, sparks["active_kcal"]?.last == nil {
+                return withUnit(intString(kcal))
+            }
             return withUnit(caloriesValue(appleDays.last))
         case .stress:
             #if DEBUG

@@ -155,7 +155,13 @@ final class Repository: ObservableObject {
     /// #814) and the canonical imported id. Active strap FIRST so per-day dedup lets the measured/live row
     /// win over the imported one. Deduped, so a single-device install (active id == canonical) reads one id.
     var importedReadIds: [String] {
-        deviceId == canonicalDeviceId ? [deviceId] : [deviceId, canonicalDeviceId]
+        var ids = deviceId == canonicalDeviceId ? [deviceId] : [deviceId, canonicalDeviceId]
+        // Fork addition: while the Garmin server is connected, its dailies (steps, SpO2, RHR, HRV) and
+        // nights are read right after the active strap, ahead of the canonical WHOOP history.
+        if GarminServerTokenStore.email != nil, !ids.contains(GarminServerSync.deviceId) {
+            ids.insert(GarminServerSync.deviceId, at: 1)
+        }
+        return ids
     }
     /// The distinct COMPUTED ("-noop") source ids to union: the active strap's computed sibling and the
     /// canonical computed sibling. Same dedup rule as `importedReadIds`.
