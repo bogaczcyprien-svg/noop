@@ -19,7 +19,7 @@ final class GarminServerSync: ObservableObject {
 
     static let deviceId = "garmin-import"
     private static let historyStart = "2026-08-15"
-    private static let lastDayKey = "garminServer.lastSyncedDay"
+    private static let lastDayKey = "garminServer.lastSyncedDay.v2"
     private static let lastRunKey = "garminServer.lastRunAt"
     private static let minInterval: TimeInterval = 15 * 60
     private static let overlapDays = 3
@@ -144,11 +144,14 @@ final class GarminServerSync: ObservableObject {
         let total = Self.num(t["sleep_duration_minutes"])
             ?? ([deep, light, rem].allSatisfy { $0 != nil } ? deep! + light! + rem! : nil)
         let rhr = Self.num(t["resting_heart_rate"]).map { Int($0.rounded()) }
+        let nightHRV = Self.points((try? await client.get("night-hrv", ["date": day])) as? [String: Any])
         let hrv = Self.num(t["avg_overnight_hrv"])
+            ?? (nightHRV.isEmpty ? nil : Double(nightHRV.map(\.bpm).reduce(0, +)) / Double(nightHRV.count))
+        let skinDev = Self.num(t["skin_temp_deviation_c"])
         let eff = Self.num(t["sleep_efficiency"])
 
         var wroteDay = false
-        let hasAnything = [total, Self.num(t["steps"]), Self.num(t["resting_heart_rate"]), hrv].contains { $0 != nil }
+        let hasAnything = [total, Self.num(t["steps"]), Self.num(t["resting_heart_rate"]), hrv, skinDev].contains { $0 != nil }
         if hasAnything {
             let metric = DailyMetric(
                 day: day, totalSleepMin: total, efficiency: eff,
@@ -157,21 +160,37 @@ final class GarminServerSync: ObservableObject {
                 restingHr: rhr, avgHrv: hrv,
                 recovery: nil, strain: nil,          // NEVER the server's or Garmin's own scores
                 exerciseCount: nil,
-                spo2Pct: Self.num(t["spo2"]), skinTempDevC: nil,
+                spo2Pct: Self.num(t["spo2"]), skinTempDevC: skinDev,
                 respRateBpm: Self.num(t["respiration_rate"]),
                 steps: Self.num(t["steps"]).map { Int($0) }, activeKcalEst: nil)
             _ = try await store.upsertDailyMetrics([metric], deviceId: Self.deviceId)
             wroteDay = true
         }
 
-        // Night window from the in-sleep HR points (the API has no explicit bed/wake times and no
-        // per-epoch hypnogram, so no stage JSON is synthesized).
+        // Night window: Garmin's own bed/wake times and its per-segment hypnogram (deep/light/rem/awake,
+        // stored with the canonical segment spelling "wake"). Older server builds without them fall back
+        // to the in-sleep HR span with no stage JSON (never a synthesized hypnogram).
         var wroteSleep = false
-        if let first = nightHR.first?.ts, let last = nightHR.last?.ts, last - first >= 3_600 {
+        let levels: [[String: Any]] = (sleep["levels"] as? [[String: Any]] ?? []).compactMap { l in
+            guard let s = Self.num(l["start_ms"]), let e = Self.num(l["end_ms"]), e > s,
+                  let raw = (l["stage"] as? String)?.lowercased() else { return nil }
+            let stage: String
+            switch raw {
+            case "deep", "light", "rem": stage = raw
+            case "awake", "wake": stage = "wake"
+            default: return nil
+            }
+            return ["start": Int(s / 1000), "end": Int(e / 1000), "stage": stage]
+        }
+        let stagesJSON = levels.isEmpty ? nil
+            : (try? JSONSerialization.data(withJSONObject: levels)).flatMap { String(data: $0, encoding: .utf8) }
+        let start = Self.num(sleep["sleep_start"]).map { Int($0 / 1000) } ?? nightHR.first?.ts
+        let end = Self.num(sleep["sleep_end"]).map { Int($0 / 1000) } ?? nightHR.last?.ts
+        if let start, let end, end - start >= 3_600 {
             let lowest = nightHR.map(\.bpm).min()
             _ = try await store.upsertSleepSessions([CachedSleepSession(
-                startTs: first, endTs: last, efficiency: eff,
-                restingHr: rhr ?? lowest, avgHrv: hrv, stagesJSON: nil)], deviceId: Self.deviceId)
+                startTs: start, endTs: end, efficiency: eff,
+                restingHr: rhr ?? lowest, avgHrv: hrv, stagesJSON: stagesJSON)], deviceId: Self.deviceId)
             wroteSleep = true
         }
 
@@ -189,6 +208,7 @@ final class GarminServerSync: ObservableObject {
         add("rhr", Self.num(t["resting_heart_rate"]))
         add("hrv", hrv)
         add("spo2", Self.num(t["spo2"]))
+        add("skin_temp_dev_c", skinDev)
         add("vo2max", Self.num(t["vo2max_cycling"]))
         add("sleep_total_min", total)
         add("sleep_deep_min", deep)
