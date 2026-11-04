@@ -104,7 +104,7 @@ final class GarminServerSync: ObservableObject {
             var totals = (days: 0, sleeps: 0, hr: 0)
             for (i, day) in days.enumerated() {
                 statusText = String(localized: "Syncing \(day) (\(i + 1)/\(days.count))…")
-                let r = try await syncDay(day, client: client, store: store)
+                let r = try await syncDay(day, client: client, store: store, recent: i >= days.count - 2)
                 totals.days += r.day ? 1 : 0; totals.sleeps += r.sleep ? 1 : 0; totals.hr += r.hr
                 // Checkpoint after every day so an interruption never re-pulls finished days.
                 UserDefaults.standard.set(day, forKey: Self.lastDayKey)
@@ -131,11 +131,20 @@ final class GarminServerSync: ObservableObject {
     }
 
     private func syncDay(_ day: String, client: GarminServerClient,
-                         store: WhoopStore) async throws -> (day: Bool, sleep: Bool, hr: Int) {
+                         store: WhoopStore, recent: Bool) async throws -> (day: Bool, sleep: Bool, hr: Int) {
         let t = try await client.get("today", ["date": day]) as? [String: Any] ?? [:]
         let sleep = (try? await client.get("sleep-detail", ["date": day])) as? [String: Any] ?? [:]
         let nightHR = Self.points((try? await client.get("night-heart-rate", ["date": day])) as? [String: Any])
-        let dayHR = Self.points((try? await client.get("heart-rate-intraday", ["date": day])) as? [String: Any])
+        // Recent days: the raw wellness FIT series (~60 s, decoded on the server per call, ~20 s), falling
+        // back to the 2-min summary series. Older days use the summary only, to spare Garmin.
+        var dayHR: [(ts: Int, bpm: Int)] = []
+        if recent {
+            statusText = String(localized: "Fetching detailed heart rate for \(day)…")
+            dayHR = Self.points((try? await client.get("heart-rate-raw", ["date": day], timeout: 90)) as? [String: Any])
+        }
+        if dayHR.isEmpty {
+            dayHR = Self.points((try? await client.get("heart-rate-intraday", ["date": day])) as? [String: Any])
+        }
 
         let deep = Self.num(sleep["deep_minutes"]), light = Self.num(sleep["light_minutes"])
         let rem = Self.num(sleep["rem_minutes"])

@@ -1,6 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Fetching detailed heart rate for %@…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Fetching detailed heart rate for %@…"}}, "fr": {"stringUnit": {"state": "translated", "value": "Récupération du cœur détaillé du %@…"}}}},
     "Password": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Password"}}, "fr": {"stringUnit": {"state": "translated", "value": "Mot de passe"}}}},
     "Garmin server": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Garmin server"}}, "fr": {"stringUnit": {"state": "translated", "value": "Serveur Garmin"}}}},
     "Pulls your Garmin data (heart rate, HRV, sleep, SpO2, steps) from your own server. NOOP computes its own scores from it.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Pulls your Garmin data (heart rate, HRV, sleep, SpO2, steps, workouts) from your own server. NOOP computes its own scores from it."}}, "fr": {"stringUnit": {"state": "translated", "value": "Récupère tes données Garmin (fréquence cardiaque, VFC, sommeil, SpO2, pas) depuis ton propre serveur. NOOP calcule ses propres scores à partir de celles-ci."}}}},

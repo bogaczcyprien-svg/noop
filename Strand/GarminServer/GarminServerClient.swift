@@ -28,7 +28,7 @@ struct GarminServerClient {
 
     private static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
-        c.timeoutIntervalForRequest = 30
+        c.timeoutIntervalForRequest = 90   // per-request timeouts are set on each URLRequest
         c.waitsForConnectivity = false
         return URLSession(configuration: c)
     }()
@@ -59,10 +59,10 @@ struct GarminServerClient {
     }
 
     /// GET a JSON endpoint. Returns the decoded object (dictionary or array).
-    func get(_ path: String, _ query: [String: String] = [:]) async throws -> Any {
+    func get(_ path: String, _ query: [String: String] = [:], timeout: TimeInterval = 30) async throws -> Any {
         var comps = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) } }
-        return try await send(URLRequest(url: comps.url!))
+        return try await send(URLRequest(url: comps.url!, timeoutInterval: timeout))
     }
 
     /// Fire-and-forget `POST /sync-now` (non-blocking server side; it returns at once).
