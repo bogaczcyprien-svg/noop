@@ -137,6 +137,9 @@ struct AddDeviceWizard: View {
     /// its `@Published discovered` / `scanning` / `needsPairing` while scanning. The chosen ring is adopted
     /// for real on `finishAdd`, where the registered `PairedDevice` carries the ring generation. Built once.
     @StateObject private var ouraScanner: OuraLiveSource
+    /// Discovery-only EXPERIMENTAL Garmin CIRQA scanner (`feedsLive: false`). Its finds land in the same
+    /// `pickedStrap` shape as a broadcast-HR Garmin, and the stored model routes the CIRQA to its own lane.
+    @StateObject private var garminScanner: GarminCirqaSource
 
     /// - Parameter startAt: DEBUG-only deep-link into a specific (type, step) so a seeded simulator build
     ///   can screenshot one wizard step deterministically (e.g. the Oura onboarding gate) without tapping
@@ -172,6 +175,8 @@ struct AddDeviceWizard: View {
         _ouraScanner = StateObject(wrappedValue: OuraLiveSource(
             live: live, deviceId: "scan-preview", ringGen: .gen3, authKey: { nil },
             persist: { _ in }, log: wizardLog, feedsLive: false))
+        _garminScanner = StateObject(wrappedValue: GarminCirqaSource(
+            live: live, deviceId: "scan-preview", persist: { _ in }, log: wizardLog, feedsLive: false))
     }
 
     var body: some View {
@@ -1081,8 +1086,21 @@ struct AddDeviceWizard: View {
                 } onRescan: {
                     huamiScanner.scan()
                 }
+            } else if type == .garmin {
+                // Garmin: a CIRQA band (its own protocol) OR a watch broadcasting standard HR.
+                GarminPickList(cirqa: garminScanner, broadcast: hrScanner) { strap in
+                    pickedStrap = strap
+                    clearOtherPicks(except: .garmin)
+                    nameDraft = strap.name
+                    garminScanner.stopScan()
+                    hrScanner.stopScan()
+                    step = .confirm
+                } onRescan: {
+                    garminScanner.scan()
+                    hrScanner.scan()
+                }
             } else {
-                // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
+                // Heart-rate strap (Broadcast HR is the standard 0x180D path).
                 HRPickList(scanner: hrScanner) { strap in
                     pickedStrap = strap
                     clearOtherPicks(except: type ?? .hrStrap)
@@ -1234,14 +1252,16 @@ struct AddDeviceWizard: View {
         case .gymEquipment:      ftmsScanner.scan()
         case .amazfit, .miBand:  huamiScanner.scan()
         case .oura:              ouraScanner.scan()
-        // Heart-rate strap AND Garmin both use the standard 0x180D scanner (Garmin Broadcast HR).
-        case .hrStrap, .garmin:  hrScanner.scan()
+        case .hrStrap:           hrScanner.scan()
+        // Garmin: the CIRQA lane AND the standard 0x180D scanner (a watch's Broadcast HR).
+        case .garmin:            garminScanner.scan(); hrScanner.scan()
         }
     }
 
     private func stopAllScans() {
         model.stopWhoopScan()
         hrScanner.stopScan()
+        garminScanner.stopScan()
         ftmsScanner.stopScan()
         huamiScanner.stopScan()
         ouraScanner.stop()
@@ -1544,6 +1564,36 @@ private struct HRPickList: View {
 
     private func brandGuess(from name: String) -> String {
         DeviceBrandCatalog.spec(forAdvertisedName: name)?.brand ?? String(localized: "Heart-rate strap")
+    }
+}
+
+// MARK: - Garmin pick list (CIRQA lane + broadcast-HR watches)
+
+private struct GarminPickList: View {
+    @ObservedObject var cirqa: GarminCirqaSource
+    @ObservedObject var broadcast: StandardHRSource
+    let onSelect: (StandardHRSource.DiscoveredStrap) -> Void
+    let onRescan: () -> Void
+
+    private var found: [StandardHRSource.DiscoveredStrap] {
+        let bands = cirqa.discovered
+        let watches = broadcast.discovered.filter { w in !bands.contains { $0.id == w.id } }
+        return (bands + watches).sorted { $0.rssi > $1.rssi }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            ScanStatusBar(searching: cirqa.scanning || broadcast.scanning, onRescan: onRescan)
+            if found.isEmpty {
+                SearchingCard()
+            } else {
+                ForEach(found) { dev in
+                    DiscoveredRow(name: dev.name, subtitle: String(localized: "Experimental"), rssi: dev.rssi) {
+                        onSelect(dev)
+                    }
+                }
+            }
+        }
     }
 }
 

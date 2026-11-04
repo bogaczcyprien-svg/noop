@@ -299,8 +299,24 @@ final class SourceCoordinator: ObservableObject {
         case .ftms:  return makeFTMSSource(id: id)
         case .huami: return makeHuamiSource(id: id)
         case .oura:  return makeOuraSource(id: id)
-        default:     return makeStandardSource(id: id)
+        default:
+            // A Garmin CIRQA registers as `.liveBLE` (Garmin brand) but speaks Garmin's own multi-link/GFDI
+            // protocol, not the standard 0x180D broadcast, so its stored model routes it to the CIRQA lane.
+            if GarminCirqaSource.isCirqa(name: model(for: id)) { return makeGarminCirqaSource(id: id) }
+            return makeStandardSource(id: id)
         }
+    }
+
+    /// Build the EXPERIMENTAL Garmin CIRQA source for `id` (own central, never the WHOOP path). Live HR rides
+    /// the same `LiveState` + persist channels as a generic strap.
+    private func makeGarminCirqaSource(id: String) -> any LiveHRSource {
+        GarminCirqaSource(
+            live: live,
+            deviceId: id,
+            persist: { [storeHandle] streams in
+                Task { if let store = await storeHandle() { _ = try? await store.insert(streams, deviceId: id) } }
+            },
+            log: straplog)
     }
 
     /// Build the isolated `StandardHRSource` for a generic HR strap `id`.
