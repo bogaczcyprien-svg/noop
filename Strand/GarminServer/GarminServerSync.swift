@@ -244,7 +244,6 @@ final class GarminServerSync: ObservableObject {
         var points: [MetricPoint] = []
         func add(_ key: String, _ v: Double?) { if let v { points.append(MetricPoint(day: day, key: key, value: v)) } }
         add("steps", Self.num(t["steps"]))
-        add("total_kcal", Self.num(t["calories"]))
         add("rhr", Self.num(t["resting_heart_rate"]))
         add("hrv", hrv)
         add("spo2", Self.num(t["spo2"]))
