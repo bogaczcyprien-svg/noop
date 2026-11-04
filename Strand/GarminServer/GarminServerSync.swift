@@ -165,7 +165,14 @@ final class GarminServerSync: ObservableObject {
 
     private func syncDay(_ day: String, client: GarminServerClient,
                          store: WhoopStore, recent: Bool) async throws -> (day: Bool, sleep: Bool, hr: Int) {
-        let t = try await client.get("today", ["date": day]) as? [String: Any] ?? [:]
+        // A day the server holds nothing for answers 404: that day is simply empty. Any other failure
+        // (server unreachable, expired session) still stops the run so the checkpoint never skips a day.
+        let t: [String: Any]
+        do {
+            t = try await client.get("today", ["date": day]) as? [String: Any] ?? [:]
+        } catch GarminServerClient.Failure.http(404) {
+            t = [:]
+        }
         let sleep = (try? await client.get("sleep-detail", ["date": day])) as? [String: Any] ?? [:]
         let nightHR = Self.points((try? await client.get("night-heart-rate", ["date": day])) as? [String: Any])
         // Day heart rate: the server's ~60 s wellness-FIT series. It is cached server-side (instant); an
