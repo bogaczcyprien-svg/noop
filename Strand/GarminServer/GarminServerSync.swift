@@ -101,7 +101,7 @@ final class GarminServerSync: ObservableObject {
         do {
             // Register once (first backfill): re-adding would reset a status the user changed in Devices.
             if from == Self.historyStart { try registerSource(store) }
-            var totals = (days: 0, sleeps: 0, hr: 0, workouts: 0)
+            var totals = (days: 0, sleeps: 0, hr: 0)
             for (i, day) in days.enumerated() {
                 statusText = String(localized: "Syncing \(day) (\(i + 1)/\(days.count))…")
                 let r = try await syncDay(day, client: client, store: store)
@@ -109,15 +109,13 @@ final class GarminServerSync: ObservableObject {
                 // Checkpoint after every day so an interruption never re-pulls finished days.
                 UserDefaults.standard.set(day, forKey: Self.lastDayKey)
             }
-            statusText = String(localized: "Syncing workouts…")
-            totals.workouts = try await syncActivities(since: from, client: client, store: store)
 
             await repo.refresh()
             let now = Date()
             lastRunAt = now
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastRunKey)
             failed = false
-            statusText = String(localized: "Up to date · \(totals.days) days · \(totals.sleeps) nights · \(totals.workouts) workouts · \(totals.hr) heart-rate points")
+            statusText = String(localized: "Up to date · \(totals.days) days · \(totals.sleeps) nights · \(totals.hr) heart-rate points")
         } catch {
             await repo.refresh()   // show whatever landed before the failure
             report(error)
@@ -224,33 +222,6 @@ final class GarminServerSync: ObservableObject {
         return (wroteDay, wroteSleep, hrCount)
     }
 
-    private func syncActivities(since: String, client: GarminServerClient, store: WhoopStore) async throws -> Int {
-        let floor = Self.dayFmt.date(from: since)?.timeIntervalSince1970 ?? 0
-        var rows: [WorkoutRow] = []
-        var offset = 0
-        pages: while offset < 2_000 {
-            guard let page = try await client.get("activities", ["limit": "50", "offset": String(offset)]) as? [[String: Any]],
-                  !page.isEmpty else { break }
-            for a in page {
-                guard let startStr = a["start_time"] as? String,
-                      let start = Self.iso.date(from: startStr) ?? Self.isoFrac.date(from: startStr) else { continue }
-                if start.timeIntervalSince1970 < floor { break pages }
-                let dur = Self.num(a["duration_seconds"]) ?? 0
-                let startTs = Int(start.timeIntervalSince1970)
-                rows.append(WorkoutRow(
-                    startTs: startTs, endTs: startTs + Int(dur.rounded()),
-                    sport: Self.sport(a["activity_type"] as? String), source: "garmin",
-                    durationS: dur, energyKcal: Self.num(a["calories"]),
-                    avgHr: Self.num(a["avg_hr"]).map { Int($0.rounded()) },
-                    maxHr: Self.num(a["max_hr"]).map { Int($0.rounded()) },
-                    strain: nil, distanceM: Self.num(a["distance_meters"]), zonesJSON: nil,
-                    notes: a["activity_name"] as? String, steps: nil))
-            }
-            offset += page.count
-        }
-        return rows.isEmpty ? 0 : try await store.upsertWorkouts(rows, deviceId: Self.deviceId)
-    }
-
     // MARK: - Helpers
 
     private func report(_ error: Error?, _ message: String? = nil) {
@@ -269,30 +240,6 @@ final class GarminServerSync: ObservableObject {
         #endif
     }
 
-    /// Garmin `activity_type` keys → NOOP's sport names (WorkoutCatalog); unknown types read "Other".
-    static func sport(_ type: String?) -> String {
-        switch type?.lowercased() ?? "" {
-        case "cycling", "road_biking", "mountain_biking", "gravel_cycling", "cyclocross", "e_bike_fitness", "bmx":
-            return "Cycling"
-        case "indoor_cycling", "virtual_ride", "spinning": return "Indoor cycle"
-        case "running", "trail_running", "street_running", "track_running", "ultra_run": return "Running"
-        case "treadmill_running", "indoor_running": return "Treadmill run"
-        case "walking", "casual_walking", "speed_walking": return "Walking"
-        case "hiking": return "Hiking"
-        case "lap_swimming": return "Pool swim"
-        case "open_water_swimming": return "Open-water swim"
-        case "rowing": return "Rowing"
-        case "indoor_rowing": return "Row machine"
-        case "elliptical": return "Elliptical"
-        case "strength_training": return "Strength"
-        case "hiit": return "HIIT"
-        case "yoga": return "Yoga"
-        case "pilates": return "Pilates"
-        case "tennis": return "Tennis"
-        case "boxing": return "Boxing"
-        default: return WorkoutCatalog.defaultSportName
-        }
-    }
 
     static func num(_ v: Any?) -> Double? {
         switch v {
@@ -330,9 +277,5 @@ final class GarminServerSync: ObservableObject {
         let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"; return f
-    }()
-    private static let iso: ISO8601DateFormatter = ISO8601DateFormatter()
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
     }()
 }

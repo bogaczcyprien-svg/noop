@@ -306,7 +306,7 @@ struct DataSourcesView: View {
     private var garminServerCard: some View {
         card(title: String(localized: "Garmin server"), icon: "server.rack",
              tint: StrandPalette.metricPurple,
-             subtitle: String(localized: "Pulls your Garmin data (heart rate, HRV, sleep, SpO2, steps, workouts) from your own server. NOOP computes its own scores from it.")) {
+             subtitle: String(localized: "Pulls your Garmin data (heart rate, HRV, sleep, SpO2, steps) from your own server. NOOP computes its own scores from it.")) {
             VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                 if garminServer.isConnected {
                     if let email = garminServer.accountEmail {
