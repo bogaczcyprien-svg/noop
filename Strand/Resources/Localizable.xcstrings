@@ -1,6 +1,8 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Heart rate · HRV · Sleep · Resting HR · Steps · SpO₂ · Skin temp": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Heart rate · HRV · Sleep · Resting HR · Steps · SpO₂ · Skin temp"}}, "fr": {"stringUnit": {"state": "translated", "value": "Fréquence cardiaque · VFC · Sommeil · FC repos · Pas · SpO₂ · Temp. cutanée"}}}},
+    "Synced from your Garmin server every 15 min. Only what Garmin Connect received from the band can show up here.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Synced from your Garmin server every 15 min. Only what Garmin Connect received from the band can show up here."}}, "fr": {"stringUnit": {"state": "translated", "value": "Synchronisé depuis ton serveur Garmin toutes les 15 min. Seul ce que Garmin Connect a reçu du bracelet peut s’afficher ici."}}}},
     "Fetching detailed heart rate for %@…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Fetching detailed heart rate for %@…"}}, "fr": {"stringUnit": {"state": "translated", "value": "Récupération du cœur détaillé du %@…"}}}},
     "Password": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Password"}}, "fr": {"stringUnit": {"state": "translated", "value": "Mot de passe"}}}},
     "Garmin server": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Garmin server"}}, "fr": {"stringUnit": {"state": "translated", "value": "Serveur Garmin"}}}},

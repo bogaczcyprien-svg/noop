@@ -1238,6 +1238,14 @@ struct DeviceCapabilityProfile {
                 powers: String(localized: "Powers Rest, Effort, Fitness Age and steps, plus Charge once recovery calibrates"),
                 footnote: String(localized: "Computed live from your Apple Watch via Health. Recovery needs about a week of nights to calibrate, and every watch-derived score is labelled with its confidence. Only the metrics your watch actually records are listed above."))
         }
+        // Fork: the user's Garmin collection server (a cloud import, not a BLE strap).
+        if d.id == GarminServerSync.deviceId {
+            return DeviceCapabilityProfile(
+                displayModel: String(localized: "Garmin server"),
+                captures: String(localized: "Heart rate · HRV · Sleep · Resting HR · Steps · SpO₂ · Skin temp"),
+                powers: String(localized: "Powers Charge, Effort, Rest and Sleep"),
+                footnote: String(localized: "Synced from your Garmin server every 15 min. Only what Garmin Connect received from the band can show up here."))
+        }
         // Generic heart-rate strap: live HR + R-R only; drives the live console + Effort, nothing nightly.
         // (Same WHOOP test as SourceCoordinator.isWhoop, inlined so this stays nonisolated.)
         let isWhoop = d.id == "my-whoop" || d.brand.caseInsensitiveCompare("WHOOP") == .orderedSame

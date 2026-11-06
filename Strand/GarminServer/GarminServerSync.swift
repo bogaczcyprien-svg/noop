@@ -117,8 +117,11 @@ final class GarminServerSync: ObservableObject {
             }
             totals.hr += try await upgradeCoarseDays(client: client, store: store, skip: Set(days))
 
-            await repo.refresh()
             let now = Date()
+            // The Devices card's "last seen" reads the registry; a completed server sync is this source's contact.
+            try? DeviceRegistryStore(dbQueue: store.registryWriter)
+                .touchLastSeen(Self.deviceId, at: Int(now.timeIntervalSince1970))
+            await repo.refresh()
             lastRunAt = now
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastRunKey)
             live?.lastSyncedAt = now.timeIntervalSince1970
