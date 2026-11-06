@@ -21,7 +21,7 @@ final class GarminServerSync: ObservableObject {
     private static let historyStart = "2026-08-15"
     private static let lastDayKey = "garminServer.lastSyncedDay.v2"
     private static let lastRunKey = "garminServer.lastRunAt"
-    private static let minInterval: TimeInterval = 15 * 60
+    private static let minInterval: TimeInterval = 5 * 60
     private static let overlapDays = 3
 
     @Published private(set) var busy = false
