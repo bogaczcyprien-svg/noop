@@ -126,13 +126,23 @@ final class GarminServerSync: ObservableObject {
             // Register once (first backfill): re-adding would reset a status the user changed in Devices.
             if from == Self.historyStart { try registerSource(store) }
             var totals = (days: 0, sleeps: 0, hr: 0)
-            for (i, day) in days.enumerated() {
+            // A long backfill fetches today and yesterday first, so the screens fill at once instead of
+            // after every older day; the in-order pass below then skips them and keeps the checkpoint.
+            let head = days.count > 4 ? Array(days.suffix(2)) : []
+            for day in head {
+                statusText = String(localized: "Syncing \(day) (\(totals.days + 1)/\(days.count))…")
+                let r = try await syncDay(day, client: client, store: store, recent: true)
+                totals.days += r.day ? 1 : 0; totals.sleeps += r.sleep ? 1 : 0; totals.hr += r.hr
+            }
+            if !head.isEmpty { await repo.refresh() }
+            for (i, day) in days.enumerated() where !head.contains(day) {
                 statusText = String(localized: "Syncing \(day) (\(i + 1)/\(days.count))…")
                 let r = try await syncDay(day, client: client, store: store, recent: i >= days.count - 2)
                 totals.days += r.day ? 1 : 0; totals.sleeps += r.sleep ? 1 : 0; totals.hr += r.hr
                 // Checkpoint after every day so an interruption never re-pulls finished days.
                 UserDefaults.standard.set(day, forKey: Self.lastDayKey)
             }
+            if let last = head.last { UserDefaults.standard.set(last, forKey: Self.lastDayKey) }
             totals.hr += try await upgradeCoarseDays(client: client, store: store, skip: Set(days))
 
             let now = Date()
