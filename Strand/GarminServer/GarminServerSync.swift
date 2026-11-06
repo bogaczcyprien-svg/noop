@@ -61,24 +61,26 @@ final class GarminServerSync: ObservableObject {
         }
     }
 
-    func syncNow(repo: Repository) {
+    /// `askServer` also asks the server to pull Garmin right away (the "Sync now" button). Automatic syncs
+    /// only read what the server already has, so they never add Garmin polling beyond its 15-minute cron.
+    func syncNow(repo: Repository, askServer: Bool = true) {
         guard !busy, let token = GarminServerTokenStore.load() else { return }
         setBusy(true); failed = false
         Task {
             do {
                 let client = GarminServerClient(base: try await GarminServerClient.resolveBase(), token: token)
-                await client.requestServerSync()
+                if askServer { await client.requestServerSync() }
                 await run(repo: repo, client: client)
             } catch { report(error) }
             setBusy(false)
         }
     }
 
-    /// Called when the app comes to the foreground: a quiet sync at most every 15 minutes.
-    func syncIfDue(repo: Repository) {
+    /// Every app open reads the server (`force`); while the app stays open, a re-read every 15 minutes.
+    func syncIfDue(repo: Repository, force: Bool = false) {
         guard isConnected, !busy else { return }
-        if let last = lastRunAt, Date().timeIntervalSince(last) < Self.minInterval { return }
-        syncNow(repo: repo)
+        if !force, let last = lastRunAt, Date().timeIntervalSince(last) < Self.minInterval { return }
+        syncNow(repo: repo, askServer: false)
     }
 
     /// While the app stays in the foreground, re-check every minute so today's heart rate, steps and
