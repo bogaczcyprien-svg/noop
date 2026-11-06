@@ -232,7 +232,16 @@ final class GarminServerSync: ObservableObject {
         let eff = Self.num(t["sleep_efficiency"])
 
         var wroteDay = false
-        let hasAnything = [total, Self.num(t["steps"]), Self.num(t["resting_heart_rate"]), hrv, skinDev].contains { $0 != nil }
+        // All-day SpO2 and 15-min steps keep today's numbers moving between Garmin's daily summaries: the
+        // day's SpO2 falls back to the mean of its all-day points, and steps take the larger of the summary and
+        // the summed 15-min intervals (the summary can lag the intervals on a running day).
+        let spo2Pts = Self.points((try? await client.get("spo2-intraday", ["date": day])) as? [String: Any])
+            .filter { (70...100).contains($0.bpm) }
+        let spo2 = Self.num(t["spo2"]) ?? (spo2Pts.isEmpty ? nil : Double(spo2Pts.map(\.bpm).reduce(0, +)) / Double(spo2Pts.count))
+        let stepPts = Self.points((try? await client.get("steps-intraday", ["date": day])) as? [String: Any])
+        let stepSum = stepPts.isEmpty ? nil : Double(stepPts.map(\.bpm).reduce(0, +))
+        let steps = [Self.num(t["steps"]), stepSum].compactMap { $0 }.max()
+        let hasAnything = [total, steps, spo2, Self.num(t["resting_heart_rate"]), hrv, skinDev].contains { $0 != nil }
         if hasAnything {
             let metric = DailyMetric(
                 day: day, totalSleepMin: total, efficiency: eff,
@@ -241,9 +250,9 @@ final class GarminServerSync: ObservableObject {
                 restingHr: rhr, avgHrv: hrv,
                 recovery: nil, strain: nil,          // NEVER the server's or Garmin's own scores
                 exerciseCount: nil,
-                spo2Pct: Self.num(t["spo2"]), skinTempDevC: skinDev,
+                spo2Pct: spo2, skinTempDevC: skinDev,
                 respRateBpm: Self.num(t["respiration_rate"]),
-                steps: Self.num(t["steps"]).map { Int($0) }, activeKcalEst: nil)
+                steps: steps.map { Int($0) }, activeKcalEst: nil)
             _ = try await store.upsertDailyMetrics([metric], deviceId: Self.deviceId)
             wroteDay = true
         }
@@ -292,10 +301,10 @@ final class GarminServerSync: ObservableObject {
         // Browseable series (Metric Explorer / correlations), with the brand scores as reference only.
         var points: [MetricPoint] = []
         func add(_ key: String, _ v: Double?) { if let v { points.append(MetricPoint(day: day, key: key, value: v)) } }
-        add("steps", Self.num(t["steps"]))
+        add("steps", steps)
         add("rhr", Self.num(t["resting_heart_rate"]))
         add("hrv", hrv)
-        add("spo2", Self.num(t["spo2"]))
+        add("spo2", spo2)
         add("skin_temp_dev_c", skinDev)
         add("vo2max", Self.num(t["vo2max_cycling"]))
         add("sleep_total_min", total)
