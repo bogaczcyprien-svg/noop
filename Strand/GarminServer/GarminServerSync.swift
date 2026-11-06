@@ -218,11 +218,18 @@ final class GarminServerSync: ObservableObject {
         // uncached day is decoded on demand (~20 s), which only the two most recent days wait for. Older
         // uncached days fall back to the 2-min summary and are upgraded on a later sync (see upgradeCoarseDays).
         if recent { statusText = String(localized: "Fetching detailed heart rate for \(day)…") }
-        let raw = await fetchRawHR(day, client: client, timeout: recent ? 90 : 8)
+        // A finished day whose detailed series is already stored is not fetched again: a re-pull of the
+        // history (a checkpoint bump) then costs a few fast summary requests per day, not a wait on the
+        // server's on-demand decode. Coarse days stay with `upgradeCoarseDays`.
+        let dayStartTs = Self.dayFmt.date(from: day).map { Int($0.timeIntervalSince1970) } ?? 0
+        let isCoarse = (UserDefaults.standard.stringArray(forKey: Self.coarseKey) ?? []).contains(day)
+        let haveHR = !recent && !isCoarse && !((try? await store.hrSamples(
+            deviceId: Self.deviceId, from: dayStartTs, to: dayStartTs + 86_399, limit: 1)) ?? []).isEmpty
+        let raw = haveHR ? [] : await fetchRawHR(day, client: client, timeout: recent ? 90 : 8)
         var dayHR = raw ?? []
         // The two most recent days also take the 2-min series every pass: a still-running day's ~60 s file can
         // be cached server-side mid-day, and the 2-min series is what keeps today's curve growing until evening.
-        if dayHR.isEmpty || recent {
+        if !haveHR && (dayHR.isEmpty || recent) {
             let rawTs = Set(dayHR.map(\.ts))
             dayHR += Self.points((try? await client.get("heart-rate-intraday", ["date": day])) as? [String: Any])
                 .filter { !rawTs.contains($0.ts) && $0.ts > (dayHR.last?.ts ?? 0) }
@@ -249,10 +256,12 @@ final class GarminServerSync: ObservableObject {
         // series start the evening before, so both are clipped to this local calendar day.
         let dayLo = Self.dayFmt.date(from: day).map { Int($0.timeIntervalSince1970) } ?? 0
         let inDay: ((ts: Int, bpm: Int)) -> Bool = { $0.ts >= dayLo && $0.ts < dayLo + 86_400 }
-        let spo2Pts = Self.points((try? await client.get("spo2-intraday", ["date": day])) as? [String: Any])
+        // Only the two most recent days need these: a finished day's summary is final, and skipping them
+        // keeps a full backfill from paying two extra slow requests per historical day.
+        let spo2Pts = !recent ? [] : Self.points((try? await client.get("spo2-intraday", ["date": day])) as? [String: Any])
             .filter { inDay($0) && (70...100).contains($0.bpm) }
         let spo2 = Self.num(t["spo2"]) ?? (spo2Pts.isEmpty ? nil : Double(spo2Pts.map(\.bpm).reduce(0, +)) / Double(spo2Pts.count))
-        let stepPts = Self.points((try? await client.get("steps-intraday", ["date": day])) as? [String: Any])
+        let stepPts = !recent ? [] : Self.points((try? await client.get("steps-intraday", ["date": day])) as? [String: Any])
             .filter(inDay)
         let stepSum = stepPts.isEmpty ? nil : Double(stepPts.map(\.bpm).reduce(0, +))
         let steps = [Self.num(t["steps"]), stepSum].compactMap { $0 }.max()
@@ -327,7 +336,7 @@ final class GarminServerSync: ObservableObject {
         add("sleep_light_min", light)
         add("sleep_rem_min", rem)
         add("ref_sleep_score", Self.num(t["sleep_score"]))
-        if let stress = (try? await client.get("stress-today", ["date": day])) as? [String: Any] {
+        if recent, let stress = (try? await client.get("stress-today", ["date": day])) as? [String: Any] {
             let vals = Self.points(stress).filter(inDay).map { Double($0.bpm) }
             if !vals.isEmpty { add("stress", vals.reduce(0, +) / Double(vals.count)) }
         }
