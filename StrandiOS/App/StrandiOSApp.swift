@@ -392,6 +392,7 @@ struct StrandiOSApp: App {
                 model.ble.requestSync(.foreground)
                 // Garmin server source: read the server on every open.
                 GarminServerSync.shared.live = model.live
+                GarminServerSync.shared.intelligence = model.intelligence
                 GarminServerSync.shared.syncIfDue(repo: model.repo, force: true)
                 GarminServerSync.shared.startAutoRefresh(repo: model.repo)
                 // #1538: settle a re-score an earlier background attempt could not finish, rather than

@@ -1,6 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Updating your scores…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Updating your scores…"}}, "fr": {"stringUnit": {"state": "translated", "value": "Mise à jour de tes scores…"}}}},
     "Today's readings": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Today's readings"}}, "fr": {"stringUnit": {"state": "translated", "value": "Mesures du jour"}}}},
     "Heart rate · HRV · Sleep · Resting HR · Steps · SpO₂ · Skin temp": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Heart rate · HRV · Sleep · Resting HR · Steps · SpO₂ · Skin temp"}}, "fr": {"stringUnit": {"state": "translated", "value": "Fréquence cardiaque · VFC · Sommeil · FC repos · Pas · SpO₂ · Temp. cutanée"}}}},
     "Synced from your Garmin server every 15 min. Only what Garmin Connect received from the band can show up here.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Synced from your Garmin server every 15 min. Only what Garmin Connect received from the band can show up here."}}, "fr": {"stringUnit": {"state": "translated", "value": "Synchronisé depuis ton serveur Garmin toutes les 15 min. Seul ce que Garmin Connect a reçu du bracelet peut s’afficher ici."}}}},

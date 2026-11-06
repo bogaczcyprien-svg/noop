@@ -38,6 +38,9 @@ final class GarminServerSync: ObservableObject {
     /// The app's live state, set at launch, so the Today header shows this sync like a strap offload
     /// (pulsing sync dot while it runs, then "last synced" or the error).
     weak var live: LiveState?
+    /// Re-scores after each sync, so new server rows reach Charge / Effort / calories without waiting for a
+    /// strap offload or the idle tick (this source has neither).
+    weak var intelligence: IntelligenceEngine?
 
     // MARK: - Actions
 
@@ -162,6 +165,11 @@ final class GarminServerSync: ObservableObject {
             try? DeviceRegistryStore(dbQueue: store.registryWriter)
                 .touchLastSeen(Self.deviceId, at: Int(now.timeIntervalSince1970))
             await repo.refresh()
+            if let intelligence {
+                statusText = String(localized: "Updating your scores…")
+                await intelligence.analyzeRecent(skipIfUnchanged: true, triggerLabel: "garmin-server")
+                await repo.refresh()
+            }
             lastRunAt = now
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastRunKey)
             live?.lastSyncedAt = now.timeIntervalSince1970
