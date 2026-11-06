@@ -81,6 +81,22 @@ final class GarminServerSync: ObservableObject {
         syncNow(repo: repo)
     }
 
+    /// While the app stays in the foreground, re-check every minute so today's heart rate, steps and
+    /// stress keep following the server's 15-minute pulls without reopening the app. iOS suspends the
+    /// task in the background; the foreground hook restarts it.
+    private var autoRefresh: Task<Void, Never>?
+    func startAutoRefresh(repo: Repository) {
+        autoRefresh?.cancel()
+        autoRefresh = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self?.syncIfDue(repo: repo)
+            }
+        }
+    }
+    func stopAutoRefresh() { autoRefresh?.cancel(); autoRefresh = nil }
+
     func disconnect(repo: Repository) {
         GarminServerTokenStore.clear()
         UserDefaults.standard.removeObject(forKey: Self.lastDayKey)
@@ -192,8 +208,12 @@ final class GarminServerSync: ObservableObject {
         if recent { statusText = String(localized: "Fetching detailed heart rate for \(day)…") }
         let raw = await fetchRawHR(day, client: client, timeout: recent ? 90 : 8)
         var dayHR = raw ?? []
-        if dayHR.isEmpty {
-            dayHR = Self.points((try? await client.get("heart-rate-intraday", ["date": day])) as? [String: Any])
+        // The two most recent days also take the 2-min series every pass: a still-running day's ~60 s file can
+        // be cached server-side mid-day, and the 2-min series is what keeps today's curve growing until evening.
+        if dayHR.isEmpty || recent {
+            let rawTs = Set(dayHR.map(\.ts))
+            dayHR += Self.points((try? await client.get("heart-rate-intraday", ["date": day])) as? [String: Any])
+                .filter { !rawTs.contains($0.ts) && $0.ts > (dayHR.last?.ts ?? 0) }
         }
         markCoarse(day, raw == nil)
 
