@@ -19,7 +19,7 @@ final class GarminServerSync: ObservableObject {
 
     nonisolated static let deviceId = "garmin-import"
     private static let historyStart = "2026-08-15"
-    private static let lastDayKey = "garminServer.lastSyncedDay.v2"
+    private static let lastDayKey = "garminServer.lastSyncedDay.v3"   // v3: re-pull all days once, efficiency was stored as a percentage
     private static let lastRunKey = "garminServer.lastRunAt"
     private static let minInterval: TimeInterval = 15 * 60
     private static let overlapDays = 3
@@ -229,16 +229,21 @@ final class GarminServerSync: ObservableObject {
         let hrv = Self.num(t["avg_overnight_hrv"])
             ?? (nightHRV.isEmpty ? nil : Double(nightHRV.map(\.bpm).reduce(0, +)) / Double(nightHRV.count))
         let skinDev = Self.num(t["skin_temp_deviation_c"])
-        let eff = Self.num(t["sleep_efficiency"])
+        // The server reports efficiency as a percentage (98.2); NOOP stores asleep/in-bed as 0…1.
+        let eff = Self.num(t["sleep_efficiency"]).map { $0 > 1 ? $0 / 100 : $0 }.flatMap { (0...1).contains($0) ? $0 : nil }
 
         var wroteDay = false
         // All-day SpO2 and 15-min steps keep today's numbers moving between Garmin's daily summaries: the
         // day's SpO2 falls back to the mean of its all-day points, and steps take the larger of the summary and
-        // the summed 15-min intervals (the summary can lag the intervals on a running day).
+        // the summed 15-min intervals (the summary can lag the intervals on a running day). Some intraday
+        // series start the evening before, so both are clipped to this local calendar day.
+        let dayLo = Self.dayFmt.date(from: day).map { Int($0.timeIntervalSince1970) } ?? 0
+        let inDay: ((ts: Int, bpm: Int)) -> Bool = { $0.ts >= dayLo && $0.ts < dayLo + 86_400 }
         let spo2Pts = Self.points((try? await client.get("spo2-intraday", ["date": day])) as? [String: Any])
-            .filter { (70...100).contains($0.bpm) }
+            .filter { inDay($0) && (70...100).contains($0.bpm) }
         let spo2 = Self.num(t["spo2"]) ?? (spo2Pts.isEmpty ? nil : Double(spo2Pts.map(\.bpm).reduce(0, +)) / Double(spo2Pts.count))
         let stepPts = Self.points((try? await client.get("steps-intraday", ["date": day])) as? [String: Any])
+            .filter(inDay)
         let stepSum = stepPts.isEmpty ? nil : Double(stepPts.map(\.bpm).reduce(0, +))
         let steps = [Self.num(t["steps"]), stepSum].compactMap { $0 }.max()
         let hasAnything = [total, steps, spo2, Self.num(t["resting_heart_rate"]), hrv, skinDev].contains { $0 != nil }
@@ -313,7 +318,7 @@ final class GarminServerSync: ObservableObject {
         add("sleep_rem_min", rem)
         add("ref_sleep_score", Self.num(t["sleep_score"]))
         if let stress = (try? await client.get("stress-today", ["date": day])) as? [String: Any] {
-            let vals = Self.points(stress).map { Double($0.bpm) }
+            let vals = Self.points(stress).filter(inDay).map { Double($0.bpm) }
             if !vals.isEmpty { add("stress", vals.reduce(0, +) / Double(vals.count)) }
         }
         if !points.isEmpty { _ = try await store.upsertMetricSeries(points, deviceId: Self.deviceId) }
