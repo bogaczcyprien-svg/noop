@@ -235,9 +235,14 @@ final class GarminServerSync: ObservableObject {
         // server's on-demand decode. Coarse days stay with `upgradeCoarseDays`.
         let dayStartTs = Self.dayFmt.date(from: day).map { Int($0.timeIntervalSince1970) } ?? 0
         let isCoarse = (UserDefaults.standard.stringArray(forKey: Self.coarseKey) ?? []).contains(day)
-        let haveHR = !recent && !isCoarse && !((try? await store.hrSamples(
-            deviceId: Self.deviceId, from: dayStartTs, to: dayStartTs + 86_399, limit: 1)) ?? []).isEmpty
-        let raw = haveHR ? [] : await fetchRawHR(day, client: client, timeout: recent ? 90 : 8)
+        var haveHR = false
+        if !recent && !isCoarse {
+            let stored = (try? await store.hrSamples(deviceId: Self.deviceId, from: dayStartTs,
+                                                     to: dayStartTs + 86_399, limit: 1)) ?? []
+            haveHR = !stored.isEmpty
+        }
+        let raw: [(ts: Int, bpm: Int)]?
+        if haveHR { raw = [] } else { raw = await fetchRawHR(day, client: client, timeout: recent ? 90 : 8) }
         var dayHR = raw ?? []
         // The two most recent days also take the 2-min series every pass: a still-running day's ~60 s file can
         // be cached server-side mid-day, and the 2-min series is what keeps today's curve growing until evening.
