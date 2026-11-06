@@ -2576,8 +2576,30 @@ final class IntelligenceEngine: ObservableObject {
                 .sorted { $0.day < $1.day }
             guard !rows.isEmpty else { continue }
             let byDay = Dictionary(rows.map { ($0.day, $0) }, uniquingKeysWith: { a, _ in a })
-            for w in Self.watchRecoveries(appleRows: rows, strapRecoveryDays: importScoredDays) {
+            // Fork: the Garmin server source also feeds raw heart rate, so its days are scored by the HR loop
+            // above, but without R-R that pass leaves recovery nil. Only a day that pass actually gave a
+            // recovery is skipped here; a scored day without one takes the Garmin HRV/RHR Charge in place,
+            // keeping every other cell (strain, calories, day HR) the HR pass computed.
+            let isGarminServer = source == GarminServerSync.deviceId
+            let skipDays = isGarminServer
+                ? Set(dailies.filter { $0.recovery != nil }.map(\.day)).union(importedWhoopDays).union(appleHealthDays)
+                : importScoredDays
+            for w in Self.watchRecoveries(appleRows: rows, strapRecoveryDays: skipDays) {
                 guard let recovery = w.recovery, let row = byDay[w.day] else { continue }
+                if isGarminServer, let idx = dailies.firstIndex(where: { $0.day == w.day }) {
+                    let d = dailies[idx]
+                    dailies[idx] = d.with(recovery: recovery, skinTempDevC: d.skinTempDevC ?? row.skinTempDevC,
+                                          skinTempC: d.skinTempC)
+                    importScoredDays.insert(w.day)
+                    resolvedScoreOwnerByDay[w.day] = source
+                    if let i = out.firstIndex(where: { $0.day == w.day }) {
+                        let o = out[i]
+                        out[i] = Computed(day: o.day, recovery: recovery, strain: o.strain, sleepMin: o.sleepMin,
+                                          hrv: o.hrv ?? row.avgHrv, rhr: o.rhr ?? row.restingHr,
+                                          source: .computed, confidence: w.confidence)
+                    }
+                    continue
+                }
                 let scored = row.with(recovery: recovery, skinTempDevC: row.skinTempDevC,
                                       skinTempC: row.skinTempC)
                 dailies.append(scored)
