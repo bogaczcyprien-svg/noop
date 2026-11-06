@@ -61,7 +61,8 @@ public enum WatchRecovery {
     /// - Returns: a `Result` with recovery in [0,100] and a confidence tier, or nil recovery +
     ///   `.calibrating` when today's SDNN is missing, the baseline isn't usable, or history is thin.
     public static func compute(todaySDNN: Double?, todayRHR: Int?,
-                               sdnnHistory: [Double], rhrHistory: [Double]) -> Result {
+                               sdnnHistory: [Double], rhrHistory: [Double],
+                               minNights: Int = minBaselineNights) -> Result {
         // Build both baselines through the production model (Winsorized EWMA + cold-start gating),
         // exactly as the strap path does. SDNN feeds the HRV config; resting HR feeds the RHR config.
         let hrvBase = Baselines.foldHistory(sdnnHistory.map { Optional($0) }, cfg: Baselines.hrvCfg)
@@ -79,7 +80,7 @@ public enum WatchRecovery {
         // nothing to the baseline, so counting it would let rejected values buy a score a week early.
         guard let sdnn = todaySDNN,
               hrvBase.usable,
-              hrvBase.nValid >= minBaselineNights else {
+              hrvBase.nValid >= minNights else {
             return Result(recovery: nil, confidence: .calibrating)
         }
 

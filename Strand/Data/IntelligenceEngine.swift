@@ -2584,7 +2584,10 @@ final class IntelligenceEngine: ObservableObject {
             let skipDays = isGarminServer
                 ? Set(dailies.filter { $0.recovery != nil }.map(\.day)).union(importedWhoopDays).union(appleHealthDays)
                 : importScoredDays
-            for w in Self.watchRecoveries(appleRows: rows, strapRecoveryDays: skipDays) {
+            let scoredDays = isGarminServer
+                ? Self.garminRecoveries(rows: rows, strapRecoveryDays: skipDays)
+                : Self.watchRecoveries(appleRows: rows, strapRecoveryDays: skipDays)
+            for w in scoredDays {
                 guard let recovery = w.recovery, let row = byDay[w.day] else { continue }
                 if isGarminServer, let idx = dailies.firstIndex(where: { $0.day == w.day }) {
                     let d = dailies[idx]
@@ -3493,6 +3496,37 @@ final class IntelligenceEngine: ObservableObject {
     /// so the strap keeps winning (matching the source precedence; we never overwrite a strap recovery with a
     /// lower-density watch one). Pure (no store) so it's unit-tested directly and is the SAME logic
     /// `analyzeRecent` ships. `appleRows` must be chronological (oldest first).
+    /// Fork: the Garmin server's Charge. Real once the HRV baseline has `Baselines.minNightsSeed` (4)
+    /// valid nights; before that, a provisional estimate from tonight's HRV and RHR against the few
+    /// Garmin nights so far (none on the very first night), so the calibration nights show a number.
+    nonisolated static func garminRecoveries(rows garminRows: [DailyMetric],
+                                             strapRecoveryDays: Set<String>) -> [WatchScoredDay] {
+        let rows = garminRows.sorted { $0.day < $1.day }
+        var out: [WatchScoredDay] = []
+        for (i, row) in rows.enumerated() where !strapRecoveryDays.contains(row.day) {
+            let prior = rows[..<i]
+            let hrvHist = prior.compactMap { $0.avgHrv }
+            let rhrHist = prior.compactMap { $0.restingHr.map(Double.init) }
+            let res = WatchRecovery.compute(todaySDNN: row.avgHrv, todayRHR: row.restingHr,
+                                            sdnnHistory: hrvHist, rhrHistory: rhrHist,
+                                            minNights: Baselines.minNightsSeed)
+            if let r = res.recovery {
+                out.append(WatchScoredDay(day: row.day, recovery: r, confidence: res.confidence))
+            } else if let hrv = row.avgHrv, hrv > 0, !hrvHist.isEmpty {
+                // HRV ratio to the running mean drives it (±25 % ≈ ±40 points); RHR above its mean pulls
+                // it down 3 points per bpm. Clamped away from the extremes: it is a placeholder, not a score.
+                let hrvMean = hrvHist.reduce(0, +) / Double(hrvHist.count)
+                var est = 55 + 160 * (hrv / hrvMean - 1)
+                if let rhr = row.restingHr, !rhrHist.isEmpty {
+                    est -= 3 * (Double(rhr) - rhrHist.reduce(0, +) / Double(rhrHist.count))
+                }
+                out.append(WatchScoredDay(day: row.day, recovery: min(90, max(15, est.rounded())),
+                                          confidence: .calibrating))
+            }
+        }
+        return out
+    }
+
     nonisolated static func watchRecoveries(appleRows: [DailyMetric],
                                 strapRecoveryDays: Set<String> = []) -> [WatchScoredDay] {
         let rows = appleRows.sorted { $0.day < $1.day }

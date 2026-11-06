@@ -99,6 +99,18 @@ final class GarminServerSync: ObservableObject {
     }
     func stopAutoRefresh() { autoRefresh?.cancel(); autoRefresh = nil }
 
+    /// Today's all-day SpO2 readings straight from the server (time, %), for the SpO2 screen's table.
+    /// Read on demand rather than stored: the day's single percentage is what the scores use.
+    func spo2Readings(day: Date = Date()) async -> [(ts: Int, pct: Int)] {
+        guard let token = GarminServerTokenStore.load(),
+              let base = try? await GarminServerClient.resolveBase() else { return [] }
+        let key = Self.dayFmt.string(from: day)
+        let lo = Int(Calendar.current.startOfDay(for: day).timeIntervalSince1970)
+        let obj = (try? await GarminServerClient(base: base, token: token).get("spo2-intraday", ["date": key])) as? [String: Any]
+        return Self.points(obj).filter { $0.ts >= lo && $0.ts < lo + 86_400 && (70...100).contains($0.bpm) }
+            .map { (ts: $0.ts, pct: $0.bpm) }
+    }
+
     func disconnect(repo: Repository) {
         GarminServerTokenStore.clear()
         UserDefaults.standard.removeObject(forKey: Self.lastDayKey)

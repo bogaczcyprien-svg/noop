@@ -1032,6 +1032,7 @@ struct MetricDetailView: View {
                     statRow(effectiveRange: effRange, windowed: win)
                     // Steps chart summaries are bucketed, but the provenance table deliberately remains
                     // one row per underlying observed day.
+                    if metric.key == "spo2" { GarminSpO2DayTable() }
                     readingsTable(windowed: isStepsDetail ? rawWin : win)
                     correlationCard
                 }
