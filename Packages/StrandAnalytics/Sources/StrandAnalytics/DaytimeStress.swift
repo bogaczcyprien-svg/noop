@@ -36,8 +36,11 @@ public enum DaytimeStress {
     /// sends live HR only ~every 30 s (see `StrainScorer.minSparseReadings`'s own doc comment for the
     /// same hardware constraint) — a 25-sample floor would leave a 5/MG's daytime timeline blank
     /// almost everywhere. 5 clears a sparse 30 s-cadence device's ~10 real readings per 5-minute
-    /// window comfortably while still rejecting a near-empty bucket.
-    public static let minHourHRSamples: Int = 5
+    /// window comfortably while still rejecting a near-empty bucket. Fork: lowered from 5 to 2 for the
+    /// Garmin server feed, whose all-day HR lands only every ~1-2 minutes (2-5 readings per window), so
+    /// a 5-sample floor punched holes in the timeline wherever Garmin logged a steady stretch sparsely.
+    /// A strap streaming at 1 Hz or every 30 s clears either floor, so its timeline is unchanged.
+    public static let minHourHRSamples: Int = 2
     /// Bucket width for the timeline, in seconds. FORK CHANGE (#WHOOP-parity, explicit request —
     /// "je veux toutes les 1 minute... comment on fait pour arriver à 1"): widened resolution from a
     /// full hour to 5 minutes, the shortest window RMSSD/HRV is scientifically meaningful over (the
@@ -386,7 +389,7 @@ public enum DaytimeStress {
     /// samples carry no meaningful beat-to-beat ORDER to center a local window on, so the bucket's own
     /// median IS the local reference. MOTIVATED by the bucket-width change in this file: an hourly
     /// bucket averaged 60+ HR samples, where one glitch barely moved the mean; a 5-minute bucket with
-    /// a WHOOP 5/MG's sparse ~30 s cadence may carry as few as `minHourHRSamples` (5) — on that few
+    /// a WHOOP 5/MG's sparse ~30 s cadence may carry as few as `minHourHRSamples` (2) — on that few
     /// samples, ONE bad reading can swing the mean by several bpm, exactly the kind of noise this
     /// file's z-score terms are sensitive to. Falls back to the plain mean when there are too few
     /// samples to trust a median (< 3) or when every sample would be rejected (never discards the
