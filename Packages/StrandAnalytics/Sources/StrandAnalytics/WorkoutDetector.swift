@@ -666,7 +666,10 @@ public enum Calories {
     /// — but only so far, or a disconnected evening would bank a full night of resting kcal that was
     /// never observed. ACTIVE energy is capped separately and much tighter, at the inferred cadence
     /// (see `estimateDayEnergy`): a gap is evidence of a missing sensor, never of exercise.
-    static let dayMaxObservedGapS: Double = 60.0
+    /// Fork: 300 s, not 60. The Garmin server feed logs all-day HR every ~1-2 minutes, so a 60 s cap
+    /// counted only about half of each interval and the day total read several hundred kcal low.
+    /// Not mirrored on Android.
+    static let dayMaxObservedGapS: Double = 300.0
     static let dayMaxObservedSpanS: Double = 86_400.0
     static let workoutDivisor = 251.04  // 60 s/min × 4.184 kJ/kcal
 
