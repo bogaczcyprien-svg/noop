@@ -2297,11 +2297,18 @@ struct LiquidTodayView: View {
     // surfaces already showed — else NOOP's on-device HR estimate `activeKcalEst`) — one number across the
     // tile, card and the detail it taps to. Mirrors the steps precedence above.
     private var caloriesCount: Double? {
-        importedActiveKcalDay ?? displayDay?.activeKcalEst
+        appleKcalForCalories ?? displayDay?.activeKcalEst
+    }
+
+    /// Fork: with the Garmin server connected, Apple Health's active energy is Garmin Connect's own
+    /// figure written to Health, so it is ignored and the day reads NOOP's estimate (HR + intervals.icu
+    /// session kcal) alone.
+    private var appleKcalForCalories: Double? {
+        GarminServerSync.shared.isConnected ? nil : importedActiveKcalDay
     }
 
     private var caloriesDetailMetric: MetricDescriptor? {
-        MetricCatalog.todayCaloriesMetric(hasImportedKcal: importedActiveKcalDay != nil,
+        MetricCatalog.todayCaloriesMetric(hasImportedKcal: appleKcalForCalories != nil,
                                           hasOnDeviceKcal: displayDay?.activeKcalEst != nil)
     }
 
