@@ -346,10 +346,15 @@ import WhoopStore
 
     static func applying(_ result: Result, to daily: DailyMetric) -> DailyMetric {
         let established = result.firstWakeDay.map { daily.day >= $0 } ?? false
-        let steps = established ? result.stepsByWakeDay[daily.day] : daily.steps
-        let strain = established ? result.strainByWakeDay[daily.day] : daily.strain
-        let calories = established ? result.caloriesByWakeDay[daily.day] : daily.activeKcalEst
-        let workouts = established ? result.workoutCountByWakeDay[daily.day] : daily.exerciseCount
+        // Fork: a wake day the cycle pass produced no window for (e.g. a Garmin-server night whose sleep is
+        // not a cached session) keeps the calendar-day values instead of blanking them.
+        let steps = established ? (result.stepsByWakeDay[daily.day] ?? daily.steps) : daily.steps
+        let strain = established ? (result.strainByWakeDay[daily.day] ?? daily.strain) : daily.strain
+        // Fork: the day path's estimate wins. It excludes intervals.icu session windows and adds the
+        // session's exact energy; the cycle estimate only scores raw heart rate.
+        let calories = daily.activeKcalEst ?? (established ? result.caloriesByWakeDay[daily.day] : nil)
+        let workouts = established
+            ? (result.workoutCountByWakeDay[daily.day] ?? daily.exerciseCount) : daily.exerciseCount
         return DailyMetric(day: daily.day, totalSleepMin: daily.totalSleepMin, efficiency: daily.efficiency,
             deepMin: daily.deepMin, remMin: daily.remMin, lightMin: daily.lightMin,
             disturbances: daily.disturbances, restingHr: daily.restingHr, avgHrv: daily.avgHrv,
