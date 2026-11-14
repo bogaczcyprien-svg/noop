@@ -1412,7 +1412,13 @@ class AiCoach(
          */
         fun resolveSystemPrompt(ctx: Context): String {
             val custom = NoopPrefs.coachSystemPrompt(ctx).trim()
-            return if (custom.isNotEmpty()) custom else DEFAULT_SYSTEM_PROMPT
+            val base = if (custom.isNotEmpty()) custom else DEFAULT_SYSTEM_PROMPT
+            // FORK: like the fork iOS Coach, answer in French on a French device.
+            return if (java.util.Locale.getDefault().language == "fr") {
+                base + "\n\nAlways reply in French (français), regardless of what language the data labels or this prompt are in."
+            } else {
+                base
+            }
         }
 
         /**
