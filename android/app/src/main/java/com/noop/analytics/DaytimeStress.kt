@@ -42,9 +42,9 @@ object DaytimeStress {
     // MARK: - Tunables
 
     /** Minimum HR samples in an hour before its mean HR is trusted (~5 min at 1 Hz). */
-    const val minHourHrSamples: Int = 300
+    const val minHourHrSamples: Int = 2 // FORK: 300 -> 2 readings per 5-minute window
     /** Bucket width for the timeline, in seconds (one hour). */
-    const val bucketSeconds: Long = 3_600L
+    const val bucketSeconds: Long = 300L // FORK: hour -> 5-minute windows
     /**
      * How far the DISPLAY timeline slides its window between points.
      *
@@ -60,14 +60,34 @@ object DaytimeStress {
      * Half is the least overlap that still doubles the resolution, and it keeps every on-the-hour
      * point exactly where the hourly pass put it.
      */
-    const val timelineStepSeconds: Long = 1_800L
+    const val timelineStepSeconds: Long = 60L // FORK: refresh every minute
     /** Band floor for "high" on the shared 0–3 scale (matches StressBand.High). */
     const val highBandFloor: Double = 2.0
     /** Consecutive most-recent covered hours that must all be HIGH to flag sustained stress. */
-    const val sustainedHours: Int = 3
+    const val sustainedHours: Int = 36 // FORK: 36 five-minute windows = 3 hours
     /** First/last local hour-of-day treated as "waking" for the timeline (06:00–22:00). */
-    const val wakingStartHour: Int = 6
-    const val wakingEndHour: Int = 22
+    const val wakingStartHour: Int = 0 // FORK: full day, like WHOOP's chart
+    const val wakingEndHour: Int = 24
+
+    /** FORK: per-record activity intensity that counts as ambulatory for the stress mask. */
+    const val stressMotionThreshold: Double = 0.45
+    /** FORK: windows after an ambulatory one that can still be shadow-masked (one hour). */
+    const val postActivityShadowWindowBuckets: Int = 12
+    /** FORK: HR spread used to score a motion-masked window instead of blanking it. */
+    const val activityHRSigmaBPM: Double = 90.0
+    /** FORK: clean beats needed for a 5-minute RMSSD. */
+    internal const val minDaytimeBucketRRBeats: Int = 8
+    /** FORK: HR readings this far from the window median are dropped from its mean. */
+    internal const val hrOutlierDeviationBPM: Double = 30.0
+
+    /** FORK: window mean HR with single-reading outliers dropped. */
+    internal fun cleanedMeanHR(bpm: List<Double>): Double? {
+        if (bpm.isEmpty()) return null
+        if (bpm.size < 3) return mean(bpm)
+        val med = quantile(bpm.sorted(), 0.5)
+        val kept = bpm.filter { kotlin.math.abs(it - med) <= hrOutlierDeviationBPM }
+        return mean(if (kept.isEmpty()) bpm else kept)
+    }
 
     // MARK: - Motion gate
     //
@@ -207,6 +227,8 @@ object DaytimeStress {
          * reference and the coverage totals. See the motion-gate constants above.
          */
         val maskedForActivity: Boolean = false,
+        /** FORK: true when the window overlapped a sleep span and was left unscored. */
+        val maskedForSleep: Boolean = false,
     ) {
         /** True when the hour was scored (had enough HR to place on the curve). */
         val hasData: Boolean get() = level != null
@@ -259,6 +281,8 @@ object DaytimeStress {
          * overlapping windows would count the same minute more than once.
          */
         val timeline: List<HourPoint> = hours,
+        /** FORK: windows left unscored because they overlapped sleep. */
+        val sleepMaskedHours: Int = 0,
     ) {
         /** The scored hours only (level non-null), in time order. */
         val scored: List<HourPoint> get() = hours.filter { it.level != null }
@@ -355,6 +379,8 @@ object DaytimeStress {
      200 000-row reads, would be cost for nothing. The widget and the Today card ask for it.
          */
         includeTimeline: Boolean = false,
+        /** FORK: wall-clock [start, end) sleep spans; windows overlapping one are not scored. */
+        sleepSpans: List<Pair<Long, Long>> = emptyList(),
     ): Result {
         if (hr.isEmpty()) return Result.EMPTY
 
@@ -387,8 +413,8 @@ object DaytimeStress {
             val out = ArrayList<HourAgg>(ordered.size)
             for (b in ordered) {
                 val hrs = hrGrid[b] ?: emptyList<Double>()
-                val mHr = if (hrs.size >= minHourHrSamples) mean(hrs) else null
-                val rrRes = HrvAnalyzer.analyzeRaw(rrGrid[b] ?: emptyList())
+                val mHr = if (hrs.size >= minHourHrSamples) cleanedMeanHR(hrs) else null
+                val rrRes = HrvAnalyzer.analyzeRaw(rrGrid[b] ?: emptyList(), minBeats = minDaytimeBucketRRBeats)
                 out.add(HourAgg(b, mHr, rrRes.rmssd))
             }
             return out
@@ -412,7 +438,7 @@ object DaytimeStress {
             for (p in activity) {
                 val bucket = bucketOf(p.ts + tzOffsetSeconds, phase)
                 totalCounts[bucket] = (totalCounts[bucket] ?: 0) + 1
-                if (p.intensity > WorkoutDetector.motionThreshold) {
+                if (p.intensity > stressMotionThreshold) {
                     activeCounts[bucket] = (activeCounts[bucket] ?: 0) + 1
                 }
             }
@@ -424,6 +450,13 @@ object DaytimeStress {
         val activeFracByBucket = activeFractions(0L)
         fun isAmbulatory(bucket: Long): Boolean =
             (activeFracByBucket[bucket] ?: 0.0) >= activityMaskFraction
+        // FORK: a window overlapping a sleep span is not scored and stays out of the calm reference.
+        fun overlapsSleep(localShiftedBucket: Long): Boolean {
+            if (sleepSpans.isEmpty()) return false
+            val wallStart = localShiftedBucket - tzOffsetSeconds
+            val wallEnd = wallStart + bucketSeconds
+            return sleepSpans.any { wallStart < it.second && wallEnd > it.first }
+        }
 
         // 3) The reference point + spread for each signal — WHERE they come from depends on
         //    `mode`. Every other step (bucketing above incl. the motion gate, the waking-hour
@@ -451,7 +484,7 @@ object DaytimeStress {
                 // Ambulatory hours are excluded from the day's OWN calm reference too (the motion
                 // gate): an exertion hour's elevated HR / suppressed HRV must not pull the calm
                 // anchor up or inflate the across-hour spread the z-scores divide by.
-                val referenceAggs = aggs.filter { isWakingHour(it.bucket) && !isAmbulatory(it.bucket) }
+                val referenceAggs = aggs.filter { isWakingHour(it.bucket) && !isAmbulatory(it.bucket) && !overlapsSleep(it.bucket) }
                 val hrMeans = referenceAggs.mapNotNull { it.meanHr }
                 val rmssdVals = referenceAggs.mapNotNull { it.rmssd }
                 refHr = calmReference(hrMeans, calmIsLow = true)         // calm HR is LOW
@@ -504,7 +537,7 @@ object DaytimeStress {
             val out = ArrayList<HourPoint>(gridAggs.size)
             for (a in gridAggs) {
                 if (!isWakingHour(a.bucket)) continue
-                val hourOfDay = (floorDiv(a.bucket, bucketSeconds) % 24).toInt()
+                val hourOfDayValue = hourOfDay(a.bucket)
                 // The wall-clock bucket start (undo the local shift applied above).
                 val wallStart = a.bucket - tzOffsetSeconds
                 // Motion gate: an AMBULATORY hour — or the post-exercise shadow hour whose HR has not
@@ -514,22 +547,27 @@ object DaytimeStress {
                 // scores normally). Only meaningful when the hour actually HAD a reading to withhold
                 // — a no-HR hour is plain no-data, not "masked". The look-back is one FULL window on
                 // either grid, so the half-step pass shadows the same hour of exertion.
-                val shadow = ambulatory(a.bucket - bucketSeconds) &&
+                val shadow = (1..postActivityShadowWindowBuckets).any { ambulatory(a.bucket - it * bucketSeconds) } &&
                     a.meanHr != null && refHr != null && a.meanHr > refHr + postActivityShadowBpm
                 val masked = a.meanHr != null && (ambulatory(a.bucket) || shadow)
                 // Score only when HR cleared the count gate AND the hour was not motion-masked (HR is
                 // the always-available anchor; RMSSD enriches it when beats allow).
-                val level: Double? = if (a.meanHr != null && !masked) {
-                    squash(rawScore(a.meanHr, refHr, sdHr, a.rmssd, refRmssd, sdRmssd))
+                // FORK: a motion-masked window is still scored, HR-only against a wide spread, so walking reads
+                // as mildly raised instead of a gap. A window overlapping sleep is left unscored.
+                val sleepMasked = a.meanHr != null && overlapsSleep(a.bucket)
+                val level: Double? = if (a.meanHr != null && !sleepMasked) {
+                    if (masked) squash(rawScore(a.meanHr, refHr, activityHRSigmaBPM, null, null, 0.0))
+                    else squash(rawScore(a.meanHr, refHr, sdHr, a.rmssd, refRmssd, sdRmssd))
                 } else {
                     null
                 }
-                out.add(HourPoint(hourOfDay, wallStart, level, a.meanHr, a.rmssd, masked))
+                out.add(HourPoint(hourOfDayValue, wallStart, level, a.meanHr, a.rmssd, masked, sleepMasked))
             }
             return out
         }
         val points = scoreGrid(aggs, activeFracByBucket)
         val activityMaskedHours = points.count { it.maskedForActivity }
+        val sleepMaskedHours = points.count { it.maskedForSleep }
 
         // 4b) The half-step DISPLAY timeline: the same hour-long window re-read every
         //     [timelineStepSeconds], scored against the SAME references, and merged with the
@@ -537,9 +575,15 @@ object DaytimeStress {
         //     midpoints are new, so the curve still passes through exactly the values scored above.
         //     Nothing that counts hours reads this — see [Result.timeline].
         val timeline = if (includeTimeline && timelineStepSeconds in 1 until bucketSeconds) {
-            val midAggs = aggregate(hrBuckets(timelineStepSeconds), rrBuckets(timelineStepSeconds))
-            (points + scoreGrid(midAggs, activeFractions(timelineStepSeconds)))
-                .sortedBy { it.startTs }
+            // FORK: every phase between 0 and one window, so the line moves every minute.
+            val all = ArrayList(points)
+            var phase = timelineStepSeconds
+            while (phase < bucketSeconds) {
+                val midAggs = aggregate(hrBuckets(phase), rrBuckets(phase))
+                all += scoreGrid(midAggs, activeFractions(phase))
+                phase += timelineStepSeconds
+            }
+            all.sortedBy { it.startTs }
         } else {
             points
         }
@@ -553,12 +597,15 @@ object DaytimeStress {
             return if (points.isEmpty()) Result.EMPTY
             else Result(points, sustainedHigh = false, sustainedRun = 0, dayMean = null, peak = null,
                 activityMaskedHours = activityMaskedHours,
-                highStressMinutes = 0, hrOnlyFallback = hrOnlyFallback, timeline = timeline)
+                highStressMinutes = 0, hrOnlyFallback = hrOnlyFallback, timeline = timeline,
+                sleepMaskedHours = sleepMaskedHours)
         }
 
         // 5) Sustained-high flag: walk back from the latest SCORED hour while each is HIGH.
         var run = 0
-        for ((_, lvl) in scored.asReversed()) {
+        // FORK: motion-masked windows are scored now but never count toward sustained stress.
+        val sustainedCandidates = scored.filter { !it.first.maskedForActivity }
+        for ((_, lvl) in sustainedCandidates.asReversed()) {
             if (lvl >= highBandFloor) run += 1 else break
         }
         val sustained = run >= sustainedHours
@@ -574,7 +621,8 @@ object DaytimeStress {
         return Result(points, sustained, run, dayMean, peak,
             timeline = timeline,
             activityMaskedHours = activityMaskedHours,
-            highStressMinutes = highStressMinutes, hrOnlyFallback = hrOnlyFallback)
+            highStressMinutes = highStressMinutes, hrOnlyFallback = hrOnlyFallback,
+            sleepMaskedHours = sleepMaskedHours)
     }
 
     // MARK: - Helpers
@@ -617,7 +665,50 @@ object DaytimeStress {
      * reference and to pick the hours to score, so the two can never drift apart.
      */
     internal fun isWakingHour(bucket: Long): Boolean =
-        isWakingHourOfDay((floorDiv(bucket, bucketSeconds) % 24).toInt())
+        isWakingHourOfDay(hourOfDay(bucket))
+
+    /** FORK: local hour-of-day of a bucket start (buckets are no longer an hour wide). */
+    internal fun hourOfDay(bucket: Long): Int = (floorDiv(bucket, 3_600L) % 24).toInt()
+
+    /**
+     * FORK: the stress line inside one sleep span, scored against the night's own calm reference
+     * (the day read leaves those windows unscored). Twin of the fork Swift `analyzeSleepWindow`.
+     */
+    fun analyzeSleepWindow(
+        hr: List<HrSample>,
+        rr: List<RrInterval>,
+        sleepSpan: Pair<Long, Long>,
+        tzOffsetSeconds: Long = 0L,
+    ): List<HourPoint> {
+        if (sleepSpan.second <= sleepSpan.first) return emptyList()
+        val hrInSpan = hr.filter { it.ts >= sleepSpan.first && it.ts < sleepSpan.second }
+        if (hrInSpan.isEmpty()) return emptyList()
+        val rrInSpan = rr.filter { it.ts >= sleepSpan.first && it.ts < sleepSpan.second }
+        val hrByBucket = HashMap<Long, MutableList<Double>>()
+        for (s in hrInSpan) hrByBucket.getOrPut(bucketOf(s.ts + tzOffsetSeconds, 0L)) { ArrayList() }.add(s.bpm.toDouble())
+        val rrByBucket = HashMap<Long, MutableList<Double>>()
+        for (s in rrInSpan) rrByBucket.getOrPut(bucketOf(s.ts + tzOffsetSeconds, 0L)) { ArrayList() }.add(s.rrMs.toDouble())
+        val buckets = hrByBucket.keys.sorted()
+        val meanHrs = buckets.map { b ->
+            val hrs = hrByBucket[b] ?: emptyList<Double>()
+            if (hrs.size >= minHourHrSamples) cleanedMeanHR(hrs) else null
+        }
+        val rmssds = buckets.map { b ->
+            HrvAnalyzer.analyzeRaw(rrByBucket[b] ?: emptyList(), minBeats = minDaytimeBucketRRBeats).rmssd
+        }
+        if (buckets.isEmpty()) return emptyList()
+        val hrMeans = meanHrs.filterNotNull()
+        val rmssdVals = rmssds.filterNotNull()
+        val refHr = calmReference(hrMeans, calmIsLow = true)
+        val refRmssd = calmReference(rmssdVals, calmIsLow = false)
+        val sdHr = std(hrMeans, mean(hrMeans))
+        val sdRmssd = std(rmssdVals, mean(rmssdVals))
+        return buckets.indices.map { i ->
+            val m = meanHrs[i]
+            val level = if (m != null) squash(rawScore(m, refHr, sdHr, rmssds[i], refRmssd, sdRmssd)) else null
+            HourPoint(hourOfDay(buckets[i]), buckets[i] - tzOffsetSeconds, level, m, rmssds[i])
+        }
+    }
 
     /**
      * The day's "calm" reference for a signal: the quartile toward the calm end (lower

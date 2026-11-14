@@ -3355,6 +3355,9 @@ class WhoopBleClient(
                     runCatching { HealthConnectWriter.write(context, repository, deviceId) }
                         .onSuccess { r -> log("HC writeback: ${r.written} record(s)" + if (r.ok) "" else " (failed: ${r.failures.joinToString()})") }
                 }
+                // FORK: intervals.icu wellness push + activity pull, like the iOS post-offload hook.
+                // Both no-op until the user enters an API key in Settings.
+                runCatching { com.noop.intervals.IntervalsIcuRunner.afterOffload(context, repository, deviceId) }
             } finally {
                 val retryAlreadyQueued = analyzeAfterBackfillPending.getAndSet(false)
                 if (!retryAlreadyQueued) _state.update { it.copy(analyzingHistory = false) }

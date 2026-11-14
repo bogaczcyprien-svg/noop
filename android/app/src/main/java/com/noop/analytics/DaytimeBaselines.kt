@@ -104,11 +104,13 @@ object DaytimeBaselines {
         val wakingMeanHRs = ArrayList<Double>()
         val wakingRMSSDs = ArrayList<Double>()
         for ((bucket, hrs) in hrByBucket) {
-            if (!DaytimeStress.isWakingHour(bucket)) continue
+            // FORK: the cross-day aggregate keeps the 06:00-22:00 daytime hours the stress line no longer limits itself to.
+            val hourOfDay = DaytimeStress.hourOfDay(bucket)
+            if (hourOfDay < 6 || hourOfDay >= 22) continue
             if (hrs.size >= DaytimeStress.minHourHrSamples) {
-                DaytimeStress.mean(hrs)?.let { wakingMeanHRs.add(it) }
+                DaytimeStress.cleanedMeanHR(hrs)?.let { wakingMeanHRs.add(it) }
             }
-            HrvAnalyzer.analyzeRaw(rrByBucket[bucket] ?: emptyList()).rmssd?.let { wakingRMSSDs.add(it) }
+            HrvAnalyzer.analyzeRaw(rrByBucket[bucket] ?: emptyList(), minBeats = DaytimeStress.minDaytimeBucketRRBeats).rmssd?.let { wakingRMSSDs.add(it) }
         }
 
         val hrAgg = if (wakingMeanHRs.isEmpty()) null

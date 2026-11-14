@@ -257,6 +257,8 @@ data class ProfileBaselines(
     val restingHR: BaselineState? = null,
     val resp: BaselineState? = null,
     val skinTemp: BaselineState? = null,
+    /** FORK: personal baseline of the primary-session MEAN resting HR (RecoveryScorer.wNightMeanHR). */
+    val nightMeanHR: BaselineState? = null,
 )
 
 /**

@@ -310,11 +310,15 @@ object HrvAnalyzer {
      *   beats is too noisy to trust. null (the default, and what the NIGHTLY windowed path passes) skips
      *   the gate entirely, so the nightly RMSSD is byte-identical to before this parameter existed.
      */
-    fun analyzeRaw(rawRR: List<Double>, maxRejectedFraction: Double? = null): HrvResult {
+    fun analyzeRaw(
+        rawRR: List<Double>,
+        maxRejectedFraction: Double? = null,
+        minBeats: Int = MIN_BEATS, // FORK: a 5-minute stress window asks for fewer beats
+    ): HrvResult {
         val nInput = rawRR.size
         val cleaned = cleanRRGapAware(rawRR)
         val clean = cleaned.nn
-        if (clean.size < MIN_BEATS) {
+        if (clean.size < minBeats) {
             return HrvResult.empty(nInput)
         }
         // Spot-only: refuse when too large a fraction of beats was noise (out-of-range or ectopic). Only

@@ -234,8 +234,12 @@ object StrainScorer {
      *  The thresholds are %HRR, where Edwards (1993) defines its zones on %HRmax (#2835). Deliberate,
      *  and documented at the pipeline note in this file's header rather than restated here. */
     val edwardsZones: List<Pair<Double, Int>> = listOf(
-        90.0 to 5, 80.0 to 4, 70.0 to 3, 60.0 to 2, 50.0 to 1,
+        // FORK: cut-offs raised (twin of the fork Swift scorer).
+        95.0 to 5, 85.0 to 4, 75.0 to 3, 65.0 to 2, 60.0 to 1,
     )
+
+    /** FORK: per-zone TRIMP weight; zone 1 nearly free so ordinary daytime HR nets to ~0. */
+    val edwardsTRIMPWeight: DoubleArray = doubleArrayOf(0.0, 0.01, 2.0, 3.0, 4.0, 5.0)
 
     /** TRIMP accumulation method. */
     enum class Method { EDWARDS, BANISTER }
@@ -388,7 +392,7 @@ object StrainScorer {
     ): Double {
         var acc = 0.0
         for (i in hr.indices) {
-            acc += zoneWeight(hr[i].bpm.toDouble(), restingHR, hrReserve) * durations[i]
+            acc += edwardsTRIMPWeight[zoneWeight(hr[i].bpm.toDouble(), restingHR, hrReserve)] * durations[i]
         }
         return acc
     }

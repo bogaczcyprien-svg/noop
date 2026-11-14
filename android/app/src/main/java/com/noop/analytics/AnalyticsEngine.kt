@@ -357,6 +357,11 @@ object AnalyticsEngine {
         dayHr: List<HrSample>? = null,
         daySteps: List<StepSample>? = null,
         dayGravity: List<GravitySample>? = null,
+        // FORK: [start, end) windows (non-ambulatory intervals.icu sessions) cut out of the step estimate.
+        excludedStepWindows: List<Pair<Long, Long>> = emptyList(),
+        // FORK: [start, end) windows plus their own known kcal (intervals.icu sessions): HR inside is dropped
+        // from the day estimate and the session's kcal added in its place.
+        excludedCalorieWindows: List<Triple<Long, Long, Double>> = emptyList(),
         // Wear-gated nightly skin-temp mean is harvested here (baseline-independent); IntelligenceEngine
         // seeds a personal baseline from these means across nights and re-derives skinTempDevC in pass 2
         // (same two-pass shape as avgHrv→recovery). (PR #85)
@@ -860,6 +865,9 @@ object AnalyticsEngine {
                 respBaseline = baselines.resp,
                 sleepPerf = sleepPerf,
                 skinTempDev = skinTempDevC, // symmetric penalty; term drops + renormalizes when null
+                // FORK: tonight's primary-session mean HR against its own baseline.
+                nightMeanHR = primarySessionRestingHR(matched, hr),
+                nightMeanHRBaseline = baselines.nightMeanHR,
             )
         }
 
@@ -962,6 +970,7 @@ object AnalyticsEngine {
             // (#277); the wrap-aware tick math itself lives in the shared StepsCounter kernel so the daily
             // and per-workout (#398) totals can never disagree.
             val inDay = (daySteps ?: steps).filter { tsInDay(it.ts) }
+                .filter { s -> excludedStepWindows.none { s.ts >= it.first && s.ts < it.second } } // FORK
             val ticks = StepsCounter.stepsInWindow(inDay) ?: return@run null
             // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
             // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so
@@ -983,8 +992,10 @@ object AnalyticsEngine {
         // (dayString(ts, tzOffset)) so it agrees with the bucket (#277). Fall back to the
         // night-window hr for pure-function callers that don't supply dayHr. Strain keeps the full
         // window (bounded log).
+        // FORK: HR inside an intervals.icu session window is dropped and the session's own kcal added back.
         val dayHrFiltered = (dayHr ?: hr).filter { tsInDay(it.ts) }
-        val activeKcalEst: Double? = if (dayHrFiltered.isEmpty()) {
+            .filter { s -> excludedCalorieWindows.none { s.ts >= it.first && s.ts < it.second } }
+        val hrBasedKcal: Double? = if (dayHrFiltered.isEmpty()) {
             null
         } else {
             Calories.estimateDayCalories(
@@ -993,6 +1004,12 @@ object AnalyticsEngine {
                 hrmax = effMaxHR,
                 restingHR = restingHRDaily?.toDouble(),
             )
+        }
+        val importedRideKcal = excludedCalorieWindows.sumOf { it.third }
+        val activeKcalEst: Double? = when {
+            hrBasedKcal != null -> hrBasedKcal + importedRideKcal
+            importedRideKcal > 0 -> importedRideKcal
+            else -> null
         }
 
         // ── Assemble DailyMetric ──────────────────────────────────────────────

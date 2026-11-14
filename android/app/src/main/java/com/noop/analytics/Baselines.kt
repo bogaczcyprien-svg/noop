@@ -162,6 +162,11 @@ object Baselines {
             minVal = 0.0, maxVal = 100.0, floorSpread = 5.0,
             halfLifeB = 14.0, halfLifeS = 21.0,
         ),
+        // FORK: baseline for the primary-session MEAN resting HR (twin of the fork Swift config).
+        "resting_hr_primary_mean" to MetricCfg(
+            minVal = 30.0, maxVal = 120.0, floorSpread = 2.0,
+            halfLifeB = 14.0, halfLifeS = 21.0,
+        ),
         // Readiness HRV baseline, folded in the LOG domain (ln ms) with hard-outlier rejection OFF
         // (RD2 · the window-fold spine mode — see update's `rejectHardOutliers`). ReadinessEngine
         // z-scores lnRMSSD (RD1: HRV is right-skewed), so these bounds/floor are in LN(ms) units — NOT

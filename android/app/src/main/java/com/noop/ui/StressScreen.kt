@@ -280,7 +280,12 @@ private suspend fun loadDaytimeCore(
     // It is not free, which is why it was opt-in: a second bucketing pass and one RMSSD per extra
     // window, on a screen already doing three windowed reads. Since #2144 that cost only lands when
     // today's heart rate has actually moved, which is what makes it affordable here.
-    val daytime = DaytimeStress.analyze(hr, rr, gravity, tzOffsetSeconds, mode, includeTimeline = true)
+    // FORK: tonight's sleep (widened 12 h back so a night crossing midnight is found) is left unscored.
+    val sleepSpans = vm.repo.sleepSessionsMerged(vm.activeStrapId, from - 12 * 3_600L, nowSeconds, limit = 4)
+        .map { it.startTs to it.endTs }
+    val daytime = DaytimeStress.analyze(
+        hr, rr, gravity, tzOffsetSeconds, mode, includeTimeline = true, sleepSpans = sleepSpans,
+    )
     // ADDITIVE advanced readouts from the SAME `rr`. Each engine self-gates and returns null when
     // its requirement is not met, in which case its row is simply hidden in the UI.
     DaytimeCore(

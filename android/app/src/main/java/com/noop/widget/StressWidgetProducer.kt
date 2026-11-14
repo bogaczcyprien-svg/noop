@@ -195,9 +195,13 @@ internal object StressWidgetProducer {
                 val mode = selectedDaytimeStressMode(
                     repo, deviceId, window.day, zone, personalBaseline,
                 )
+                // FORK: tonight's sleep is left unscored (widened 12 h back for a night crossing midnight).
+                val sleepSpans = repo.sleepSessionsMerged(deviceId, from - 12 * 3_600L, nowSeconds, limit = 4)
+                    .map { it.startTs to it.endTs }
                 DaytimeStress.analyze(
                     hr, rr, gravity, tzOffsetSeconds, mode,
                     includeTimeline = true,
+                    sleepSpans = sleepSpans,
                     // The half-step display series rather than the bare hours: same scored window,
                     // same reference, read twice as often, so the curve tracks the day instead of
                     // stepping through it. Coverage copy reads `activityMaskedHours` from the

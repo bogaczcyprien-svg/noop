@@ -645,7 +645,7 @@ object NoopPrefs {
      *  (`.baselineRelative`) instead of the day's own calm hours. Default false — single-subject
      *  validated so far, so it ships behind a toggle. Mirrors iOS `stressPersonalBaselineEnabled`. */
     fun stressPersonalBaseline(context: Context): Boolean =
-        of(context).getBoolean(KEY_STRESS_PERSONAL_BASELINE, false)
+        of(context).getBoolean(KEY_STRESS_PERSONAL_BASELINE, true) // FORK: default ON, like the fork iOS app
 
     fun setStressPersonalBaseline(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_STRESS_PERSONAL_BASELINE, enabled).apply()

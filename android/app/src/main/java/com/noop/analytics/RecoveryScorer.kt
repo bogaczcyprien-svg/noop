@@ -63,10 +63,14 @@ object RecoveryScorer {
     // Constants (recovery.py)
     // ─────────────────────────────────────────────────────────────────────────
 
-    const val wHRV: Double = 0.55
+    // FORK: 0.55 -> 0.30, user-requested; the cut funds wNightMeanHR (twin of the fork Swift scorer).
+    const val wHRV: Double = 0.30
     const val wRHR: Double = 0.20
     const val wResp: Double = 0.05
     const val wSleep: Double = 0.15
+
+    /** FORK: weight of the primary-session MEAN resting-HR term (lower vs baseline is better). */
+    const val wNightMeanHR: Double = 0.25
 
     /** Skin-temperature deviation weight (symmetric illness/overreach penalty). */
     const val wSkinTemp: Double = 0.05
@@ -109,7 +113,7 @@ object RecoveryScorer {
     const val wActivityBalance: Double = 0.05
 
     /** Logistic spread: ±2 z-units ≈ full Red–Green band (15%–95%). */
-    const val logisticK: Double = 1.6
+    const val logisticK: Double = 1.7 // FORK: 1.6 -> 1.7, user-tuned
 
     /** Logistic offset so Z=0 → 58%. */
     const val logisticZ0: Double = -0.20
@@ -331,6 +335,8 @@ object RecoveryScorer {
         recoveryIndexSlope: Double? = null,
         effortBaseline: DriverBaseline? = null,
         priorDayEffort: Double? = null,
+        nightMeanHR: Double? = null,
+        nightMeanHRBaseline: DriverBaseline? = null,
     ): Double? {
         // Cold-start gate: HRV is the dominant driver; if its baseline isn't
         // usable, refuse to score (more honest than a fabricated value).
@@ -382,6 +388,10 @@ object RecoveryScorer {
                 zScore(effortBaseline.mean, priorDayEffort, effortBaseline.spread) to wActivityBalance,
             )
         }
+        // FORK: night-mean-HR term, lower vs baseline is better. Added only with both value and baseline.
+        if (nightMeanHR != null && nightMeanHRBaseline != null) {
+            terms.add(zScore(nightMeanHRBaseline.mean, nightMeanHR, nightMeanHRBaseline.spread) to wNightMeanHR)
+        }
 
         if (terms.isEmpty()) return null
         val totalWeight = terms.sumOf { it.second }
@@ -420,6 +430,8 @@ object RecoveryScorer {
         recoveryIndexSlope: Double? = null,
         effortBaseline: BaselineState? = null,
         priorDayEffort: Double? = null,
+        nightMeanHR: Double? = null,
+        nightMeanHRBaseline: BaselineState? = null,
     ): Double? = recovery(
         hrv = hrv,
         rhr = rhr,
@@ -439,5 +451,7 @@ object RecoveryScorer {
         recoveryIndexSlope = recoveryIndexSlope,
         effortBaseline = effortBaseline?.takeIf { it.usable }?.let { DriverBaseline(it) },
         priorDayEffort = priorDayEffort,
+        nightMeanHR = nightMeanHR,
+        nightMeanHRBaseline = nightMeanHRBaseline?.takeIf { it.usable }?.let { DriverBaseline(it) },
     )
 }

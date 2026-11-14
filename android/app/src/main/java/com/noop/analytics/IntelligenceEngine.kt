@@ -43,6 +43,17 @@ import kotlinx.coroutines.withContext
  */
 object IntelligenceEngine {
 
+    /** FORK: sports whose motion must not count as steps (pedaling, strokes…). Twin of the fork Swift set. */
+    private val nonAmbulatorySports: Set<String> = setOf(
+        "ride", "virtualride", "gravelride", "mountainbikeride", "mountain bike ride",
+        "ebikeride", "e-bike ride", "cycling", "cycle", "bike", "biking", "spinning",
+        "rowing", "row", "swim", "swimming", "openwaterswim", "open water swim",
+        "kayaking", "canoeing", "stand up paddling", "paddling",
+    )
+
+    /** FORK: whether an intervals.icu sport type is non-ambulatory. */
+    internal fun isNonAmbulatorySport(sport: String): Boolean = sport.trim().lowercase() in nonAmbulatorySports
+
     /**
      * Serialises [analyzeRecent] against itself. The pass is launched from four independent coroutines: the
      * 15-min backstop loop and rescoreAfterEdit (both AppViewModel), the post-offload analyze
@@ -682,6 +693,8 @@ object IntelligenceEngine {
         val rhrCfg = Baselines.metricCfg["resting_hr"] ?: return emptyList<Computed>() to 0
         val skinCfg = Baselines.metricCfg["skin_temp"] ?: return emptyList<Computed>() to 0
         val respCfg = Baselines.metricCfg["resp"] ?: return emptyList<Computed>() to 0
+        // FORK: see RecoveryScorer.wNightMeanHR.
+        val nightMeanHRCfg = Baselines.metricCfg["resting_hr_primary_mean"] ?: return emptyList<Computed>() to 0
 
         val computedId = importedDeviceId + "-noop"
 
@@ -1102,6 +1115,20 @@ object IntelligenceEngine {
             val dayGrav = AnalyticsEngine.daySliceFromNight(grav, from, to, dayMidnight, dayEnd) { it.ts }
                 ?: repo.gravitySamplesForDevice(owner, dayMidnight, dayEnd, STREAM_LIMIT)
 
+            // FORK: intervals.icu sessions over this calendar day. Non-ambulatory ones (rides, rowing,
+            // swimming…) are cut out of the step estimate, and every session with its own calories has its
+            // HR-estimated span replaced by that exact figure. Twin of the fork Swift engine.
+            val intervalsRides = runCatching {
+                repo.workouts(com.noop.intervals.IntervalsIcuImporter.DEVICE_ID, dayMidnight, dayEnd, 50)
+            }.getOrDefault(emptyList())
+            val excludedStepWindows = intervalsRides
+                .filter { isNonAmbulatorySport(it.sport) }
+                .map { it.startTs to it.endTs }
+            val excludedCalorieWindows = intervalsRides.mapNotNull { ride ->
+                val kcal = ride.energyKcal ?: return@mapNotNull null
+                if (kcal > 0) Triple(ride.startTs, ride.endTs, kcal) else null
+            }
+
             // CONSUME (#531 / #175): the strap's OWN band sleep_state for the night window as (ts, state)
             // samples, so the H7 morning-stillness guard can confirm a borderline re-onset against the strap's
             // OWN scored band, AND analyzeDay can grid it per session for persistence. #175 wired the RAW
@@ -1193,6 +1220,8 @@ object IntelligenceEngine {
                 dayHr = dayHr,
                 daySteps = daySteps,
                 dayGravity = dayGrav,
+                excludedStepWindows = excludedStepWindows,       // FORK
+                excludedCalorieWindows = excludedCalorieWindows, // FORK
                 skinTemp = skin,
                 skinTempFamily = skinFamily,   // #938
                 skinTempAnchorRaw = skinAnchorRaw,   // #938 second capture: per-device worn anchor
@@ -1603,8 +1632,17 @@ object IntelligenceEngine {
         val skinBase2 = Baselines
             .foldHistory(skinHistory.values, skinHistory.dayKeys, skinCfg, recoveryEpoch)
             .takeIf { it.usable }
+        // FORK: night-mean-HR baseline, folded from the primary-session means collected above (own nights
+        // only, like skin temp). Gated on `usable` like resp/skin. Twin of the fork Swift engine.
+        val nightMeanHRHistory = ChargeBaselines.history(
+            emptyList(), ownNights(primarySessionRHRByDay), newestDay, nightMeanHRCfg, recoveryEpoch,
+        )
+        val nightMeanHRBase2 = Baselines
+            .foldHistory(nightMeanHRHistory.values, nightMeanHRHistory.dayKeys, nightMeanHRCfg, recoveryEpoch)
+            .takeIf { it.usable }
         val baselines2 = ProfileBaselines(
             hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
+            nightMeanHR = nightMeanHRBase2,
         )
 
         // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
