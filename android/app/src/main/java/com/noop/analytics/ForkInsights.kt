@@ -234,3 +234,32 @@ object OverloadPolicy {
     fun shouldNotify(enabled: Boolean, streak: Int, lastNotifiedDay: String?, today: String): Boolean =
         enabled && streak >= REQUIRED_STREAK && lastNotifiedDay != today
 }
+
+/** What shaped today's Effort: inputs used, zone minutes, raw vs sustained peak. Twin of the fork's
+ *  Swift `StrainScorer.breakdown`; the score comes from [StrainScorer.strain] with the SAME inputs, so the
+ *  sheet always explains the number on the ring. */
+object EffortBreakdownCalc {
+    data class Breakdown(
+        val hrMaxUsed: Double,
+        val restingHRUsed: Double,
+        val method: StrainScorer.Method,
+        val strain: Double,
+        /** [0] below zone 1, [1..5] zones 1-5, minutes. */
+        val zoneMinutes: List<Double>,
+        val peakBpm: Double?,
+        val sustainedPeakBpm: Double?,
+    )
+
+    fun breakdown(
+        hr: List<com.noop.data.HrSample>,
+        maxHR: Double?,
+        restingHR: Double,
+        method: StrainScorer.Method,
+        sex: String,
+    ): Breakdown? {
+        val s = StrainScorer.strain(hr = hr, maxHR = maxHR, restingHR = restingHR, method = method, sex = sex) ?: return null
+        val effMax = maxHR ?: StrainScorer.defaultMaxHR().toDouble()
+        val zones = StrainScorer.zoneMinutes(hr, restingHR, effMax - restingHR, StrainScorer.sampleDurationsMinutes(hr))
+        return Breakdown(effMax, restingHR, method, s, zones, hr.maxOfOrNull { it.bpm.toDouble() }, StrainScorer.sustainedPeak(hr))
+    }
+}

@@ -1025,6 +1025,10 @@ fun TodayScreen(
     // fabricated number. Any past day → null (the gauge uses the stored strain). Keyed on the same inputs
     // as the day-scoped loads so it reloads as the selector moves and as a sync/import grows the HR window.
     var liveTodayStrain by remember { mutableStateOf<Double?>(null) }
+    // FORK: the Effort breakdown sheet (zone minutes, HRmax/RHR used, raw vs sustained peak), fed the SAME
+    // inputs as liveTodayStrain so it explains the number on the ring. Opened by tapping the Effort ring.
+    var effortBreakdown by remember { mutableStateOf<com.noop.analytics.EffortBreakdownCalc.Breakdown?>(null) }
+    var showEffortBreakdown by remember { mutableStateOf(false) }
     LaunchedEffect(days, selectedDayKey, selectedDayOffset, activeDayCycle, dayCycleMode) {
         liveTodayStrain = if (selectedDayOffset == 0) {
             val zone = ZoneId.systemDefault()
@@ -1044,6 +1048,9 @@ fun TodayScreen(
             val effMaxHR = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble()
                 ?: if (profileStore.age > 0) StrainScorer.tanakaHRmax(profileStore.age.toDouble()) else null
             val restingHr = displayMetric?.restingHr?.toDouble() ?: StrainScorer.defaultRestingHR
+            effortBreakdown = runCatching {
+                com.noop.analytics.EffortBreakdownCalc.breakdown(todayHr, effMaxHR, restingHr, NoopPrefs.effortMethod(context), profileStore.sex)
+            }.getOrNull()
             StrainScorer.strain(
                 hr = todayHr,
                 maxHR = effMaxHR,
@@ -1720,6 +1727,7 @@ fun TodayScreen(
                                     heroSourceLabel = heroSourceLabel,
                                     onScoreInfo = openGuide,
                                     onChargeTap = { showChargeBreakdown = true },
+                                    onEffortTap = { showEffortBreakdown = true },
                                     // #1164: today's Rest is provisional while the strap has banked records
                                     // not yet offloaded — show "Pending sync" instead of a number that moves.
                                     restPendingSync = restPendingSync(
@@ -2065,6 +2073,32 @@ fun TodayScreen(
                 onOpenTrend = {
                     showChargeBreakdown = false
                     onOpenMetric(HERO_CHARGE_METRIC_KEY)
+                },
+            )
+        }
+    }
+
+    // FORK: the Effort breakdown sheet, same full-screen Dialog presentation as the Charge breakdown.
+    if (showEffortBreakdown) {
+        Dialog(
+            onDismissRequest = { showEffortBreakdown = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            com.noop.fork.EffortBreakdownSheet(
+                breakdown = if (selectedDayOffset == 0) effortBreakdown else null,
+                isToday = selectedDayOffset == 0,
+                displayed = effortForDay,
+                stored = displayMetric?.strain,
+                live = if (selectedDayOffset == 0) liveTodayStrain else null,
+                effortScale = effortScale,
+                onClose = { showEffortBreakdown = false },
+                onHowCalculated = {
+                    showEffortBreakdown = false
+                    openGuide(ScoreSection.EFFORT)
+                },
+                onOpenTrend = {
+                    showEffortBreakdown = false
+                    onOpenMetric(HERO_EFFORT_METRIC_KEY)
                 },
             )
         }
@@ -3036,6 +3070,8 @@ private fun ScoreHeroRow(
     // A1 (#514/#706): tapping the Charge ring opens the breakdown sheet. A small chevron cue overlays the
     // ring's bottom edge INSIDE the ring frame, so it adds no stacked height (the #762 self-sizing parity).
     onChargeTap: (() -> Unit)? = null,
+    // FORK: tapping the Effort ring opens the Effort breakdown sheet instead of the bare trend.
+    onEffortTap: (() -> Unit)? = null,
     // #1164: pending-sync state for today's Rest (strap has banked records not yet offloaded). When true
     // the Rest ring shows "Pending sync" instead of a provisional number that will change.
     restPendingSync: Boolean = false,
@@ -3100,7 +3136,7 @@ private fun ScoreHeroRow(
             ) {
                 // CHARGE, recovery 0–100, as a GlowRing with the value counting up in the centre. Honest
                 // empty / calibrating overlay; badges its recovery winner.
-                val effortRingTap = onOpenMetric?.let { open -> { open(HERO_EFFORT_METRIC_KEY) } }
+                val effortRingTap = onEffortTap ?: onOpenMetric?.let { open -> { open(HERO_EFFORT_METRIC_KEY) } }
                 val restRingTap = onOpenMetric?.let { open -> { open(HERO_REST_METRIC_KEY) } }
                 HeroRingColumn(
                     modifier = Modifier.width(col),
