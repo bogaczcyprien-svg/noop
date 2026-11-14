@@ -1082,6 +1082,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         dayStrain21 = todayRow.strain?.let { UnitFormatter.effortValue(it, EffortScale.WHOOP) },
                         target21 = optimalStrainRange(todayRow.recovery)?.low,
                     )
+                    // FORK: overload alert (Effort above the optimal band 3 days running), default off.
+                    runCatching { com.noop.notif.OverloadNotifier.onDaysUpdate(appContext, todayRow.day, days) }
                 }
                 // v5 skin-temp suite: run the Cycle / Body-clock / Illness-heads-up engines over the same
                 // cached history and publish their RESULTS for the Health hub. The richer IllnessSignalEngine

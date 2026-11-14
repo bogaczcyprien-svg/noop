@@ -3360,6 +3360,10 @@ class WhoopBleClient(
                 runCatching { com.noop.intervals.IntervalsIcuRunner.afterOffload(context, repository, deviceId) }
                 // FORK: bedtime breathing reminder, 21:00-23:00 only, once per evening; no-op when off.
                 runCatching { com.noop.breathing.BedtimeBreathingNudge.postIfDue(context, repository, deviceId) }
+                // FORK: morning sleep recap, HRV trend and post-workout nutrition notifications; each no-op when off.
+                runCatching { com.noop.notif.SleepRecapNotifier.postIfDue(context, repository, deviceId) }
+                runCatching { com.noop.notif.TrendNotifier.postIfDue(context, repository, deviceId) }
+                runCatching { com.noop.notif.WorkoutNutritionNotifier.postIfDue(context, repository, deviceId) }
             } finally {
                 val retryAlreadyQueued = analyzeAfterBackfillPending.getAndSet(false)
                 if (!retryAlreadyQueued) _state.update { it.copy(analyzingHistory = false) }

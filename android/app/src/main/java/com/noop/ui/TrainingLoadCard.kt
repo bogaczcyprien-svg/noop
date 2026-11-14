@@ -89,6 +89,10 @@ fun TrainingLoadCard(days: List<DailyMetric>, modifier: Modifier = Modifier) {
                     Stat(stringResource(R.string.trends_tl_form), latest?.let { signed(it.balance) } ?: "—")
                     Stat(stringResource(R.string.trends_days), "${result.contiguousDays}")
                 }
+                // FORK: Pace of Recovery, the forward TSB projection, shown only while form is negative.
+                latest?.let { paceOfRecoveryLine(it.chronicLoad, it.acuteLoad) }?.let {
+                    Text(it, style = NoopType.footnote, color = Palette.textTertiary)
+                }
             }
         }
     }
@@ -137,3 +141,18 @@ private fun androidx.compose.foundation.layout.RowScope.Stat(label: String, valu
 
 private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.1f", v)
 private fun signed(v: Double): String = String.format(java.util.Locale.US, "%+.1f", v)
+
+/** FORK: twin of the fork iOS TrainingLoadCard.paceOfRecoveryLine. */
+private fun paceOfRecoveryLine(ctl: Double, atl: Double): String? {
+    if (ctl - atl >= 0) return null
+    val p = com.noop.analytics.PaceOfRecovery.project(ctl, atl)
+    val fr = java.util.Locale.getDefault().language == "fr"
+    val max = com.noop.analytics.PaceOfRecovery.MAX_PROJECTED_DAYS
+    return if (p.daysToRecovered >= max) {
+        if (fr) "À ce rythme, retour à une forme équilibrée dans plus de $max jours si tu lèves le pied maintenant."
+        else "At this pace, recovery is more than $max days out if you ease up now."
+    } else {
+        if (fr) "À ce rythme, environ ${p.daysToRecovered} jour(s) pour retrouver une forme équilibrée si tu lèves le pied maintenant."
+        else "At this pace, about ${p.daysToRecovered} day(s) to recovered form if you ease up now."
+    }
+}

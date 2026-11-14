@@ -30,6 +30,10 @@ import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
@@ -209,6 +213,11 @@ internal enum class Destination(
     IntervalsIcu("intervals_icu", R.string.nav_intervals_icu, Icons.Filled.CloudSync),
     IntervalsIcuActivities("intervals_icu_activities", R.string.nav_intervals_icu_activities, Icons.Filled.FitnessCenter),
     PlannedTraining("planned_training", R.string.nav_planned_training, Icons.Filled.CalendarMonth),
+    // FORK: the fork iOS More-list additions.
+    SleepRecap("sleep_recap", R.string.nav_sleep_recap, Icons.Filled.NotificationsActive),
+    RacePredictor("race_predictor", R.string.nav_race_predictor, Icons.Filled.Flag),
+    FastingWindow("fasting_window", R.string.nav_fasting_window, Icons.Filled.Restaurant),
+    Resilience("resilience", R.string.nav_resilience, Icons.Filled.Shield),
     GroundTruthCollector("ground_truth_collector", R.string.ground_truth_title, Icons.Filled.Sensors),
 
     // The "More" tab: its own navigated page (mirroring the iOS More tab) that hosts the full
@@ -262,6 +271,7 @@ internal val drawerGroups: List<DrawerGroup> = listOf(
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
         Destination.BackupSync, Destination.Devices, Destination.NoopLimitations, Destination.IntervalsIcu,
+        Destination.SleepRecap, Destination.RacePredictor, Destination.FastingWindow, Destination.Resilience,
     ), defaultExpanded = false),
     DrawerGroup("App", R.string.more_group_app, listOf(
         Destination.Automations, Destination.SmartAlarm, Destination.Notifications,
@@ -815,6 +825,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.IntervalsIcu.route) { com.noop.intervals.IntervalsIcuSettingsScreen(viewModel) }
                 composable(Destination.IntervalsIcuActivities.route) { com.noop.intervals.IntervalsIcuActivitiesScreen(viewModel) }
                 composable(Destination.PlannedTraining.route) { com.noop.intervals.IntervalsIcuPlannedScreen() }
+                composable(Destination.SleepRecap.route) { com.noop.fork.SleepRecapSettingsScreen() }
+                composable(Destination.RacePredictor.route) { com.noop.fork.RaceTimePredictorScreen(viewModel) }
+                composable(Destination.FastingWindow.route) { com.noop.fork.FastingWindowScreen(viewModel) }
+                composable(Destination.Resilience.route) { com.noop.fork.ResilienceScreen(viewModel) }
                 composable(Destination.TestCentre.route) {
                     TestCentreScreen(viewModel, onOpenGroundTruthCollector = {
                         nav.navigate(Destination.GroundTruthCollector.route)
