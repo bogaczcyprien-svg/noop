@@ -2519,6 +2519,7 @@
     <string name="nav_intervals_icu">intervals.icu</string>
     <string name="nav_intervals_icu_activities">Activités intervals.icu</string>
     <string name="nav_planned_training">Entraînements prévus</string>
+    <string name="nav_breathing">Respiration</string>
     <string name="push_title">Envoi auto-hébergé</string>
     <string name="push_subtitle">Expérimental · Android</string>
     <string name="push_destination_title">Votre point de terminaison</string>

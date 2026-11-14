@@ -3358,6 +3358,8 @@ class WhoopBleClient(
                 // FORK: intervals.icu wellness push + activity pull, like the iOS post-offload hook.
                 // Both no-op until the user enters an API key in Settings.
                 runCatching { com.noop.intervals.IntervalsIcuRunner.afterOffload(context, repository, deviceId) }
+                // FORK: bedtime breathing reminder, 21:00-23:00 only, once per evening; no-op when off.
+                runCatching { com.noop.breathing.BedtimeBreathingNudge.postIfDue(context, repository, deviceId) }
             } finally {
                 val retryAlreadyQueued = analyzeAfterBackfillPending.getAndSet(false)
                 if (!retryAlreadyQueued) _state.update { it.copy(analyzingHistory = false) }

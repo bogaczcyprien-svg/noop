@@ -148,6 +148,8 @@ internal enum class Destination(
     // Group: Recovery
     Sleep("sleep", R.string.nav_sleep, Icons.Filled.Bedtime),
     Breathe("breathe", R.string.nav_breathe, Icons.Filled.Air),
+    // FORK: the Breathing tab (research-backed exercises), a bottom-bar tab like on the fork iOS app.
+    Breathing("breathing", R.string.nav_breathing, Icons.Filled.Air),
     Stress("stress", R.string.nav_stress, Icons.Filled.Spa),
 
     // Group: Activity
@@ -243,6 +245,8 @@ internal val drawerGroups: List<DrawerGroup> = listOf(
         // promoted to a top-level tab — no longer listed under More." Leaving it would have put the
         // same destination in two places at once, which is the duplication the note above says this
         // list exists to avoid. (#2218)
+        // FORK: Trends and Coach live here; the bar carries Today · Breathing · Sleep like the fork iOS app.
+        Destination.Trends, Destination.Coach,
         Destination.InsightsHub, Destination.Intelligence,
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
@@ -703,6 +707,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 }
                 composable(Destination.Intervals.route) { IntervalsScreen(viewModel) }
                 composable(Destination.Breathe.route) { BreatheScreen(viewModel) }
+                composable(Destination.Breathing.route) {
+                    com.noop.breathing.BreathingTabScreen(viewModel, onMoreTechniques = { nav.navigate(Destination.Breathe.route) })
+                }
                 composable(Destination.Coach.route) {
                     // A normal push, so Back returns to the conversation (#2243).
                     CoachScreen(onOpenSettings = { nav.navigate(Destination.CoachSettings.route) })
@@ -1122,20 +1129,15 @@ internal data class BarTab(val dest: Destination, val icon: ImageVector, @String
  *  More is special-cased (it opens the sheet rather than a route), so it is appended at the call site. */
 internal val barLeadingTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
-    // chart.line.uptrend.xyaxis on iOS — the rising-trend glyph, not a flat bar chart.
-    BarTab(Destination.Trends, Icons.AutoMirrored.Filled.TrendingUp, R.string.nav_trends),
 )
 /**
  * The trailing tabs, as shipped. [barTrailingTabsFor] is what the bar actually draws: Coach is
  * conditional, so this list is the full set rather than the visible one.
  */
 internal val barTrailingTabs = listOf(
+    // FORK: Breathing and Sleep, as on the fork iOS app (Coach and Trends moved to More).
+    BarTab(Destination.Breathing, Icons.Filled.Air, R.string.nav_breathing),
     BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
-    // #2218: Coach was promoted to a top-level tab on iOS and this side did not follow, so it sat in
-    // the More list while the comment above claimed the two bars matched. AutoAwesome is the sparkles
-    // glyph iOS uses, and the same one the More row already shows, so the entry a wearer has learned
-    // keeps its face when it moves up.
-    BarTab(Destination.Coach, Icons.Filled.AutoAwesome, R.string.nav_coach),
 )
 
 /**
