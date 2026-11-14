@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
@@ -199,6 +200,10 @@ internal enum class Destination(
         Icons.Filled.Tune,
     ),
     TestCentre("test_centre", R.string.nav_test_centre, Icons.Filled.BugReport),
+    // FORK: intervals.icu settings, its activities list and the planned-training calendar.
+    IntervalsIcu("intervals_icu", R.string.nav_intervals_icu, Icons.Filled.CloudSync),
+    IntervalsIcuActivities("intervals_icu_activities", R.string.nav_intervals_icu_activities, Icons.Filled.FitnessCenter),
+    PlannedTraining("planned_training", R.string.nav_planned_training, Icons.Filled.CalendarMonth),
     GroundTruthCollector("ground_truth_collector", R.string.ground_truth_title, Icons.Filled.Sensors),
 
     // The "More" tab: its own navigated page (mirroring the iOS More tab) that hosts the full
@@ -242,13 +247,14 @@ internal val drawerGroups: List<DrawerGroup> = listOf(
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Workouts, Destination.Health, Destination.VitalSigns,
+        Destination.Live, Destination.Workouts, Destination.IntervalsIcuActivities, Destination.PlannedTraining,
+        Destination.Health, Destination.VitalSigns,
         Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
         Destination.Rhythm,
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
-        Destination.BackupSync, Destination.Devices, Destination.NoopLimitations,
+        Destination.BackupSync, Destination.Devices, Destination.NoopLimitations, Destination.IntervalsIcu,
     ), defaultExpanded = false),
     DrawerGroup("App", R.string.more_group_app, listOf(
         Destination.Automations, Destination.SmartAlarm, Destination.Notifications,
@@ -670,6 +676,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        // FORK: intervals.icu activities and planned-training calendar.
+                        onOpenIntervalsActivities = { nav.navigate(Destination.IntervalsIcuActivities.route) },
+                        onOpenPlannedTraining = { nav.navigate(Destination.PlannedTraining.route) },
                     )
                 }
                 composable(Destination.Live.route) {
@@ -791,6 +800,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.SelfHostedPush.route) { SelfHostedPushScreen() }
+                // FORK: intervals.icu screens.
+                composable(Destination.IntervalsIcu.route) { com.noop.intervals.IntervalsIcuSettingsScreen(viewModel) }
+                composable(Destination.IntervalsIcuActivities.route) { com.noop.intervals.IntervalsIcuActivitiesScreen(viewModel) }
+                composable(Destination.PlannedTraining.route) { com.noop.intervals.IntervalsIcuPlannedScreen() }
                 composable(Destination.TestCentre.route) {
                     TestCentreScreen(viewModel, onOpenGroundTruthCollector = {
                         nav.navigate(Destination.GroundTruthCollector.route)

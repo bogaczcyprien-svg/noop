@@ -2516,6 +2516,9 @@
     <string name="nav_power_saving">Économie d’énergie</string>
     <string name="l10n_app_changelog_training_load_a_vo_max_without_f9205a67">Charge d\'entraînement, VO₂max sans mètre ruban, et bien moins de batterie à recalculer</string>
     <string name="nav_self_hosted_push">Envoi auto-hébergé</string>
+    <string name="nav_intervals_icu">intervals.icu</string>
+    <string name="nav_intervals_icu_activities">Activités intervals.icu</string>
+    <string name="nav_planned_training">Entraînements prévus</string>
     <string name="push_title">Envoi auto-hébergé</string>
     <string name="push_subtitle">Expérimental · Android</string>
     <string name="push_destination_title">Votre point de terminaison</string>

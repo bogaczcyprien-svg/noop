@@ -55,6 +55,9 @@
     <string name="nav_settings">Settings</string>
     <string name="nav_test_centre">Test Centre</string>
     <string name="nav_self_hosted_push">Self-hosted push</string>
+    <string name="nav_intervals_icu">intervals.icu</string>
+    <string name="nav_intervals_icu_activities">intervals.icu activities</string>
+    <string name="nav_planned_training">Planned training</string>
     <string name="nav_more">More</string>
 
     <string name="push_title">Self-hosted push</string>

@@ -330,6 +330,9 @@ fun TodayScreen(
     // The #627 journal-reminder card links straight to the journal (Insights). Defaulted to a no-op so
     // the call site stays compiling; AppRoot binds it to nav.navigateTopLevel(Insights), same as Sleep.
     onOpenJournal: () -> Unit = {},
+    // FORK: intervals.icu activities list and planned-training calendar.
+    onOpenIntervalsActivities: () -> Unit = {},
+    onOpenPlannedTraining: () -> Unit = {},
 ) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
@@ -1774,16 +1777,27 @@ fun TodayScreen(
                         )
                         // The plain-English read-out, the Charge-tinted Synthesis card. Mirrors the iOS
                         // Synthesis InsightCard; carries the last scored day's read at the rollover (#543).
-                        TodaySection.SYNTHESIS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
-                            SynthesisHeroCard(
-                                day = displayMetric,
-                                recoveryCalibration = recoveryCalibration,
-                                carriedDay = lastScoredRecoveryDay,
-                                days = days,
-                                synthesisExpanded = synthesisExpanded,
-                                onToggleSynthesis = { synthesisExpanded = !synthesisExpanded },
-                                onOpenReadiness = { showChargeBreakdown = true },
-                            )
+                        TodaySection.SYNTHESIS -> Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
+                                SynthesisHeroCard(
+                                    day = displayMetric,
+                                    recoveryCalibration = recoveryCalibration,
+                                    carriedDay = lastScoredRecoveryDay,
+                                    days = days,
+                                    synthesisExpanded = synthesisExpanded,
+                                    onToggleSynthesis = { synthesisExpanded = !synthesisExpanded },
+                                    onOpenReadiness = { showChargeBreakdown = true },
+                                )
+                            }
+                            // FORK: intervals.icu activities (2 + "see all") under the synthesis, as on iOS.
+                            if (selectedDayOffset == 0) {
+                                com.noop.intervals.IntervalsIcuActivitiesSection(
+                                    viewModel, limit = 2, onSeeAll = onOpenIntervalsActivities,
+                                )
+                            }
                         }
                         // METRICS: header + Edit affordance (#251) + the tile grid. Previously two
                         // LazyColumn items; merged into ONE (a section must be a single keyed item for the
@@ -1792,6 +1806,10 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
+                            // FORK: intervals.icu "next session" card above Key Metrics, as on iOS.
+                            if (selectedDayOffset == 0) {
+                                com.noop.intervals.IntervalsIcuNextPlannedCard(onOpenCalendar = onOpenPlannedTraining)
+                            }
                             Row(verticalAlignment = Alignment.Top) {
                                 Box(modifier = Modifier.weight(1f)) {
                                     // The label names the window the DETAILED tiles graph, so it is only honest while they are
