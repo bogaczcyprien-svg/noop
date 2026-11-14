@@ -1029,6 +1029,19 @@ fun TodayScreen(
     // inputs as liveTodayStrain so it explains the number on the ring. Opened by tapping the Effort ring.
     var effortBreakdown by remember { mutableStateOf<com.noop.analytics.EffortBreakdownCalc.Breakdown?>(null) }
     var showEffortBreakdown by remember { mutableStateOf(false) }
+    // FORK: Avg HR (24h) Key Metrics tile — the whole calendar day of the selected day, night included.
+    var dayMeanHr by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(selectedDay, days) {
+        dayMeanHr = withContext(Dispatchers.IO) {
+            runCatching {
+                val zone = ZoneId.systemDefault()
+                val start = selectedDay.atStartOfDay(zone).toEpochSecond()
+                val end = minOf(start + 86_400, System.currentTimeMillis() / 1000)
+                val hr = viewModel.repo.hrSamplesUnion(viewModel.activeStrapId, start, end)
+                com.noop.analytics.WholeDayMeanHR.mean(hr.map { it.bpm.toDouble() })
+            }.getOrNull()
+        }
+    }
     LaunchedEffect(days, selectedDayKey, selectedDayOffset, activeDayCycle, dayCycleMode) {
         liveTodayStrain = if (selectedDayOffset == 0) {
             val zone = ZoneId.systemDefault()
@@ -1834,6 +1847,7 @@ fun TodayScreen(
                             Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
                                 MetricGrid(
                                     d = stepResolvedDisplayMetric,
+                                    dayMeanHr = dayMeanHr,
                                     w = window,
                                     recoveryCalibration = recoveryCalibration,
                                     lastScoredCharge = lastScoredCharge,
@@ -5991,6 +6005,7 @@ internal fun resolveSkinTempReading(
 @Suppress("UNUSED_PARAMETER")
 private fun MetricGrid(
     d: DailyMetric?,
+    dayMeanHr: Double? = null,
     w: Window,
     recoveryCalibration: Int? = null,
     lastScoredCharge: LastCharge? = null,
@@ -6090,6 +6105,14 @@ private fun MetricGrid(
     fun kmUsual(series: List<Double>, format: (Double) -> String): String? =
         com.noop.analytics.KeyMetricVerdict.usual(kmHist(series))?.let(format)
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
+        KeyMetric.DAY_MEAN_HR to KeyTileData(
+            label = uiString(R.string.today_metric_day_mean_hr),
+            value = dayMeanHr?.let { "${it.roundToInt()}" } ?: NO_DATA,
+            unit = if (dayMeanHr != null) "bpm" else "",
+            tint = Palette.metricRose,
+            frac = dayMeanHr?.let { (it / 120.0).coerceIn(0.0, 1.0) },
+            spark = emptyList(),
+        ),
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
             KeyTileData(
@@ -6284,6 +6307,7 @@ private fun MetricGrid(
     // on the hero ring's breakdown sheet (its existing home) — the tile is the history view.
     // Weight has no windowed detail yet -> not tappable (null keeps the tile inert rather than lying).
     fun tapFor(metric: KeyMetric): (() -> Unit)? = when (metric) {
+        KeyMetric.DAY_MEAN_HR -> ({ onOpenMetric("day_mean_hr") })
         KeyMetric.CHARGE -> ({ onOpenMetric("recovery") })
         KeyMetric.EFFORT -> ({ onOpenMetric("strain") })
         KeyMetric.REST -> ({ onOpenMetric("rest") })
@@ -6387,6 +6411,7 @@ private data class KeyTileData(
  *  trend line / heart-monitor / drop / air (≈lungs) / walk / scale / flame. Tinted to the tile colour at
  *  render, so the icon reads as the same signal as the bar. */
 private fun keyMetricIcon(metric: KeyMetric): ImageVector = when (metric) {
+    KeyMetric.DAY_MEAN_HR -> Icons.Filled.MonitorHeart
     KeyMetric.CHARGE -> Icons.Filled.Favorite
     KeyMetric.EFFORT -> Icons.Filled.Bolt
     KeyMetric.REST -> Icons.Filled.Bedtime

@@ -62,6 +62,7 @@
     <string name="nav_race_predictor">Race predictor</string>
     <string name="nav_fasting_window">Fasting window</string>
     <string name="nav_resilience">Resilience</string>
+    <string name="today_metric_day_mean_hr">Avg HR (24h)</string>
     <string name="nav_breathing">Breathing</string>
     <string name="nav_nutrition">Nutrition</string>
     <string name="nav_more">More</string>

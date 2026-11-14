@@ -1545,6 +1545,8 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
                 CardDivider()
                 SessionEffortCard(strain = strain, effortScale = effortScale)
             }
+            // FORK: post-workout carb refuel target, like the fork iOS workout detail.
+            com.noop.fork.CarbRefuelCard(vm = vm, row = row)
 
             // HR curve over the session window (#410). A faint baseline shows under 2 points.
             if (hrCurve.size > 1) {

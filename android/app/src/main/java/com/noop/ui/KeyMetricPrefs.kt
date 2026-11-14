@@ -21,6 +21,8 @@ import com.noop.R
  * byte-identical to the macOS `KeyMetric` enum so a backup/restore reads the same layout on either OS.
  */
 enum class KeyMetric(val raw: String, @StringRes val titleRes: Int) {
+    // FORK: whole-day mean HR (night included), first in the default order like the fork iOS app.
+    DAY_MEAN_HR("dayMeanHr", R.string.today_metric_day_mean_hr),
     CHARGE("charge", R.string.today_metric_charge),
     EFFORT("effort", R.string.today_metric_effort),
     REST("rest", R.string.today_metric_rest),
@@ -43,7 +45,7 @@ enum class KeyMetric(val raw: String, @StringRes val titleRes: Int) {
 
         /** The original, hard-coded grid order — the default when the layout isn't customised. */
         val defaultOrder: List<KeyMetric> = listOf(
-            CHARGE, EFFORT, REST, HRV, RESTING_HR,
+            DAY_MEAN_HR, CHARGE, EFFORT, REST, HRV, RESTING_HR,
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
         )
     }

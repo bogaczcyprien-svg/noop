@@ -2560,6 +2560,16 @@ internal suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vita
             .map { VitalReading(it.day, it.value, it.deviceId) },
         format = { it.roundToInt().toString() },
     )
+    // FORK: the Avg HR (24h) Key Metrics tile drill-in, the computed whole-day mean HR series.
+    "day_mean_hr" -> VitalDetailModel(
+        key = key,
+        title = uiString(R.string.today_metric_day_mean_hr),
+        unit = "bpm",
+        color = Palette.metricRose,
+        readings = vm.repo.metricSeriesComputedUnion(vm.activeStrapId, "day_mean_hr", "0000-01-01", "9999-12-31")
+            .map { VitalReading(it.day, it.value, it.deviceId) },
+        format = { it.roundToInt().toString() },
+    )
     "vitality" -> VitalDetailModel(
         key = key,
         title = uiString(R.string.l10n_health_screen_vitality_be320b06),
