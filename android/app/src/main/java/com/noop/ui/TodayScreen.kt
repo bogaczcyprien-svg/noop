@@ -1884,6 +1884,19 @@ fun TodayScreen(
                         ) {
                             HeartRateTrendCard(viewModel, days, selectedDay, todayDate, displayMetric,
                                 effortScale, effortForDay, dayCycleMode)
+                            // FORK: today's stress line right under the heart-rate curve, as on iOS. Skipped when
+                            // the user already pinned the same card into "added cards", so it never shows twice.
+                            if (selectedDayOffset == 0 && HostedCard.STRESS_TODAY !in enabledHostedCards) {
+                                HostedCardsSection(
+                                    cards = listOf(HostedCard.STRESS_TODAY),
+                                    days = days,
+                                    viewModel = viewModel,
+                                    effortScale = effortScale,
+                                    onOpenStress = onOpenStress,
+                                    onOpenSleep = onOpenSleep,
+                                    onOpenMetric = onOpenMetric,
+                                )
+                            }
                         }
                         // The three hero vitals, HRV / Resting HR / Respiratory. Carried day (#543).
                         TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
