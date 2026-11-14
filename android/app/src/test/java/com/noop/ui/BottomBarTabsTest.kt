@@ -27,11 +27,11 @@ class BottomBarTabsTest {
         assertTrue("a bar tab must not also appear in the More sheet, found $both", both.isEmpty())
     }
 
-    /** FORK: matching the fork iOS app: Today, Breathing, Sleep, then More, which the bar appends itself. */
+    /** FORK: matching the fork iOS app: Today, Nutrition, Breathing, Sleep, then More, which the bar appends itself. */
     @Test
     fun theBarCarriesTheSameFourNamedTabsAsIOS() {
         assertEquals(
-            listOf(Destination.Today, Destination.Breathing, Destination.Sleep),
+            listOf(Destination.Today, Destination.Nutrition, Destination.Breathing, Destination.Sleep),
             barTabs.map { it.dest },
         )
     }

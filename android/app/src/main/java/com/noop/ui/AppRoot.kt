@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
@@ -150,6 +151,8 @@ internal enum class Destination(
     Breathe("breathe", R.string.nav_breathe, Icons.Filled.Air),
     // FORK: the Breathing tab (research-backed exercises), a bottom-bar tab like on the fork iOS app.
     Breathing("breathing", R.string.nav_breathing, Icons.Filled.Air),
+    // FORK: the Nutrition tab (macro targets and meal log), a bottom-bar tab like on the fork iOS app.
+    Nutrition("nutrition", R.string.nav_nutrition, Icons.Filled.PieChart),
     Stress("stress", R.string.nav_stress, Icons.Filled.Spa),
 
     // Group: Activity
@@ -707,6 +710,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 }
                 composable(Destination.Intervals.route) { IntervalsScreen(viewModel) }
                 composable(Destination.Breathe.route) { BreatheScreen(viewModel) }
+                composable(Destination.Nutrition.route) { com.noop.nutrition.NutritionScreen(viewModel) }
                 composable(Destination.Breathing.route) {
                     com.noop.breathing.BreathingTabScreen(viewModel, onMoreTechniques = { nav.navigate(Destination.Breathe.route) })
                 }
@@ -1129,6 +1133,7 @@ internal data class BarTab(val dest: Destination, val icon: ImageVector, @String
  *  More is special-cased (it opens the sheet rather than a route), so it is appended at the call site. */
 internal val barLeadingTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
+    BarTab(Destination.Nutrition, Icons.Filled.PieChart, R.string.nav_nutrition),
 )
 /**
  * The trailing tabs, as shipped. [barTrailingTabsFor] is what the bar actually draws: Coach is

@@ -59,6 +59,7 @@
     <string name="nav_intervals_icu_activities">intervals.icu activities</string>
     <string name="nav_planned_training">Planned training</string>
     <string name="nav_breathing">Breathing</string>
+    <string name="nav_nutrition">Nutrition</string>
     <string name="nav_more">More</string>
 
     <string name="push_title">Self-hosted push</string>
