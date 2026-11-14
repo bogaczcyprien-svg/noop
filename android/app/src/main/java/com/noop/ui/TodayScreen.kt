@@ -1918,6 +1918,7 @@ fun TodayScreen(
                         // section emits no item; visibleDashboardCards is the loop-level filtered list.
                         TodaySection.YOUR_CARDS -> YourCardsSection(
                             cards = visibleDashboardCards,
+                            keyMetrics = enabledKeyMetrics,
                             stepsAverage30 = stepsAverage30,
                             day = stepResolvedDisplayMetric,
                             carriedDay = lastScoredRecoveryDay,
@@ -4212,6 +4213,8 @@ private fun HostedCardsSection(
 @Composable
 private fun YourCardsSection(
     cards: List<DashboardCard>,
+    // FORK: the Key Metrics tiles shown above; a card repeating one of them is hidden.
+    keyMetrics: List<KeyMetric> = emptyList(),
     stepsAverage30: Pair<Double?, Int>,
     day: DailyMetric?,
     carriedDay: DailyMetric?,
@@ -4269,8 +4272,15 @@ private fun YourCardsSection(
                     contentDescription = uiString(R.string.l10n_today_screen_customise_your_cards_2428d761),
                 )
             }
-            cards.forEach { card ->
+            // FORK: Your Cards grouped like the fork iOS app — repeats of Key Metrics hidden, then Form and
+            // Today as two-column tiles, Last night as one list card, Coupled/Coach as small shortcuts.
+            val keySet = keyMetrics.toSet()
+            val visibleCards = cards.filter { c -> forkKeyMetricTwin(c)?.let { it !in keySet } ?: true }
+            ForkCardGroup.entries.forEach { group ->
+                val inGroup = visibleCards.filter { forkCardGroup(it) == group }
+                if (inGroup.isNotEmpty()) ForkCardGroupLayout(group, inGroup) { card ->
                 DashboardCardRow(
+                    style = forkStyleFor(group),
                     card = card,
                     value = dashboardCardValue(
                         card = card,
@@ -4334,6 +4344,7 @@ private fun YourCardsSection(
                         onOpenCoach = { showCoachLauncher = true },
                     ),
                 )
+            }
             }
         }
     }
@@ -4588,7 +4599,7 @@ private fun dashboardCardValue(
             // seed the 30-day RHR/HRV baseline StressScreen reads, the front card has no number to show. The
             // old `?: NO_DATA` rendered a bare dash that read like a broken card; show the honest calibrating
             // state instead, matching the owner's reply on #706 and the StressScreen empty/calibrating copy.
-            stress?.let { it.roundToInt().toString() } ?: STRESS_CALIBRATING
+            stress?.let { String.format(Locale.getDefault(), "%.1f", it) } ?: STRESS_CALIBRATING // FORK: one decimal, as on iOS
         DashboardCard.FITNESS_AGE ->
             // Carries the bound symbol the Health hero uses (#2173), so a floored reading does not read
             // as an exact one here and as a bounded one there.
@@ -4624,6 +4635,7 @@ private fun dashboardCardValue(
 @Composable
 private fun DashboardCardRow(
     card: DashboardCard,
+    style: ForkCardStyle = ForkCardStyle.ROW,
     value: String,
     fraction: Double?,
     tint: Color,
@@ -4635,6 +4647,10 @@ private fun DashboardCardRow(
     // A real number renders white; a placeholder (No Data, or the Stress calibrating state) renders dimmed.
     val hasValue = value != NO_DATA && value != STRESS_CALIBRATING
     val displayValue = localizedMetricValue(value)
+    if (style != ForkCardStyle.ROW) {
+        ForkCompactCard(card, displayValue, hasValue, tint, style, onClick)
+        return
+    }
     // iOS `cardLink` corner is 20 (a touch rounder than the app-wide 18dp card), with the SAME neutral
     // surfaceRaised fill + plain hairline the frosted neutral surface already draws.
     val rowShape = RoundedCornerShape(20.dp)
