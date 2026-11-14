@@ -6028,6 +6028,15 @@ private fun MetricGrid(
     // old 2-column large sparkline cards. One descriptor per KeyMetric, carrying the SAME value/tint reads
     // the old builders used PLUS the tile's LiquidTube fraction (mirroring the iOS ktile frac). The #251
     // editor + enabled-order + collapse expander are all preserved; only the tile look changes.
+    // FORK: verdict helpers (iOS `relativeVerdict` / `accumulatingVerdict` / `usualText`). The window's
+    // last point is the shown day, so the usual is read from the points before it.
+    fun kmHist(series: List<Double>): List<Double> = if (series.isEmpty()) series else series.dropLast(1)
+    fun kmRel(value: Double?, series: List<Double>, rule: com.noop.analytics.KeyMetricVerdict.Rule, minSpread: Double) =
+        com.noop.analytics.KeyMetricVerdict.relative(value, kmHist(series), rule, minSpread)
+    fun kmAcc(value: Double?, series: List<Double>, minSpread: Double) =
+        if (isToday) null else kmRel(value, series, com.noop.analytics.KeyMetricVerdict.Rule.NEITHER, minSpread)
+    fun kmUsual(series: List<Double>, format: (Double) -> String): String? =
+        com.noop.analytics.KeyMetricVerdict.usual(kmHist(series))?.let(format)
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
@@ -6040,6 +6049,7 @@ private fun MetricGrid(
                 tint = v?.let { Palette.recoveryColor(it) } ?: Palette.chargeColor,
                 frac = v?.let { (it / 100.0).coerceIn(0.0, 1.0) },
                 spark = w.recovery,
+                verdict = com.noop.analytics.KeyMetricVerdict.recovery(v),
             )
         },
         KeyMetric.EFFORT to KeyTileData(
@@ -6054,6 +6064,8 @@ private fun MetricGrid(
             tint = (effortForDay ?: d?.strain)?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor,
             frac = (effortForDay ?: d?.strain)?.let { (it / 100.0).coerceIn(0.0, 1.0) },
             spark = w.strain,
+            verdict = kmAcc(effortForDay ?: d?.strain, w.strain, 1.0),
+            usual = kmUsual(w.strain) { UnitFormatter.effortDisplay(it, effortScale) },
         ),
         KeyMetric.REST to KeyTileData(
             label = uiString(R.string.l10n_today_screen_rest_b79e5f48),
@@ -6066,6 +6078,7 @@ private fun MetricGrid(
             tint = restScore?.let { Palette.recoveryColor(it) } ?: Palette.restColor,
             frac = restScore?.let { (it / 100.0).coerceIn(0.0, 1.0) },
             spark = restSpark,
+            verdict = com.noop.analytics.KeyMetricVerdict.rest(restScore),
             // Composed from the two shipped strings rather than a third one needing four translations.
             // Matches the single iOS caption "Pending sync · strap history still offloading": the second
             // half alone read as a fragment, and more so now that a real number sits above it (#2012).
@@ -6084,6 +6097,8 @@ private fun MetricGrid(
                 tint = Palette.metricCyan,
                 frac = v?.let { (it / 120.0).coerceIn(0.0, 1.0) },
                 spark = w.hrv,
+                verdict = kmRel(v, w.hrv, com.noop.analytics.KeyMetricVerdict.Rule.HIGHER_IS_BETTER, 3.0),
+                usual = kmUsual(w.hrv) { "${it.roundToInt()} ms" },
             )
         },
         KeyMetric.RESTING_HR to run {
@@ -6095,6 +6110,8 @@ private fun MetricGrid(
                 tint = Palette.metricRose,
                 frac = v?.let { (it / 100.0).coerceIn(0.0, 1.0) },
                 spark = w.rhr,
+                verdict = kmRel(v?.toDouble(), w.rhr, com.noop.analytics.KeyMetricVerdict.Rule.LOWER_IS_BETTER, 1.5),
+                usual = kmUsual(w.rhr) { "${it.roundToInt()} bpm" },
             )
         },
         KeyMetric.BLOOD_OXYGEN to run {
@@ -6118,6 +6135,8 @@ private fun MetricGrid(
                 // showed an unlabelled figure, which is the harder of the two to argue with.
                 caption = if (onCandidate) uiString(R.string.spo2_strap_estimate_caption) else null,
                 spark = spo2SparkSeries(w.spo2, w.spo2Candidate),
+                verdict = kmRel(v, if (onCandidate) w.spo2Candidate else w.spo2, com.noop.analytics.KeyMetricVerdict.Rule.LOW_IS_BAD, 1.0),
+                usual = kmUsual(if (onCandidate) w.spo2Candidate else w.spo2) { "${it.roundToInt()} %" },
             )
         },
         KeyMetric.RESPIRATORY to run {
@@ -6129,6 +6148,8 @@ private fun MetricGrid(
                 tint = Palette.accent,
                 frac = v?.let { (it / 24.0).coerceIn(0.0, 1.0) },
                 spark = w.resp,
+                verdict = kmRel(v, w.resp, com.noop.analytics.KeyMetricVerdict.Rule.STEADY_IS_BETTER, 0.4),
+                usual = kmUsual(w.resp) { String.format(Locale.getDefault(), "%.1f rpm", it) },
             )
         },
         KeyMetric.STEPS to run {
@@ -6141,6 +6162,8 @@ private fun MetricGrid(
                 tint = Palette.metricCyan,
                 frac = steps?.let { (it / 10000.0).coerceIn(0.0, 1.0) },
                 spark = w.steps,   // #616: was missing → no trend line under the tile
+                verdict = kmAcc(steps?.toDouble(), w.steps, 500.0),
+                usual = kmUsual(w.steps) { intString(it) },
                 // A measured count needs no explanation; an ESTIMATE says what it was fitted from
                 // (#760/#792); a BLANK tile on a strap that estimates says what would unblock it (#1491).
                 caption = when {
@@ -6171,6 +6194,8 @@ private fun MetricGrid(
                 tint = Palette.metricAmber,
                 frac = kcal?.let { (it / 800.0).coerceIn(0.0, 1.0) },
                 spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
+                verdict = kmAcc(kcal, caloriesSpark, 50.0),
+                usual = kmUsual(caloriesSpark) { "${intString(it)} kcal" },
             )
         },
         KeyMetric.SKIN_TEMP to run {
@@ -6193,6 +6218,7 @@ private fun MetricGrid(
                 tint = Palette.metricAmber,
                 frac = null,
                 spark = w.skinTemp,
+                verdict = kmRel(d?.skinTempDevC ?: carriedDay?.skinTempDevC, w.skinTemp, com.noop.analytics.KeyMetricVerdict.Rule.STEADY_IS_BETTER, 0.15),
             )
         },
     )
@@ -6229,7 +6255,7 @@ private fun MetricGrid(
     // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
     // and a partial last row pads with empty weight so the columns stay aligned.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(3).forEach { rowTiles ->
+        tiles.chunked(2).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
             // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
             // shrink its card. Compact rows keep the plain layout, byte-identical to before.
@@ -6247,7 +6273,7 @@ private fun MetricGrid(
                         modifier = Modifier.weight(1f).then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(3 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
+                repeat(2 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         // S5: the "Show all metrics" / "Show fewer" expander — a centered link like iOS. Toggles visibility
@@ -6298,6 +6324,10 @@ private data class KeyTileData(
      *  estimate's calibration status, or why a blank tile is blank. Null leaves the tile exactly as it was. */
     val caption: String? = null,
     val spark: List<Double> = emptyList(),
+    /** FORK: whether the number reads good / normal / off against the usual (iOS `KeyMetricVerdict`). */
+    val verdict: com.noop.analytics.KeyMetricVerdict.Reading? = null,
+    /** FORK: the "Usual: …" line under the verdict. */
+    val usual: String? = null,
 )
 
 /** The per-metric glyph shown beside a Key-Metric tile's label — the Android twin of iOS
@@ -6385,7 +6415,7 @@ private fun LiquidKeyTile(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 displayValue,
-                style = NoopType.number(17f),
+                style = NoopType.number(24f),
                 color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                 maxLines = 1,
             )
@@ -6413,14 +6443,40 @@ private fun LiquidKeyTile(
         }
         // Detailed rows are height-equalised (fillMaxHeight): pin the bar + graph to the bottom edge so a
         // graph-less tile's bar lines up with its neighbours' bars rather than floating mid-card.
+        // FORK: the verdict and the usual replace the fill bar, as on the fork iOS tiles.
+        data.verdict?.let { v ->
+            val fr = Locale.getDefault().language == "fr"
+            val label = if (v.usual == null) {
+                when (v.tone) {
+                    com.noop.analytics.KeyMetricVerdict.Tone.GOOD -> if (fr) "Bien" else "Good"
+                    com.noop.analytics.KeyMetricVerdict.Tone.OFF -> if (fr) "Bas" else "Low"
+                    else -> if (fr) "Moyen" else "Fair"
+                }
+            } else when (v.direction) {
+                com.noop.analytics.KeyMetricVerdict.Direction.INLINE -> "Normal"
+                com.noop.analytics.KeyMetricVerdict.Direction.ABOVE ->
+                    if (v.strong) (if (fr) "Bien au-dessus" else "Well above usual") else (if (fr) "Au-dessus" else "Above usual")
+                com.noop.analytics.KeyMetricVerdict.Direction.BELOW ->
+                    if (v.strong) (if (fr) "Bien en dessous" else "Well below usual") else (if (fr) "En dessous" else "Below usual")
+            }
+            val symbol = when (v.direction) {
+                com.noop.analytics.KeyMetricVerdict.Direction.ABOVE -> "↑"
+                com.noop.analytics.KeyMetricVerdict.Direction.BELOW -> "↓"
+                com.noop.analytics.KeyMetricVerdict.Direction.INLINE -> "●"
+            }
+            val color = when (v.tone) {
+                com.noop.analytics.KeyMetricVerdict.Tone.GOOD -> Palette.statusPositive
+                com.noop.analytics.KeyMetricVerdict.Tone.WATCH -> Palette.statusWarning
+                com.noop.analytics.KeyMetricVerdict.Tone.OFF -> Palette.statusCritical
+                else -> Palette.textSecondary
+            }
+            Text("$symbol $label", style = NoopType.caption.copy(fontWeight = FontWeight.SemiBold), color = color, maxLines = 1)
+        }
+        data.usual?.let { u ->
+            Text((if (Locale.getDefault().language == "fr") "Normale : " else "Usual: ") + u,
+                style = NoopType.caption, color = Palette.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (detailed) Spacer(Modifier.weight(1f))
-        LiquidTube(
-            frac = data.frac ?: 0.0,
-            tint = data.tint,
-            height = 8.dp,
-            animated = false,
-            modifier = Modifier.fillMaxWidth(),
-        )
         // Detailed tiles: the windowed trend graph under the bar (same Sparkline leaf the Sleep tiles use,
         // at the shared tile spark height), tinted to the metric so the graph reads as the same signal.
         // Cap to the editor's chosen window (7 / 14 / 30) so "1 month" draws its full span; the w-based
