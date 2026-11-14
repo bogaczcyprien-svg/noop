@@ -522,7 +522,12 @@ object AnalyticsEngine {
         }
         // Sessions attributed to `day` = those whose end falls on `day` (LOCAL day, #277). `day` is
         // the caller's local-day key; attribute by the same offset so the bucket and the key agree.
-        val matched = allSessions.filter { tsInDay(it.end) }
+        // FORK (#wake-v2-refine): a V2-staged session closing on wake is cut at the end of its last sustained
+        // sleep run. Device-provided and HR-only sessions are left as they are. Twin of the fork Swift engine.
+        val providedStarts = providedSleep.map { it.start }.toSet()
+        val matched = allSessions.filter { tsInDay(it.end) }.map { s ->
+            if (useSleepStagerV2 && !s.hrOnly && s.start !in providedStarts) SleepStagerV2.trimmedToRefinedWake(s) else s
+        }
 
         // ── The day's MAIN night (#525) ───────────────────────────────────────
         // A day can hold an overnight AND a daytime nap (both end on `day`, so both are in `matched`).

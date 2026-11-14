@@ -46,6 +46,50 @@ import kotlin.math.sqrt
  */
 object SleepStagerV2 {
 
+    // ── FORK: displayed onset / wake refinement (twins of the fork Swift V2 helpers) ──────────────
+    /** Sustained sleep needed before the displayed onset (10 minutes). */
+    const val displayedOnsetSustainedSeconds = 600
+
+    /** Start of the first non-wake run lasting [sustainedSeconds], when the hypnogram opens on wake. */
+    fun refinedOnsetTs(stages: List<StageSegment>, sustainedSeconds: Int = 300): Long? {
+        if (stages.firstOrNull()?.stage != "wake") return null
+        var i = 0
+        while (i < stages.size) {
+            if (stages[i].stage == "wake") { i++; continue }
+            val runStart = stages[i].start
+            var runEnd = stages[i].end
+            var j = i + 1
+            while (j < stages.size && stages[j].stage != "wake") { runEnd = stages[j].end; j++ }
+            if (runEnd - runStart >= sustainedSeconds) return runStart
+            i = j
+        }
+        return null
+    }
+
+    /** End of the last non-wake run lasting [sustainedSeconds], when the hypnogram closes on wake. */
+    fun refinedWakeTs(stages: List<StageSegment>, sustainedSeconds: Int = 300): Long? {
+        if (stages.lastOrNull()?.stage != "wake") return null
+        var j = stages.size - 1
+        while (j >= 0) {
+            if (stages[j].stage == "wake") { j--; continue }
+            val runEnd = stages[j].end
+            var runStart = stages[j].start
+            var i = j - 1
+            while (i >= 0 && stages[i].stage != "wake") { runStart = stages[i].start; i-- }
+            if (runEnd - runStart >= sustainedSeconds) return runEnd
+            j = i
+        }
+        return null
+    }
+
+    /** Cuts a session at its refined wake, so lying still awake after waking no longer pushes wake late. */
+    fun trimmedToRefinedWake(session: DetectedSleep): DetectedSleep {
+        val wake = refinedWakeTs(session.stages) ?: return session
+        if (wake <= session.start || wake >= session.end) return session
+        val stages = session.stages.filter { it.start < wake }.map { StageSegment(it.start, minOf(it.end, wake), it.stage) }
+        return session.copy(end = wake, stages = stages, efficiency = SleepStager.efficiency(session.start, wake, stages))
+    }
+
     /**
      * Build a 30 s hypnogram for [start, end] with this recipe and return [StageSegment]s tiling the span.
      * DROP-IN: same signature + return type as [SleepStager.stageSession], so a caller can switch V1↔V2 on a

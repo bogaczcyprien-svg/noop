@@ -1865,6 +1865,11 @@ object IntelligenceEngine {
                         restingHr = s.restingHR,
                         avgHrv = s.avgHRV,
                         stagesJSON = AnalyticsEngine.encodeStages(s.stages),
+                        // FORK (#onset-v2-refine): a V2 night's displayed onset is its first 10 minutes of
+                        // uninterrupted sleep. The upsert policy keeps a user's own edit untouched.
+                        startTsAdjusted = if (useExperimentalSleepV2) {
+                            SleepStagerV2.refinedOnsetTs(s.stages, SleepStagerV2.displayedOnsetSustainedSeconds)
+                        } else null,
                         // #345 follow-up: stamp the day's motion-coverage verdict so the Sleep tab can
                         // caption a sparse (likely under-detected) night. Twin of Swift analyzeDay.
                         stagingSparse = res.gravitySparse,

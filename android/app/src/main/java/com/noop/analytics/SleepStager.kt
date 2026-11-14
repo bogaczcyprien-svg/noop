@@ -254,8 +254,14 @@ object SleepStager {
     /** Skip HR refinement (trust gravity) when fewer than this many HR samples. */
     const val hrRefineMinSamples: Int = 30
 
-    /** Consecutive sleep epochs required to declare onset. */
-    const val onsetPersistEpochs: Int = 3
+    /** Consecutive epochs used for the final-wake run (FORK: 3 -> 20, ten minutes awake at the end). */
+    const val onsetPersistEpochs: Int = 20
+
+    /** FORK: consecutive sleep epochs (15 min) required to declare onset. */
+    const val onsetPersistEpochsForOnset: Int = 30
+
+    /** FORK: an onset epoch must also sit at or under the night's median HR times this. */
+    const val onsetHRSleepMult: Double = 1.00
 
     // ── Off-wrist backstop (#500) ─────────────────────────────────────────────
     //
@@ -1836,27 +1842,43 @@ object SleepStager {
     // ── Stage 1–3: staging over a 30 s epoch grid ────────────────────────────
 
     /** First persistent-sleep epoch (onset) and last sleep epoch (final wake). */
-    internal fun onsetAndFinalWake(ckFlags: List<Boolean>): Pair<Int, Int> {
+    internal fun onsetAndFinalWake(ckFlags: List<Boolean>, hr: List<Double> = emptyList()): Pair<Int, Int> {
         val n = ckFlags.size
         if (n == 0) return Pair(0, 0)
+        // FORK (twin of the fork Swift stager): onset needs 15 min of motion-sleep whose HR is also at or
+        // under the night's median; final wake is the start of the last 10-minute awake run.
+        val validHR = if (hr.size == n) hr.filter { !it.isNaN() } else emptyList()
+        val onsetHRBaseline: Double? = if (validHR.size >= hrRefineMinSamples) HrvAnalyzer.median(validHR) else null
+        fun onsetEligible(i: Int): Boolean {
+            if (!ckFlags[i]) return false
+            if (onsetHRBaseline == null || i >= hr.size || hr[i].isNaN()) return true
+            return hr[i] <= onsetHRBaseline * onsetHRSleepMult
+        }
         var onset: Int? = null
         var run = 0
-        for ((i, s) in ckFlags.withIndex()) {
-            run = if (s) run + 1 else 0
-            if (run >= onsetPersistEpochs) {
-                onset = i - onsetPersistEpochs + 1
+        for (i in 0 until n) {
+            run = if (onsetEligible(i)) run + 1 else 0
+            if (run >= onsetPersistEpochsForOnset) {
+                onset = i - onsetPersistEpochsForOnset + 1
                 break
             }
+        }
+        var simpleLast: Int? = null
+        for (i in n - 1 downTo 0) {
+            if (ckFlags[i]) { simpleLast = i; break }
         }
         var final: Int? = null
+        var wakeRun = 0
         for (i in n - 1 downTo 0) {
-            if (ckFlags[i]) {
-                final = i
+            wakeRun = if (ckFlags[i]) 0 else wakeRun + 1
+            if (wakeRun >= onsetPersistEpochs) {
+                final = i - 1
                 break
             }
         }
+        if (final != null && final < 0) final = null
         val o = onset ?: 0
-        var f = final ?: (n - 1)
+        var f = final ?: simpleLast ?: (n - 1)
         if (f < o) f = n - 1
         return Pair(o, f)
     }
@@ -1909,7 +1931,7 @@ object SleepStager {
 
         val rescaled = rescaleCounts(grid.counts)
         val ckFlags = coleKripke(rescaled)
-        val (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags)
+        val (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags, grid.hr)
 
         val dogHR = dogHRVariability(grid.hr)
         val feats = extractFeatures(grid = grid, ckFlags = ckFlags, dogHR = dogHR,
@@ -3025,7 +3047,7 @@ object SleepStager {
 
         val rescaled = rescaleCounts(grid.counts)
         val ckFlags = coleKripke(rescaled)
-        val (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags)
+        val (onsetIdx, finalWakeIdx) = onsetAndFinalWake(ckFlags, grid.hr)
         val dogHR = dogHRVariability(grid.hr)
         val feats = extractFeatures(grid = grid, ckFlags = ckFlags, dogHR = dogHR,
             onsetIdx = onsetIdx, finalWakeIdx = finalWakeIdx)
