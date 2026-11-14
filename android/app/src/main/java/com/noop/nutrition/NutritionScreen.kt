@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -115,10 +116,13 @@ fun NutritionScreen(vm: AppViewModel) {
                         style = NoopType.caption, color = Palette.textSecondary)
                 } else {
                     fun hits(index: Int, target: Int) = logged.count { target > 0 && it.second[index] >= target * 0.9 }
-                    Text(l("Protéines dans l'objectif ${hits(1, targets.proteinG)}/${logged.size} jours notés",
-                        "Protein on target ${hits(1, targets.proteinG)}/${logged.size} logged days"), style = NoopType.body, color = Palette.textPrimary)
-                    Text(l("Glucides dans l'objectif ${hits(2, targets.carbsG)}/${logged.size} jours notés",
-                        "Carbs on target ${hits(2, targets.carbsG)}/${logged.size} logged days"), style = NoopType.body, color = Palette.textPrimary)
+                    // FORK: per-macro 7-day bars with the on-target count, like the fork iOS weekly trend.
+                    WeeklyMacroBars(l("Protéines", "Protein"), week.map { totals[it]?.get(1) ?: 0.0 }, Palette.metricRose,
+                        l("Dans l'objectif ${hits(1, targets.proteinG)}/${logged.size} jours notés", "On target ${hits(1, targets.proteinG)}/${logged.size} logged days"))
+                    WeeklyMacroBars(l("Glucides", "Carbs"), week.map { totals[it]?.get(2) ?: 0.0 }, Palette.metricCyan,
+                        l("Dans l'objectif ${hits(2, targets.carbsG)}/${logged.size} jours notés", "On target ${hits(2, targets.carbsG)}/${logged.size} logged days"))
+                    WeeklyMacroBars(l("Lipides", "Fat"), week.map { totals[it]?.get(3) ?: 0.0 }, Palette.metricAmber,
+                        l("Dans l'objectif ${hits(3, targets.fatG)}/${logged.size} jours notés", "On target ${hits(3, targets.fatG)}/${logged.size} logged days"))
                     Text(l("Moyenne ${Math.round(logged.map { it.second[0] }.average())} kcal par jour noté",
                         "Average ${Math.round(logged.map { it.second[0] }.average())} kcal per logged day"), style = NoopType.caption, color = Palette.textSecondary)
                 }
@@ -259,4 +263,32 @@ private fun MealDialog(meal: Meal?, onDismiss: () -> Unit, onSave: (String, Doub
         confirmButton = { TextButton(onClick = { onSave(name, num(p), num(c), num(f), asTemplate) }) { Text(l("Enregistrer", "Save")) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(l("Annuler", "Cancel")) } },
     )
+}
+
+/** FORK: one macro's grams per day over the last 7 days as bars, with its on-target line. */
+@Composable
+private fun WeeklyMacroBars(label: String, grams: List<Double>, tint: Color, onTarget: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
+            Text(onTarget, style = NoopType.footnote, color = Palette.textTertiary)
+        }
+        val maxV = (grams.maxOrNull() ?: 0.0).coerceAtLeast(1.0) * 1.15
+        Row(
+            Modifier.fillMaxWidth().height(56.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            grams.forEach { g ->
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.BottomCenter) {
+                    val frac = (g / maxV).toFloat().coerceIn(0f, 1f)
+                    Box(
+                        Modifier.fillMaxWidth().fillMaxHeight(if (g > 0) frac.coerceAtLeast(0.04f) else 0.02f)
+                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(if (g > 0) tint else Palette.hairline),
+                    )
+                }
+            }
+        }
+    }
 }
