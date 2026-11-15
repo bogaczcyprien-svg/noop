@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -367,6 +368,35 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     onChange = { viewModel.setPredictiveBatteryAlertsEnabled(it) },
                 )
             }
+        }
+        }
+
+        // FORK: overload alert (symmetric to the strain target nudge), default off. Twin of the fork iOS
+        // AutomationsView overloadCard.
+        item {
+        val fr = java.util.Locale.getDefault().language == "fr"
+        var overload by remember { mutableStateOf(com.noop.notif.OverloadNotifier.isEnabled(ctx)) }
+        SettingsSection(
+            icon = Icons.Filled.Warning,
+            title = if (fr) "Alerte de surcharge" else "Overload alert",
+            blurb = if (fr) "Un avertissement quand ton effort est resté au-dessus du haut de ta zone d'effort optimale plusieurs jours de suite, calculée depuis ta récupération."
+                else "A warning when your Effort has stayed above the top of your optimal strain range for several days in a row, worked out from your recovery.",
+            active = overload,
+        ) {
+            ToggleRow(
+                label = if (fr) "Prévenir en cas de surcharge prolongée" else "Notify on sustained overload",
+                help = if (fr) "Envoyée après la synchro du bracelet et le calcul de la journée, quand l'effort a dépassé la zone optimale 3 jours de suite. Au plus une fois par jour."
+                    else "Posts after your strap syncs and NOOP scores the day, once Effort has landed above the optimal range for 3 days running. At most once per day.",
+                checked = overload,
+                onChange = { on ->
+                    overload = on
+                    com.noop.notif.OverloadNotifier.setEnabled(ctx, on)
+                    if (on) {
+                        val days = viewModel.recentDays.value
+                        days.lastOrNull()?.let { runCatching { com.noop.notif.OverloadNotifier.onDaysUpdate(ctx, it.day, days) } }
+                    }
+                },
+            )
         }
         }
     }

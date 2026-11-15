@@ -774,10 +774,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.VitalSignsDetail.route) { backStackEntry ->
-                    VitalDetailScreen(
-                        vm = viewModel,
-                        key = backStackEntry.arguments?.getString("key").orEmpty(),
-                    )
+                    val vitalKey = backStackEntry.arguments?.getString("key").orEmpty()
+                    // FORK: the Avg HR (24h) tile opens its own whole-day + night-only detail, like iOS.
+                    if (vitalKey == "day_mean_hr") com.noop.fork.DayMeanHrDetailScreen(viewModel)
+                    else VitalDetailScreen(vm = viewModel, key = vitalKey)
                 }
                 // --- v5 pillar screens (Wave 3 wiring) ---
                 composable(Destination.InsightsHub.route) { InsightsHubScreen(viewModel) }

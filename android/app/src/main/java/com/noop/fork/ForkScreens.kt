@@ -28,7 +28,6 @@ import com.noop.analytics.RaceTimePredictor
 import com.noop.analytics.ResilienceEngine
 import com.noop.data.JournalEntry
 import com.noop.data.WhoopRepository
-import com.noop.notif.OverloadNotifier
 import com.noop.notif.SleepRecapNotifier
 import com.noop.notif.TrendNotifier
 import com.noop.notif.WorkoutNutritionNotifier
@@ -236,11 +235,6 @@ fun SleepRecapSettingsScreen() {
                 "Désactivé par défaut. Une notification peu après la fin d'une séance détectée, pour penser à manger et vous hydrater dans l'heure qui suit — pas de journal alimentaire, juste un rappel de timing.",
                 WorkoutNutritionNotifier.isEnabled(ctx),
             ) { WorkoutNutritionNotifier.setEnabled(ctx, it) }
-            ToggleCard(
-                "Alerte de surcharge",
-                "Désactivé par défaut. Prévient quand ton effort est resté au-dessus du haut de ta zone optimale (calculée depuis ta récupération) 3 jours de suite. Au plus une fois par jour.",
-                OverloadNotifier.isEnabled(ctx),
-            ) { OverloadNotifier.setEnabled(ctx, it) }
         }
     }
 }
