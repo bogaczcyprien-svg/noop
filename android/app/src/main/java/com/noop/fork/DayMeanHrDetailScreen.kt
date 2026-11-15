@@ -46,7 +46,7 @@ fun DayMeanHrDetailScreen(vm: AppViewModel) {
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             val from = LocalDate.now().minusDays(HISTORY_DAYS.toLong()).toString()
-            fun read(key: String) = runCatching {
+            suspend fun read(key: String) = runCatching {
                 vm.repo.metricSeriesComputedUnion(vm.activeStrapId, key, from, "9999-12-31")
                     .sortedBy { it.day }.map { it.value }
             }.getOrDefault(emptyList())
