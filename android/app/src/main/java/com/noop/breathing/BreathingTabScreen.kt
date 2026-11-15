@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,18 +73,23 @@ private fun l(fr: String, en: String) = if (isFr) fr else en
 /**
  * FORK: the Breathing tab — research-backed exercises with levels, progress, free-breathing baseline,
  * bedtime reminder and intervals.icu upload. Twin of the fork iOS `BreathingTabView`, without the CORE
- * sensor; beat-to-beat data comes from the connected strap.
+ * sensor; beat-to-beat data comes from the chest strap when one is connected, else from the WHOOP.
  */
 @Composable
 fun BreathingTabScreen(vm: AppViewModel, onMoreTechniques: () -> Unit) {
     val context = LocalContext.current
-    val live by vm.live.collectAsState()
     var history by remember { mutableStateOf(BreathingHistoryStore.load(context)) }
     var freeMinutes by remember { mutableIntStateOf(NoopPrefs.of(context).getInt(KEY_FREE_MINUTES, 10)) }
     var nudgeOn by remember { mutableStateOf(BedtimeBreathingNudge.isEnabled(context)) }
     var detail by remember { mutableStateOf<BreathingExercise?>(null) }
     var session by remember { mutableStateOf<BreathingSession?>(null) }
     val scope = rememberCoroutineScope()
+    val strapState by BreathingStrapLink.state.collectAsState()
+    val strapName by BreathingStrapLink.strapName.collectAsState()
+    val strapHr by BreathingStrapLink.heartRate.collectAsState()
+    val strapFound by BreathingStrapLink.found.collectAsState()
+    var showStrapPicker by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { BreathingStrapLink.reconnectLast(context) }
 
     fun start(ex: BreathingExercise) {
         val s = BreathingSession(context, vm, BreathingLevelStore.current(context, ex), freeMinutes * 60, scope)
@@ -93,25 +99,46 @@ fun BreathingTabScreen(vm: AppViewModel, onMoreTechniques: () -> Unit) {
     }
 
     ScreenScaffold(title = tr("Breathing"), subtitle = tr("Exercises backed by research, guided by your heart.")) {
-        // Heart data
+        // Chest strap (fork iOS strapCard): its beats win over the WHOOP's when it is connected.
         NoopCard(padding = 16.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(l("DONNÉES CARDIAQUES", "HEART DATA"), style = NoopType.caption, color = Palette.textTertiary)
+                Text(l("CEINTURE CARDIO", "CHEST STRAP"), style = NoopType.caption, color = Palette.textTertiary)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val on = strapState == BreathingStrapLink.State.CONNECTED
                     Icon(
-                        if (live.connected) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null,
-                        tint = if (live.connected) Palette.accent else Palette.textTertiary,
+                        if (on) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null,
+                        tint = if (on) Palette.accent else Palette.textTertiary,
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            if (live.connected) l("Bracelet connecté", "Strap connected") else l("Aucun bracelet connecté", "No strap connected"),
+                            when (strapState) {
+                                BreathingStrapLink.State.CONNECTED -> strapName ?: l("Ceinture cardio", "Chest strap")
+                                BreathingStrapLink.State.CONNECTING -> l("Connexion…", "Connecting…")
+                                BreathingStrapLink.State.SCANNING -> l("Recherche…", "Searching…")
+                                BreathingStrapLink.State.BLUETOOTH_OFF -> l("Le Bluetooth est coupé", "Bluetooth is off")
+                                else -> l("Aucune ceinture connectée", "No strap connected")
+                            },
                             style = NoopType.headline, color = Palette.textPrimary,
                         )
-                        Text(tr("Beat-to-beat data: breathing rate, HRV and coherence are measured live."),
-                            style = NoopType.caption, color = Palette.textSecondary)
+                        Text(
+                            if (on) tr("Beat-to-beat data: breathing rate, HRV and coherence are measured live.")
+                            else l("Sans ceinture, la fréquence cardiaque du WHOOP est utilisée ; elle est moins précise battement par battement.",
+                                "Without a strap, the WHOOP's heart rate is used; it is less precise beat to beat."),
+                            style = NoopType.caption, color = Palette.textSecondary,
+                        )
                     }
-                    live.heartRate?.takeIf { live.connected }?.let {
+                    strapHr?.takeIf { on }?.let {
                         Text("$it", style = NoopType.headline.copy(fontSize = 28.sp), color = Palette.textPrimary)
+                    }
+                }
+                if (strapState == BreathingStrapLink.State.CONNECTED) {
+                    NoopButton(l("Déconnecter", "Disconnect"), kind = NoopButtonKind.Secondary, fullWidth = true) {
+                        BreathingStrapLink.disconnect()
+                    }
+                } else {
+                    NoopButton(l("Trouver ma ceinture", "Find my strap"), fullWidth = true) {
+                        BreathingStrapLink.scan(context)
+                        showStrapPicker = true
                     }
                 }
             }
@@ -264,9 +291,57 @@ fun BreathingTabScreen(vm: AppViewModel, onMoreTechniques: () -> Unit) {
             history = BreathingHistoryStore.load(context)
         })
     }
+    if (showStrapPicker) {
+        StrapPickerDialog(
+            found = strapFound,
+            bluetoothOff = strapState == BreathingStrapLink.State.BLUETOOTH_OFF,
+            onPick = { addr -> showStrapPicker = false; BreathingStrapLink.connect(context, addr) },
+            onDismiss = { showStrapPicker = false; BreathingStrapLink.stopScan() },
+        )
+    }
 }
 
 private const val KEY_FREE_MINUTES = "noop.breathing.freeMinutes"
+
+/** Scan results for the Breathing-tab chest strap. Twin of the fork iOS `SensorPickerSheet`. */
+@Composable
+private fun StrapPickerDialog(
+    found: List<BreathingStrapLink.Found>,
+    bluetoothOff: Boolean,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(l("Choisir une ceinture", "Choose a strap")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (bluetoothOff) {
+                    Text(l("Active le Bluetooth pour trouver ta ceinture.", "Turn Bluetooth on to find your strap."),
+                        style = NoopType.body, color = Palette.textSecondary)
+                } else if (found.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(l("Mets la ceinture (mouille les capteurs) et garde le téléphone près de toi.",
+                            "Put the strap on (wet the sensors) and keep the phone close."),
+                            style = NoopType.body, color = Palette.textSecondary)
+                    }
+                }
+                found.forEach { s ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(s.address) }.padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(s.name, style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
+                        Text("${s.rssi} dBm", style = NoopType.caption, color = Palette.textTertiary)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(l("Annuler", "Cancel")) } },
+    )
+}
 
 private fun signed(v: Double): String {
     val r = Math.round(v).toInt()

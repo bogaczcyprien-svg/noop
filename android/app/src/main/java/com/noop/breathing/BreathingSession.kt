@@ -113,6 +113,7 @@ class BreathingSession(
         val resonanceLocked: Boolean,
         val totalSeconds: Int,
         val progression: Progression?,
+        val source: String = "WHOOP",
     )
 
     sealed class Upload {
@@ -168,10 +169,12 @@ class BreathingSession(
     private val holdCapSeconds: Int get() = (exercise.drill as? BreathingDrill.BreathHolds)?.maxHoldSeconds ?: 0
 
     fun start() {
+        BreathingStrapLink.takeBeats()
         if (freeSeconds > 0) enter(Part.Free) else startGuided()
         job = scope.launch {
             var tick = 0
             while (part != Part.Done) {
+                takeStrapBeats()
                 takeLiveRr()
                 if (tick % 10 == 0) secondTick()
                 pacerTick()
@@ -263,7 +266,7 @@ class BreathingSession(
         val nowMs = System.currentTimeMillis()
         val total = elapsed(startMs)
         val partElapsed = elapsed(partStartMs)
-        val hr = vm.live.value.heartRate
+        val hr = if (BreathingStrapLink.isConnected) BreathingStrapLink.heartRate.value else vm.live.value.heartRate
         if (total % 5 == 0) refreshReadings(nowMs / 1000.0)
         val guided = part != Part.Free
         var bpm = breathsPerMin
@@ -314,6 +317,12 @@ class BreathingSession(
         coherence?.let { coherenceReadings += (part != Part.Free) to it }
     }
 
+    /** The chest strap beats, when it is connected (it wins over the WHOOP, like on iOS). */
+    private fun takeStrapBeats() {
+        if (!BreathingStrapLink.isConnected || part == Part.Done) return
+        beats += BreathingStrapLink.takeBeats()
+    }
+
     /** Appends each new live R-R packet, back-dating its beats from now. */
     private fun takeLiveRr() {
         if (part == Part.Done) return
@@ -322,6 +331,7 @@ class BreathingSession(
         val first = lastRrSeq < 0
         lastRrSeq = live.rrSeq
         if (first) return
+        if (BreathingStrapLink.isConnected) return
         var t = System.currentTimeMillis() / 1000.0
         val batch = ArrayList<Pair<Double, Int>>()
         for (rr in live.rr.asReversed()) if (rr > 0) { batch += t to rr; t -= rr / 1000.0 }
@@ -374,7 +384,8 @@ class BreathingSession(
             BreathingLevelStore.save(ctx, after, exercise.id)
             progression = Progression(before.level, after, up, completed)
         }
-        val summary = Summary(free, guided, holds.toList(), resonanceBpm, locked, ((endMs - startMs) / 1000).toInt(), progression)
+        val summary = Summary(free, guided, holds.toList(), resonanceBpm, locked, ((endMs - startMs) / 1000).toInt(), progression,
+            source = if (BreathingStrapLink.isConnected) (BreathingStrapLink.strapName.value ?: (if (Locale.getDefault().language == "fr") "Ceinture cardio" else "Chest strap")) else "WHOOP")
         _ui.value = _ui.value.copy(part = Part.Done, pacer = null, summary = summary)
         BreathingHistoryStore.append(ctx, BreathingHistory.Entry(
             startMs / 1000, exercise.id, guided.seconds, guided.avgCoherence, guided.avgHR,
@@ -427,6 +438,7 @@ object BreathingSessionText {
     fun description(s: BreathingSession.Summary, exercise: BreathingExercise): String {
         val fr = Locale.getDefault().language == "fr"
         val lines = mutableListOf(exercise.title)
+        lines += (if (fr) "Données cardiaques : " else "Heart data: ") + s.source
         lines += partLine(if (fr) "Respiration libre" else "Free breathing", s.free)
         lines += partLine(if (fr) "Exercice" else "Exercise", s.guided)
         if (s.holdsSeconds.isNotEmpty()) {
