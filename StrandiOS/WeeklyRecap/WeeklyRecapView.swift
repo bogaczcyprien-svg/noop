@@ -151,7 +151,7 @@ struct WeeklyRecapView: View {
     // MARK: - Pieces
 
     private func section<C: View>(_ title: LocalizedStringKey, icon: String, tint: Color,
-                                  @ViewBuilder _ content: () -> C) -> some View {
+                                  @ViewBuilder _ content: @escaping () -> C) -> some View {
         NoopCard(tint: tint) {
             VStack(alignment: .leading, spacing: 10) {
                 Label(title, systemImage: icon).font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
