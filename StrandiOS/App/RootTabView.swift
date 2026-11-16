@@ -40,6 +40,8 @@ struct RootTabView: View {
     @State private var quickAction: QuickAction?
     /// Presents the Devices manager (pair / switch bands) when a screen asks the shell to open it.
     @State private var showDevices = false
+    /// FORK-ONLY: the week in review, opened by its Sunday reminder.
+    @State private var showWeeklyRecap = false
     /// A routed v5 pillar screen (Insights hub / Lab Book / fused record / Rhythm) presented as a sheet
     /// when a hub row deep-links to it via NavRouter. nil = closed.
     @State private var routedPillar: NavRouter.Destination?
@@ -160,6 +162,21 @@ struct RootTabView: View {
         // FORK-ONLY: a tapped bedtime breathing nudge lands on the Breathing tab.
         .onReceive(NotificationCenter.default.publisher(for: NotificationPresenter.openBreathingTab)) { _ in
             selectedTab = 5
+        }
+        // FORK-ONLY: a tapped Sunday reminder opens the week in review as a sheet.
+        .onReceive(NotificationCenter.default.publisher(for: NotificationPresenter.openWeeklyRecap)) { _ in
+            showWeeklyRecap = true
+        }
+        .sheet(isPresented: $showWeeklyRecap) {
+            NavigationStack {
+                WeeklyRecapView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showWeeklyRecap = false }
+                                .foregroundStyle(StrandPalette.accent)
+                        }
+                    }
+            }
         }
         // #1841: the same "Hide bar when scrolling" preference Android drives its own bar with. Here the
         // system owns the behaviour — iOS 26's tab bar MINIMISES to a pill on scroll down rather than
@@ -476,6 +493,8 @@ struct RootTabView: View {
                            onRefresh: { await repo.refresh() },
                            topBackground: liquidScaffoldSky()) {
                 moreSection("Insights") {
+                    // FORK-ONLY: the week in review (also opened by the Sunday 20:00 reminder).
+                    MoreRow("Bilan de la semaine", "calendar.badge.checkmark", .weeklyRecap)
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
                     // FORK-ONLY: Coach is listed here again, its tab-bar slot taken by Breathing.
@@ -635,6 +654,7 @@ private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare, trends
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, plannedTraining, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
+    case weeklyRecap
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -669,6 +689,7 @@ private enum MoreDestination: Hashable {
         case .raceTimePredictor: RaceTimePredictorView()
         case .fastingWindow: FastingWindowView()
         case .resilience: ResilienceView()
+        case .weeklyRecap: WeeklyRecapView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
         case .testCentre:      TestCentreView()

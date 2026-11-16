@@ -130,7 +130,21 @@ struct IntervalsICUActivitiesSection: View {
                     }
                 }
 
-                debriefSection(activity)
+                // FORK: the full debrief page (effects, zones, AI) replaces the old inline text debrief.
+                Divider().padding(.vertical, 2)
+                NavigationLink {
+                    WorkoutDebriefView(row: activity)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                        Text("Débrief de la séance")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                    }
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.accent)
+                }
+                .buttonStyle(.plain)
             }
         }
         .task(id: activity.startTs) { await loadSubstrate(activity) }

@@ -95,6 +95,7 @@ struct WorkoutDetailView: View {
                        topBackground: liquidScaffoldSky()) {
             headerCard
             statStrip
+            debriefLink
             routeCard
             hrCurveCard
             zonesCard
@@ -198,6 +199,32 @@ struct WorkoutDetailView: View {
             self.steps = stepReadout
             self.loaded = true
         }
+    }
+
+    // MARK: - Debrief page (FORK-ONLY, not ported to Android)
+
+    /// Opens the per-session debrief: aerobic / anaerobic effects, zones and the AI coach's read.
+    private var debriefLink: some View {
+        NavigationLink {
+            WorkoutDebriefView(row: row)
+        } label: {
+            NoopCard(tint: StrandPalette.accent) {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(StrandPalette.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Débrief de la séance")
+                            .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                        Text("Effets aérobie et anaérobie, zones, et l'avis du coach IA")
+                            .font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Heart-rate recovery (#516)

@@ -53,6 +53,7 @@ struct NutritionView: View {
                        onRefresh: { await reload() },
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                remainingSection
                 targetsSection
                 balanceSection
                 trendSection
@@ -137,6 +138,55 @@ struct NutritionView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(localizedLabel): \(Int(eaten.rounded())) of \(target) grams")
+    }
+
+    // MARK: - Left to eat today (FORK-ONLY, not ported to Android)
+    //
+    // The day's target is the macro targets' own energy (`targets.totalKcal`), built on the whole day's
+    // expected energy (`Repository.projectedDayKcal`), so the kcal left and the grams left can't disagree.
+
+    @AppStorage(NutritionStore.baseDayKcalKey) private var baseDayKcal: Double = DayEnergyProjection.defaultBaseDayKcal
+
+    private var remainingSection: some View {
+        let t = targets
+        let left = Double(t.totalKcal) - eatenKcal
+        return card(padding: 18) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                Text("Il te reste aujourd'hui").strandOverline()
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(verbatim: left >= 0 ? "\(Int(left.rounded()))" : "+\(Int((-left).rounded()))")
+                        .font(StrandFont.number(34))
+                        .foregroundStyle(left >= 0 ? StrandPalette.textPrimary : StrandPalette.metricAmber)
+                    Text(verbatim: left >= 0 ? "kcal à manger" : "kcal au-dessus de l'objectif")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+                HStack(spacing: 18) {
+                    leftStat("Protéines", target: t.proteinG, eaten: eatenProteinG, tint: StrandPalette.metricRose)
+                    leftStat("Glucides", target: t.carbsG, eaten: eatenCarbsG, tint: StrandPalette.metricCyan)
+                    leftStat("Lipides", target: t.fatG, eaten: eatenFatG, tint: StrandPalette.metricAmber)
+                }
+                Text(verbatim: "Objectif du jour ≈ \(t.totalKcal) kcal : ta journée de base (\(Int(baseDayKcal)) kcal) répartie sur 24 h, plus ce que tu dépenses en plus aujourd'hui (séances). Il monte au fil de la journée si tu bouges plus.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Stepper(value: $baseDayKcal, in: DayEnergyProjection.baseDayRange, step: 50) {
+                    Text(verbatim: "Journée de base : \(Int(baseDayKcal)) kcal")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+            }
+        }
+    }
+
+    private func leftStat(_ label: String, target: Int, eaten: Double, tint: Color) -> some View {
+        let left = Double(target) - eaten
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: label).font(.caption2).foregroundStyle(StrandPalette.textTertiary)
+            Text(verbatim: left > 0 ? "\(Int(left.rounded())) g" : "✓")
+                .font(StrandFont.headline)
+                .foregroundStyle(left > 0 ? StrandPalette.textPrimary : tint)
+        }
     }
 
     // MARK: - Calorie surplus/deficit

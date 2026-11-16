@@ -80,6 +80,8 @@ struct StrandiOSApp: App {
         // is open, so a user testing the wind-down reminder with NOOP foregrounded sees nothing. Register
         // before the first scene so any early-fired notification is presented.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
+        // FORK: re-arm the Sunday 20:00 week-in-review reminder (no prompt; only if already allowed).
+        WeeklyRecapNotifier.scheduleIfEnabled()
         // K5: tapping a scheduled morning-brief notification routes to Coach via the shared NavRouter.
         let router = NavRouter()
         _router = StateObject(wrappedValue: router)

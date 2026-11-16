@@ -8,6 +8,7 @@ import StrandAnalytics
 /// the full technique catalogue stays one tap away under "More techniques".
 struct BreathingTabView: View {
     @EnvironmentObject private var live: LiveState
+    @EnvironmentObject private var repo: Repository
     @StateObject private var strap = BreathingStrapLink()
     @StateObject private var core = CoreTempLink()
     @ObservedObject private var intervals = IntervalsICUSettings.shared
@@ -33,6 +34,7 @@ struct BreathingTabView: View {
                        subtitle: "Exercises backed by research, guided by your heart.",
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                todayPickCard
                 strapCard
                 coreCard
                 progressCard
@@ -259,6 +261,31 @@ struct BreathingTabView: View {
     }
 
     // MARK: - Exercises
+
+    // MARK: - Today's pick (fork): from the morning Charge and the time of day (BreathingDailyPick)
+
+    @ViewBuilder private var todayPickCard: some View {
+        let pick = BreathingDailyPick.pick(charge: repo.today?.recovery,
+                                           hour: Calendar.current.component(.hour, from: Date()),
+                                           hasResonancePace: BiofeedbackPrefs.lockedPace != nil)
+        if let ex = BreathingScienceCatalog.exercise(pick.exerciseId) {
+            Button { detail = ex } label: {
+                card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Conseillé aujourd'hui").strandOverline()
+                        Text(verbatim: BreathingL10n.text(ex.title)).font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(verbatim: pick.reasonFR).font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Label("Commencer", systemImage: "play.fill").font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.accent)
+                    }
+                }
+            }
+            .buttonStyle(StrandPressableButtonStyle())
+        }
+    }
 
     private var exercisesSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {

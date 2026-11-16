@@ -26,6 +26,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     /// Posted when the bedtime breathing nudge is tapped; the iOS tab shell selects the Breathing tab.
     static let openBreathingTab = Notification.Name("noop.openBreathingTab")
 
+    /// Posted when the Sunday week-in-review reminder is tapped; the iOS tab shell opens the recap.
+    static let openWeeklyRecap = Notification.Name("noop.openWeeklyRecap")
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -50,6 +53,10 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         // the Breathing tab. Posted by name because this shared file cannot see the iOS-only type.
         if category == "noop.breathing.bedtime" {
             NotificationCenter.default.post(name: Self.openBreathingTab, object: nil)
+        }
+        // FORK-ONLY: the Sunday week-in-review reminder (`WeeklyRecapNotifier.categoryId`, StrandiOS).
+        if category == "noop.weeklyRecap" {
+            NotificationCenter.default.post(name: Self.openWeeklyRecap, object: nil)
         }
         completionHandler()
     }

@@ -3394,6 +3394,21 @@ final class Repository: ObservableObject {
                                            totalKcal: energyKcal)
     }
 
+    /// FORK-ONLY: one workout's raw HR samples for the per-session debrief page, from the same device ids
+    /// its chart, zones and Avg HR use. An intervals.icu session first reads the per-second stream its
+    /// importer stored (`"intervals-icu"`, usually a chest strap or watch), falling back to the strap.
+    /// The limit covers about five and a half hours at 1 Hz.
+    func workoutHrSamples(from: Int, to: Int, source: String = "") async -> [HRSample] {
+        guard to > from else { return [] }
+        if source == "intervals.icu" {
+            let stream = await hrSamples(deviceIds: ["intervals-icu"], from: from, to: to, limit: 20_000)
+            if !stream.isEmpty { return stream }
+        }
+        let ids = Self.workoutHrDeviceIds(source: source, activeStrapId: deviceId,
+                                          importedIds: importedReadIds)
+        return await hrSamples(deviceIds: ids, from: from, to: to, limit: 20_000)
+    }
+
     /// Apple Health daily aggregates (steps/energy/vo2/hr).
     func appleDailyRows(days: Int = 4000) async -> [AppleDaily] {
         guard let store = await ensureStore() else { return [] }

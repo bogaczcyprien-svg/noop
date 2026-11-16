@@ -18,6 +18,13 @@ enum NutritionStore {
     /// metricSeries source id for the day-sum rebank (distinct from the existing CSV importer's
     /// "nutrition-csv", same distinguishing idea as Hydration's "hydration" vs "hydrationImported").
     static let metricSeriesSourceId = "macro-manual"
+
+    /// FORK: the user's quiet-day energy (kcal), the base of the whole-day projection. 2300 by default.
+    static let baseDayKcalKey = "nutrition.baseDayKcal"
+    static var baseDayKcal: Double {
+        let v = UserDefaults.standard.double(forKey: baseDayKcalKey)
+        return v > 0 ? v : DayEnergyProjection.defaultBaseDayKcal
+    }
 }
 
 extension Repository {
@@ -92,11 +99,22 @@ extension Repository {
         _ = try? await store.upsertMetricSeries(points, deviceId: NutritionStore.metricSeriesSourceId)
     }
 
-    /// Today's macro targets, from the profile's weight + today's Effort/strain + today's (resting +
-    /// active) energy estimate. Pure math in `MacroTargets`; this just feeds it the live inputs.
+    /// Today's macro targets, from the profile's weight + today's Effort/strain + the WHOLE day's expected
+    /// energy (`projectedDayKcal`). Pure math in `MacroTargets`; this just feeds it the live inputs.
+    /// FORK: the energy used to be the estimate so far, which left a tiny fat target in the morning.
     func macroTargets(weightKg: Double) -> MacroTargets.MacroTargetGrams {
         MacroTargets.dailyTargets(weightKg: weightKg, effort: today?.strain,
-                                  dailyEnergyKcal: today?.activeKcalEst)
+                                  dailyEnergyKcal: projectedDayKcal())
+    }
+
+    /// FORK: the whole day's expected energy — today's estimate so far plus the rest of the day at the
+    /// base-day rate, never below the base day (`DayEnergyProjection`).
+    func projectedDayKcal(now: Date = Date()) -> Double {
+        let cal = Calendar.current
+        let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
+        return DayEnergyProjection.projectedDayKcal(burnedSoFarKcal: today?.activeKcalEst,
+                                                    baseDayKcal: NutritionStore.baseDayKcal,
+                                                    secondsLeftInDay: end.timeIntervalSince(now))
     }
 
     // MARK: - Meal templates ("favorites") — FORK-ONLY, not ported to Android
