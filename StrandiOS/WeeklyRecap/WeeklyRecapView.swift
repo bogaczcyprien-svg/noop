@@ -210,7 +210,7 @@ struct WeeklyRecapView: View {
                                         days: 7 * (weeksBack + 1) + 2)
         let calories = await repo.series(key: "calories_in", source: NutritionStore.metricSeriesSourceId,
                                          days: 7 * (weeksBack + 1) + 2)
-        let logged = Set(calories.filter { thisWeek.contains($0.day) && $0.value > 0 }.map(\.day))
+        let logged = Set(calories.filter { thisWeek.contains($0.day) && $0.value > 0 }.map { $0.day })
         loggedDays = logged.count
         let byDay = Dictionary(repo.days.map { ($0.day, $0) }, uniquingKeysWith: { a, _ in a })
         proteinHitDays = protein.filter { p in
