@@ -2832,6 +2832,9 @@ public final class BLEManager: NSObject, ObservableObject {
         // never a fresh `backfiller.sessionRowsPersisted` re-read that a re-kicked session / trailing frames
         // could have mutated across the offload boundary.
         let persistedSensorRows = (backfiller?.sessionRowsPersisted ?? 0) > 0
+        // FORK: feed the "history stalled" watchdog (HistoryStallMonitor) — one stamp per offload attempt,
+        // one per offload that actually banked sensor rows. Read by HistoryStallNotifier (StrandiOS).
+        HistoryStallStamps.recordOffload(banked: persistedSensorRows)
         if persistedSensorRows { consecutiveEmptyOffloads = 0 }
         else if consecutiveAutoContinues == 0 { consecutiveEmptyOffloads += 1 }
         if reason == "HISTORY_COMPLETE" {

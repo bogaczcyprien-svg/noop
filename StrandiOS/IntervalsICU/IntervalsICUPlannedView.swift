@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import StrandDesign
+import StrandAnalytics
 
 /// Upcoming planned workouts from intervals.icu's calendar (the Events API, `category=WORKOUT`) — an
 /// AGENDA of what's coming, not what already happened (see `IntervalsICUActivitiesView` for that).
@@ -304,6 +305,8 @@ struct IntervalsICUNextPlannedCard: View {
         case has(IntervalsICUEvent)
     }
     @State private var state: LoadState = .loading
+    /// FORK: today's Charge, for the "is this session a good idea today?" advice.
+    @EnvironmentObject private var repo: Repository
 
     /// ALWAYS renders a stable shell (loading / has-a-session / nothing-planned), never a bare
     /// `EmptyView()` with no sibling content. A card that can momentarily have zero size while its
@@ -395,8 +398,48 @@ struct IntervalsICUNextPlannedCard: View {
                     }
                     Spacer(minLength: 0)
                 }
+                if let advice = todayAdvice(event) {
+                    adviceRow(advice)
+                }
             }
         }
+    }
+
+    /// FORK: advice for a session planned TODAY, crossing its intensity with this morning's Charge.
+    private func todayAdvice(_ event: IntervalsICUEvent) -> PlannedSessionAdvice.Advice? {
+        guard let day = event.start_date_local?.prefix(10),
+              String(day) == PushDayFormat.formatter.string(from: Date()) else { return nil }
+        let intensity = PlannedSessionAdvice.intensity(
+            name: event.name, description: event.description,
+            durationS: event.moving_time, load: event.icu_training_load)
+        return PlannedSessionAdvice.advise(charge: repo.today?.recovery, intensity: intensity)
+    }
+
+    private func adviceRow(_ advice: PlannedSessionAdvice.Advice) -> some View {
+        let color: Color
+        let icon: String
+        switch advice.level {
+        case .go: color = StrandPalette.chargeColor; icon = "checkmark.circle.fill"
+        case .adjust: color = StrandPalette.statusWarning; icon = "slider.horizontal.3"
+        case .swap: color = StrandPalette.metricRose; icon = "arrow.triangle.2.circlepath"
+        }
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(advice.title)
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(advice.detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 
     /// "Today · 6:00 PM", "Tomorrow", "In 3 days" — the quick-read countdown the user asked for,

@@ -1967,6 +1967,10 @@ struct TodayView: View {
         switch section {
         case .hero:
             classicHeroSection
+            #if os(iOS)
+            // FORK: history-stall banner + tonight's bedtime/wake card, right under the hero.
+            if selectedDayOffset == 0 { TodayForkCards() }
+            #endif
         case .liveSession:
             if liveSessionsBeta { liveSessionStartSection }
         case .synthesis:

@@ -373,6 +373,10 @@ struct LiquidTodayView: View {
                         case .hero:
                             heroCard
                             if chargeLegacyRRGap { ChargeLegacyRRGapNote() }
+                            #if os(iOS)
+                            // FORK: history-stall banner + tonight's bedtime/wake card.
+                            if selectedDayOffset == 0 { TodayForkCards() }
+                            #endif
                         case .liveSession: if liveSessionsBeta { liveSessionStartRow }
                         case .synthesis: synthesisSection
                         case .keyMetrics: keyMetricsSection

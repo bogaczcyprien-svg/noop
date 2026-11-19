@@ -36,6 +36,8 @@ public struct IntervalsICUEvent: Decodable {
     let moving_time: Int?
     /// Planned distance estimate, metres.
     let distance: Double?
+    /// Planned training load (intervals.icu's own estimate), when the plan carries one.
+    let icu_training_load: Double?
 }
 
 public enum IntervalsICUError: Error {

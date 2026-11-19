@@ -495,6 +495,7 @@ struct RootTabView: View {
                 moreSection("Insights") {
                     // FORK-ONLY: the week in review (also opened by the Sunday 20:00 reminder).
                     MoreRow("Bilan de la semaine", "calendar.badge.checkmark", .weeklyRecap)
+                    MoreRow("Ce qui joue sur ta récupération", "chart.bar.xaxis", .recoveryFactors)
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
                     // FORK-ONLY: Coach is listed here again, its tab-bar slot taken by Breathing.
@@ -654,7 +655,7 @@ private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare, trends
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, intervalsICU, plannedTraining, sleepRecap, raceTimePredictor, fastingWindow, resilience, noopLimitations
-    case weeklyRecap
+    case weeklyRecap, recoveryFactors
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -690,6 +691,7 @@ private enum MoreDestination: Hashable {
         case .fastingWindow: FastingWindowView()
         case .resilience: ResilienceView()
         case .weeklyRecap: WeeklyRecapView()
+        case .recoveryFactors: RecoveryFactorsView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
         case .testCentre:      TestCentreView()
